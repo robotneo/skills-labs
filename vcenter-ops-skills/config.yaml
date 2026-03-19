@@ -1,0 +1,4 @@
+# vCenter 凭据配置 (Host/User/Pwd)
+  host: "vcenter.example.com"
+  user: "administrator@vsphere.local"
+  password: "VMware123!"

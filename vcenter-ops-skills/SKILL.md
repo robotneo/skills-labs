@@ -1,44 +1,34 @@
 ---
-name: vcenter-ops-skills
-description: 专门用于 VMware vCenter 的运维自动化技能。该技能支持从基础的资源巡检（Datacenter、Cluster、Host、Virtual Machine、Folder、Resource Pool、Template、Datastore Cluster、Datastore、vSphere Distributed Switch、vSwitch）到复杂的虚拟机生命周期管理（克隆、删除、更新）。当用户需要查看虚拟化环境状态、批量创建开发/测试环境、或者通过模板快速部署虚拟机时，请务必触发此技能。即使客户只是模糊地提到“检查一下服务器空间”或“给我弄台新的 Linux 机器”，也应优先考虑使用此技能来检查 vCenter 资源。
+name: vCenter 运维自动化 (vcenter-ops-skills)
+description: 专门用于 VMware vCenter 的运维自动化技能。支持从全栈资源巡检到复杂的虚拟机生命周期管理（克隆、删除、规格更新）。
 license: 完整条款请参阅 LICENSE.txt 文件。
 ---
 
 
 ```yaml
 name: vcenter-ops-skills
-description: 专门用于 VMware vCenter 的运维自动化技能。该技能支持从基础的资源巡检（Datacenter、Cluster、Host、Virtual Machine、Folder、Resource Pool、Template、Datastore Cluster、Datastore、vSphere Distributed Switch、vSwitch）到复杂的虚拟机生命周期管理（克隆、删除、更新）。
+description: 支持 Datacenter 到 VDS 的全维度巡检及虚拟机置备。具备“先感知、后执行”逻辑，集成 IP 冲突检测与宿主机资源评分调度。
 version: 0.1.0
 
-entrypoint: scripts/main.py
+entrypoint: scripts/handler.py (通过 Python 3 调度)
+
+Permissions:
+  create: confirm (需用户确认规格)
+  delete: approval (需管理层审批)
 
 input_schema:
   type: object
-  required:
-    - hostname
+  required: [hostname, action]
   properties:
-    hostname:
-      type: string
-      description: 虚拟机名称
-    cpu:
-      type: number
-      default: 4
-    memory:
-      type: number
-      default: 8
-    disk:
-      type: number
-      default: 100
-    ip: 
-      type: string
-      description: 指定 IP 地址
-    host:
-      type: string
-      description: 指定宿主机
-
-permissions:
-  create: confirm
-  delete: approval
+  action: { type: string, enum: [list_all, get_vm, clone_vm, delete_vm, power_vm] }
+  hostname: { type: string, description: "虚拟机名称" }
+  cpu: { type: number, default: 4 }
+  memory: { type: number, default: 8192, description: "单位 MB" }
+  disk: { type: number, default: 100, description: "单位 GB" }
+  ip: { type: string, description: "静态 IP 地址" }
+  host_node: { type: string, description: "指定物理宿主机" }
+  network: { type: string, description: "目标网络名称" }
+  template: { type: string, description: "源模板名称" }
 ```
 
 ---
@@ -72,11 +62,14 @@ vCenter Ops Skills
     - 支持用户通过对话覆盖默认参数
     - 提交任务后实时返回 vCenter Task ID
 
-### 🧠 工作流程
-- 资源感知 (Discovery)：自动识别 vCenter 中的层级结构。
-- 环境校验 (Validation)：在执行克隆等动作前，校验目标存储空间（Datastore）和网络（Network）的可用性。
-- 任务执行 (Execution)：调用 pyvmomi 执行具体的增删改查动作。
-- 异步跟踪 (Task Tracking)：针对克隆等耗时操作，持续监控 vCenter Task 进度，直到返回明确的成功或失败状态。
+### 🧠 核心工作流 (Workflow)
+- 资源感知 (Discovery)：调用 inventory.py 自动识别 vCenter 层级，提取 Datastore 水位与 Host 负载。
+- 环境校验 (Validation)：执行克隆前，校验存储剩余空间是否满足 disk 参数，校验 network 是否存在。
+- 决策辅助 (Decision)：
+  - IP 校验：对比钉钉 IP 池状态 + 实时 Ping 检测。
+  - 宿主机调度：计算 Score = CPU剩余 * 0.5 + 内存剩余 * 0.4，自动推荐最优 Host。
+- 任务执行 (Execution)：调用 executor.py 下发异步 Task，支持硬件规格重配置与 CustomizationSpec 网络注入。
+- 异步跟踪 (Tracking)：实时返回 vCenter Task ID，监控进度直至 Success。
 
 ### 沟通准则
 
@@ -88,86 +81,83 @@ vCenter Ops Skills
 
 ---
 
-### 技能指令集
+### 📋 技能指令集 (Commands)
 
-#### 1. 资源巡检 (Inventory & Inspection)
+1. 资源巡检与状态报告
 
-用于获取 vCenter 的实时状态。
+    - 目标: 获取环境画像或定位存储/宿主机。
+    - 示例: python scripts/handler.py --action list_all
+    - 逻辑: 返回 datastores (含 is_low_space 标记) 和 hosts (含 maintenance_mode)。
 
-示例：
+2. 虚拟机高级置备 (Provisioning)
 
- - 输入：“查看目前有哪些虚拟机模板？”
- - 输出：返回 templates 列表及其分布的 datacenter。
- - 输入：“帮我找一个空间最足的存储。”
-  - 输出：对比所有 datastores 的 freeSpace 并推荐最优项。
+    - 目标: 从模板快速部署并初始化系统。
+    - 关键逻辑: 整合模板定位 -> 位置选择 -> 规格调整 -> IP 注入。
+    - 典型命令:
 
-####2. 虚拟机置备 (Provisioning)
+```bash
+python scripts/handler.py --action clone_vm --vm_name "SVR-PROD-01" \
+  --template "CentOS-7-Temp" --cpu 8 --memory 16384 --disk 200 \
+  --ip "10.0.x.x" --mask "255.255.255.0" --gw "10.0.x.1" \
+  --network "VM-Network" --host_node "esxi-node-05"
+```
 
-通过模板克隆新机器。这是本技能最复杂的原子动作。
+3. 生命周期管理
 
-置备逻辑：
-- 模板定位：确认 template_name 存在且配置正确。
-- 位置选择：确定目标 folder（文件夹）和 resource_pool（资源池）。
-- 克隆配置 (RelocateSpec)：定义目标存储和主机。
-- 自定义配置 (Customization)：处理 IP 分配、主机名修改等 OS 层面的初始化。
-
-#### 3. 生命周期管理 (Lifecycle)
-
-包含虚拟机的电源管理、配置更新和销毁。
-
-- Update: 调整 CPU/内存配额。
-- Delete: 从磁盘永久删除虚拟机（需谨慎）。
+    - 更新: 调整现有 VM 的 CPU/内存。
+    - 删除: 永久销毁（触发 approval 流程）。
+    - 电源: on/off/reset 操作。
 
 ---
 
-## 编写与测试规范
+### 🚦 决策规则与安全准则
 
-### 结构定义
+📐 IP 分配矩阵
 
-技能代码应严格按照以下结构组织：
+| 钉钉文档状态 | Ping 结果 | 最终决策 | 动作         |
+|--------------|-----------|----------|--------------|
+| 未使用       | 不通      | ✅ 可用   | 继续克隆     |
+| 未使用       | 通        | ❌ 冲突   | 报错并记录日志 |
+| 已使用       | 不通      | ⚠️ 异常   | 提示用户二次确认 |
+| 已使用       | 通        | ❌ 占用   | 拒绝分配     |
+
+⚙️ 宿主机调度策略
+
+- 策略: 自动选择评分最高的宿主机。
+- 人工干预: 用户在对话中手动指定的 host_node 拥有最高优先级。
+
+💬 沟通准则 (Agent Style)
+
+- 透明化: 操作前必须告知路径：“正在 [DC-01]/[Cluster-A] 执行操作”。
+- 降维解释: 将 "Datastore" 称为 “存储池”，将 "Snapshot" 称为 “快照点”。
+- 原子性: 只有当 IP、宿主机、存储均校验通过时，才下发克隆指令。
+
+---
+
+### 📂 工程目录结构
 
 ```markdown
 vcenter-ops-skills/
 ├── main.py                 # 项目逻辑集成与本地测试入口
-├── SKILL.md                # Required: metadata + instructions
-├── assets/                 # 数据模板目录
+├── SKILL.md                # OpenClaw 技能描述 (Agent 调用的灵魂)
+├── requirements.txt        # 依赖包 (pyvmomi)
+├── assets/                 # 存放 JSON 配置或自定义规范模板
 ├── scripts/
-│   ├── client.py           # 封装连接逻辑 - 负责处理 SSL 验证、连接建立与断开。
-│   ├── inventory.py        # 资源查询逻辑 - 利用 ContainerView 批量抓取资源，避免递归导致的 OOM 或超时。
-│   ├── executor.py         # 动作处理逻辑 - 处理耗时的异步任务，如克隆和删除。
-│   └── handler.py          # 分发请求逻辑 - 作为外部调用的统一入口。
-└── references/             # 扩展文档目录
-    └── terminology.md      # 术语解释
+│   ├── client.py           # 连接层
+│   ├── inventory.py        # 查询层
+│   ├── executor.py         # 动作层
+│   └── handler.py          # 接口层 (用于 OpenClaw 命令行对接)
+└── references/
+    └── terminology.md      # 文档层
 ```
 
-### 测试用例 (Test Cases)
+### 🧪 测试用例 (Test Cases)
 
-在发布新版本技能前，请至少验证以下场景：
+- 重名拦截: 若 hostname 已存在，立即返回 status: fail。
+- 静默失败: 模拟断网，确保 handler.py 捕获 ConnectionError 并输出 JSON 格式错误。
+- 规格越界: 若申请 disk 超过 Datastore 剩余空间，提前拦截。
 
-- 空结果处理：当指定的数据中心下没有任何集群时，不应报错，而应返回空列表。
-- 重名校验：克隆时如果目标名称已存在，应提前拦截并提示。
-- 连接超时：模拟 vCenter 登录失败的情况，确保有优雅的错误捕获。
-
-### 写入样式建议
-
-- 使用祈使句：例如“获取所有 Datacenter 列表”而非“如果你能的话请帮我拿一下列表”。
-- 解释“为什么”：在代码注释中说明为何使用 CreateContainerView（为了在大规模环境下保持性能）。
-- JSON 优先：所有内部技能通信均采用结构化 JSON，避免自然语言解析带来的歧义。
-
-### 📐 IP 分配规则
-
-| 文档状态 | Ping结果 | 是否可用  |
-| ---- | ------ | ----- |
-| 未使用  | 不通     | ✅ 可用  |
-| 未使用  | 通      | ❌ 冲突  |
-| 已使用  | 不通     | ⚠️ 可疑 |
-| 已使用  | 通      | ❌ 已占用 |
-
-### ⚙️ 宿主机调度策略
-
-- score = CPU剩余 * 0.5 + 内存剩余 * 0.4
-- 自动选择评分最高的宿主机
-- 用户可手动指定宿主机，优先使用用户指定值
+---
 
 ### 🔌 扩展方向
 
@@ -176,4 +166,3 @@ vcenter-ops-skills/
 - 审批流接入
 - JumpServer 权限自动化
 - 输出模板可自定义
-

@@ -49,7 +49,7 @@ def run_auto_provision_demo():
         try:
             msg = exe.clone_vm(
                 template_name=template_to_use,
-                new_name=new_vm_name,
+                new_vm_name=new_vm_name,
                 dc_name=target_dc,
                 cluster_name=target_cluster,
                 ds_name=target_ds
