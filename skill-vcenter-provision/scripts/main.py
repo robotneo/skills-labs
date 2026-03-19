@@ -1,5 +1,5 @@
 import json
-from core.planner import plan_provision
+from scripts.core.planner import plan_provision
 from assets.output_template import format_output
 
 def execute(args, context=None):

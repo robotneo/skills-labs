@@ -1,5 +1,5 @@
-from core.ip_allocator import allocate_ip
-from core.host_scheduler import select_host
+from scripts.core.ip_allocator import allocate_ip
+from scripts.core.host_scheduler import select_host
 
 def plan_provision(args):
     return {

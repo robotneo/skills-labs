@@ -1,0 +1,22 @@
+# 忽略所有名为 .venv 的虚拟环境目录
+.venv/
+venv/
+env/
+
+# 忽略 pyenv 生成的本地版本配置文件（可选，见下文说明）
+# .python-version
+
+# 忽略 Python 编译产生的缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 忽略操作系统和 IDE 配置文件
+.DS_Store
+.vscode/
+.idea/
+.python-version
+
+# 忽略所有 __init__.py
+**/__init__.py
