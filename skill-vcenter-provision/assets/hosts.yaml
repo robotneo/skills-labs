@@ -1,9 +1,0 @@
-- name: esxi-01
-  cpu_free: 20
-  mem_free: 32
-- name: esxi-02
-  cpu_free: 10
-  mem_free: 64
-- name: esxi-03
-  cpu_free: 30
-  mem_free: 16

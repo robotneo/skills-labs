@@ -20,3 +20,4 @@ __pycache__/
 
 # 忽略所有 __init__.py
 **/__init__.py
+requirements.txt
