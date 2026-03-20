@@ -67,7 +67,7 @@ class VCenterExecutor:
                           network_name: str,
                           host_name: Optional[str] = None,
                           cpus: Optional[int] = None, 
-                          memory_mb: Optional[int] = None, 
+                          memory_gb: Optional[int] = None, 
                           disk_gb: Optional[int] = None,
                           ip_address: Optional[str] = None,
                           subnet: str = "255.255.255.0",
@@ -139,7 +139,7 @@ class VCenterExecutor:
         # 准备配置规格 (ConfigSpec) 用于 CPU 和 内存 修改
         config_spec = vim.vm.ConfigSpec()
         if cpus: config_spec.numCPUs = cpus
-        if memory_mb: config_spec.memoryMB = memory_mb
+        if memory_gb: config_spec.memoryMB = memory_gb * 1024
         if device_changes:
             config_spec.deviceChange = device_changes
 
@@ -194,7 +194,7 @@ class VCenterExecutor:
             if disk_gb and isinstance(new_vm, vim.VirtualMachine):
                 self._resize_vm_disk(new_vm, disk_gb)
 
-            return f"成功：虚拟机 {new_name} 已部署。规格：{cpus}C/{memory_mb}MB。位置：{host_name or '集群自动选择'}"
+            return f"成功：虚拟机 {new_name} 已部署。规格：{cpus}C/{memory_gb}GB。位置：{host_name or '集群自动选择'}"
 
         except Exception as e:
             logger.error(f"高级克隆流程中断: {e}")

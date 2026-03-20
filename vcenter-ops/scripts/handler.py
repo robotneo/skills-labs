@@ -58,7 +58,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
     # --- 高级调度与硬件重配置参数 ---
     parser.add_argument("--host_node", help="（可选）指定目标物理宿主机节点名称")
     parser.add_argument("--cpu", type=int, help="自定义 CPU 核数")
-    parser.add_argument("--memory", type=int, help="自定义内存大小 (MB)")
+    parser.add_argument("--memory", type=int, help="自定义内存大小 (GB)")
     parser.add_argument("--disk", type=int, help="自定义主磁盘容量 (GB)")
 
     # --- 网络自定义参数 (CustomizationSpec) ---
@@ -128,7 +128,7 @@ def main():
                     network_name=args.network,
                     host_name=args.host_node,   # 定向调度物理机
                     cpus=args.cpu,              # 规格调整
-                    memory_mb=args.memory,      # 规格调整
+                    memory_gb=args.memory,      # 规格调整
                     disk_gb=args.disk,          # 磁盘调整
                     ip_address=args.ip,         # 网络注入
                     subnet=args.mask,           # 网络注入

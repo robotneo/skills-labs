@@ -1,11 +1,11 @@
 ```yaml
 name: vcenter-ops
 description: 专门用于 VMware vCenter 的运维自动化技能。支持从全栈资源巡检到复杂的虚拟机生命周期管理（克隆、删除、规格更新）。
-license: Proprietary. LICENSE.txt has complete terms
+# license: Proprietary. LICENSE.txt has complete terms
 compatibility: Requires Python 3.10+
 metadata:
   author: xiaofei
-  version: "0.1.0"
+  version: 0.1.0
 
 entrypoint: scripts/handler.py
 
@@ -20,7 +20,7 @@ input_schema:
   action: { type: string, enum: [list_all, get_vm, clone_vm, delete_vm, power_vm] }
   hostname: { type: string, description: "虚拟机名称" }
   cpu: { type: number, default: 4 }
-  memory: { type: number, default: 8192, description: "单位 MB" }
+  memory: { type: number, default: 8, description: "单位 GB" }
   disk: { type: number, default: 100, description: "单位 GB" }
   ip: { type: string, description: "静态 IP 地址" }
   host_node: { type: string, description: "指定物理宿主机" }
@@ -32,8 +32,7 @@ input_schema:
 
 ### 📌 功能说明
 
-vCenter Ops
-一个用于自动化管理 VMware vSphere 环境的专业技能集。
+vCenter Ops 技能：一个用于自动化管理 VMware vSphere 环境的专业技能集。
 
 本技能的核心逻辑是：“先感知，后执行”。在进行任何变更动作（如克隆或删除）之前，技能会优先确认物理环境的边界和资源余量，以确保操作的原子性和安全性。
 
@@ -95,8 +94,8 @@ vCenter Ops
     - 典型命令:
 
 ```bash
-python scripts/handler.py --action clone_vm --vm_name "SVR-PROD-01" \
-  --template "CentOS-7-Temp" --cpu 8 --memory 16384 --disk 200 \
+python scripts/handler.py --action clone_vm --hostname "SVR-PROD-01" \
+  --template "CentOS-7-Temp" --cpu 8 --memory 16 --disk 200 \
   --ip "10.0.x.x" --mask "255.255.255.0" --gw "10.0.x.1" \
   --network "VM-Network" --host_node "esxi-node-05"
 ```

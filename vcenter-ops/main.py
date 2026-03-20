@@ -108,7 +108,7 @@ def run_auto_provision_demo():
             print(f"  > 目标宿主机: {target_host['name']}")
             print(f"  > 目标网络  : {target_network_name}")
             print(f"  > IP 配置   : {ip_addr} / {subnet_mask} / {gateway_addr}")
-            print(f"  > 硬件规格  : 4C / 8G / 100G 磁盘")
+            print(f"  > 硬件规格  : 4C / 8GB / 100GB 磁盘")
             print("="*40)
 
             confirm = input("\n确认开始执行克隆动作吗? (y/n): ").strip().lower()
@@ -128,7 +128,7 @@ def run_auto_provision_demo():
                 network_name=target_network_name,
                 host_name=target_host['name'],  # 定向调度
                 cpus=4,                         # 规格自定义
-                memory_mb=8192,
+                memory_gb=8,
                 disk_gb=100,                    # 自动扩容磁盘
                 ip_address=ip_addr,
                 subnet=subnet_mask,
@@ -148,9 +148,9 @@ def run_auto_provision_demo():
                 print(f"  名称: {final_detail['name']}")
                 print(f"  电源: {final_detail['power']}")
                 print(f"  主机: {final_detail['host']}")
-                print(f"  配置: {final_detail['config']['cpu']}核 / {final_detail['config']['memory_mb']}MB / {final_detail['config']['disk_gb']}GB")
+                print(f"  配置: {final_detail['config']['cpu']}核 / {final_detail['config']['memory_gb']}GB / {final_detail['config']['disk_gb']}GB")
                 print(f"  网络: {final_detail['ip']}")
-                print(f"  性能: CPU {final_detail['perf']['cpu_mhz']} MHz, MEM {final_detail['perf']['mem_mb']} MB")
+                print(f"  性能: CPU {final_detail['perf']['cpu_mhz']} MHz, MEM {final_detail['perf']['mem_gb']} GB")
                 print("----------------------")
                 
                 if "等待" in final_detail['ip']:

@@ -155,7 +155,7 @@ class VCenterInventory:
                         },
                         "hardware": {
                             "cpu_cores": config.hardware.numCPU,
-                            "ram_mb": config.hardware.memoryMB,
+                            "ram_gb": round(config.hardware.memoryMB / 1024, 2),
                             "disk_gb": round(total_storage_gb, 2)
                         },
                         "runtime": {
@@ -166,7 +166,7 @@ class VCenterInventory:
                         },
                         "performance": {
                             "cpu_usage_mhz": summary.quickStats.overallCpuUsage,
-                            "mem_usage_mb": summary.quickStats.guestMemoryUsage
+                            "mem_usage_gb": round(summary.quickStats.guestMemoryUsage / 1024, 2)
                         }
                     }
 
@@ -212,12 +212,12 @@ class VCenterInventory:
                 "host": vm.runtime.host.name if vm.runtime.host else "Unknown",
                 "config": {
                     "cpu": config.hardware.numCPU,
-                    "memory_mb": config.hardware.memoryMB,
+                    "memory_gb": round(config.hardware.memoryMB / 1024, 2),
                     "disk_gb": round(total_disk_gb, 2)
                 },
                 "perf": {
                     "cpu_mhz": stats.overallCpuUsage or 0,
-                    "mem_mb": stats.guestMemoryUsage or 0
+                    "mem_gb": round((stats.guestMemoryUsage or 0) / 1024, 2)
                 }
             }
         finally:
