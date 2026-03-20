@@ -1,4 +1,46 @@
-# vCenter 凭据配置 (Host/User/Pwd)
+# vCenter 凭据配置
+# 第一次使用对话的时候需要初始化输入 vCenter 主机地址、用户名、密码
+vcenter:
   host: "vcenter.example.com"
   user: "administrator@vsphere.local"
-  password: "VMware123!"
+  password: "testpassword"
+  port: 443
+
+# 环境默认值
+defaults:
+  cpu: 4
+  memory_gb: 8
+  disk_gb: 100
+  subnet: "255.255.255.0"
+
+# 权限级别控制
+permission:
+  # 操作级别定义
+  levels:
+    confirm:
+      label: "普通操作 - 确认即可"
+      description: "列出参数 → 用户确认 → 执行"
+      actions:
+        - clone_vm        # 克隆/创建虚拟机
+        - get_vm          # 查询虚拟机
+        - list_all        # 资源巡检
+        - snapshot        # 创建快照
+    double_confirm:
+      label: "敏感操作 - 二次确认"
+      description: "列出参数 → 第一次确认 → 提醒风险 → 第二次确认 → 执行"
+      actions:
+        - power_vm        # 电源操作（开/关/重启）
+    approval:
+      label: "高风险操作 - 二次确认 + 审批"
+      description: "列出参数 → 第一次确认 → 提醒风险 → 第二次确认 → 执行（预留审批接口）"
+      actions:
+        - delete_vm       # 删除虚拟机
+
+  # 快捷查询：action → level 映射
+  action_map:
+    list_all: "confirm"
+    get_vm: "confirm"
+    clone_vm: "confirm"
+    snapshot: "confirm"
+    power_vm: "double_confirm"
+    delete_vm: "approval"

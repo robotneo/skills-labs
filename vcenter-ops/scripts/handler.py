@@ -1,9 +1,10 @@
 """
 Module: scripts.handler
-Description: OpenClaw 技能包统一入口分发器 (增强版)。
-支持高级克隆参数解析（规格、网络自定义、物理宿主机定向调度），并输出标准 JSON。
+Description: vCenter Ops 技能统一入口分发器。
+支持从 config.yaml 自动读取连接信息，也可通过命令行参数覆盖。
 Author: xiaofei
 Date: 2026-03-19
+Updated: 2026-03-20
 """
 
 import sys
@@ -11,17 +12,21 @@ import os
 import json
 import argparse
 import logging
+from pathlib import Path
 from typing import Dict, Any
 
-# 将项目根目录添加到 sys.path，确保可以从 scripts 包导入
+# 将项目根目录添加到 sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 导入自定义模块
 from scripts.client import VCenterClient
 from scripts.inventory import VCenterInventory
 from scripts.executor import VCenterExecutor
 
-# 配置基础日志格式：必须输出至 stderr，确保 stdout 只有干净的 JSON 数据供 LLM 解析
+# 技能根目录（SKILL.md 所在目录）
+SKILL_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = SKILL_DIR / "config.yaml"
+
+# 日志输出至 stderr，stdout 只输出干净 JSON
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -29,22 +34,61 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def load_config() -> Dict[str, Any]:
+    """
+    从 config.yaml 读取 vCenter 连接信息与环境默认值。
+    config.yaml 不存在或格式异常时返回空 dict。
+    """
+    if not CONFIG_FILE.exists():
+        logger.warning(f"配置文件不存在: {CONFIG_FILE}")
+        return {}
+
+    try:
+        import yaml
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+        logger.info(f"已加载配置文件: {CONFIG_FILE}")
+        return cfg
+    except ImportError:
+        logger.warning("缺少 PyYAML 依赖，无法读取 config.yaml，请执行: pip install pyyaml")
+        return {}
+    except Exception as e:
+        logger.warning(f"读取 config.yaml 失败: {e}")
+        return {}
+
+
+def save_config(cfg: Dict[str, Any]) -> bool:
+    """
+    将配置写回 config.yaml。
+    """
+    try:
+        import yaml
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        logger.info(f"配置已保存到: {CONFIG_FILE}")
+        return True
+    except Exception as e:
+        logger.error(f"保存 config.yaml 失败: {e}")
+        return False
+
+
 def create_arg_parser() -> argparse.ArgumentParser:
     """
-    构造增强型命令行参数解析器。
-    涵盖了从基础资产查询到复杂克隆所需的所有维度。
+    命令行参数解析器。
+    --host / --user / --pwd 改为可选，未提供时自动从 config.yaml 读取。
     """
-    parser = argparse.ArgumentParser(description="vCenter Ops Skills Advanced Handler")
-    
-    # --- 基础连接参数 ---
-    parser.add_argument("--host", required=True, help="vCenter 主机地址")
-    parser.add_argument("--user", required=True, help="用户名")
-    parser.add_argument("--pwd", required=True, help="密码")
-    parser.add_argument("--port", type=int, default=443, help="端口")
+    parser = argparse.ArgumentParser(description="vCenter Ops Handler")
+
+    # --- 连接参数（可选，降级读 config.yaml） ---
+    parser.add_argument("--host", help="vCenter 主机地址（可选，默认读 config.yaml）")
+    parser.add_argument("--user", help="用户名（可选，默认读 config.yaml）")
+    parser.add_argument("--pwd", help="密码（可选，默认读 config.yaml）")
+    parser.add_argument("--port", type=int, help="端口（可选，默认读 config.yaml）")
 
     # --- 动作控制 ---
-    parser.add_argument("--action", required=True, 
-                        choices=["list_all", "get_vm", "clone_vm", "delete_vm", "power_vm"],
+    parser.add_argument("--action", required=True,
+                        choices=["list_all", "get_vm", "clone_vm", "delete_vm", "power_vm", "snapshot"],
                         help="执行的操作类型")
 
     # --- 核心业务参数 ---
@@ -53,33 +97,60 @@ def create_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dc", help="数据中心名称")
     parser.add_argument("--cluster", help="计算集群名称")
     parser.add_argument("--ds", help="存储池名称")
-    parser.add_argument("--network", help="目标网络/VLAN名称")
+    parser.add_argument("--network", help="目标网络/VLAN 名称")
 
-    # --- 高级调度与硬件重配置参数 ---
-    parser.add_argument("--host_node", help="（可选）指定目标物理宿主机节点名称")
-    parser.add_argument("--cpu", type=int, help="自定义 CPU 核数")
-    parser.add_argument("--memory", type=int, help="自定义内存大小 (GB)")
-    parser.add_argument("--disk", type=int, help="自定义主磁盘容量 (GB)")
+    # --- 高级调度与硬件参数 ---
+    parser.add_argument("--host_node", help="指定物理宿主机节点名称")
+    parser.add_argument("--cpu", type=int, help="CPU 核数")
+    parser.add_argument("--memory", type=int, help="内存大小 (GB)")
+    parser.add_argument("--disk", type=int, help="主磁盘容量 (GB)")
 
-    # --- 网络自定义参数 (CustomizationSpec) ---
-    parser.add_argument("--ip", help="（可选）静态 IP 地址")
-    parser.add_argument("--mask", default="255.255.255.0", help="子网掩码")
+    # --- 网络参数 ---
+    parser.add_argument("--ip", help="静态 IP 地址")
+    parser.add_argument("--mask", help="子网掩码")
     parser.add_argument("--gw", help="默认网关")
 
     # --- 辅助控制 ---
     parser.add_argument("--state", choices=["on", "off", "reset"], help="电源操作状态")
-    parser.add_argument("--power_on", action="store_true", help="操作完成后是否尝试开机")
+    parser.add_argument("--power_on", action="store_true", help="完成后是否开机")
 
     return parser
 
+
+def resolve_connection(args, cfg: Dict[str, Any]) -> tuple:
+    """
+    合并连接参数：命令行 > config.yaml > 报错。
+    返回 (host, user, pwd, port)。
+    """
+    vc = cfg.get("vcenter", {})
+    defaults = cfg.get("defaults", {})
+
+    host = args.host or vc.get("host", "")
+    user = args.user or vc.get("user", "")
+    pwd = args.pwd or vc.get("password", "")
+    port = args.port or vc.get("port", 443)
+
+    missing = []
+    if not host: missing.append("host")
+    if not user: missing.append("user")
+    if not pwd: missing.append("password")
+
+    if missing:
+        raise ValueError(
+            f"vCenter 连接信息缺失: {', '.join(missing)}。"
+            f"请通过命令行参数传入或更新 config.yaml。"
+        )
+
+    return host, user, pwd, port
+
+
 def main():
-    """
-    主分发逻辑。
-    """
     parser = create_arg_parser()
     args = parser.parse_args()
 
-    # 预定义标准返回结构
+    # 读取配置文件
+    cfg = load_config()
+
     response: Dict[str, Any] = {
         "status": "success",
         "action": args.action,
@@ -88,19 +159,17 @@ def main():
     }
 
     try:
-        # 使用上下文管理器维持 vCenter 会话
-        with VCenterClient(args.host, args.user, args.pwd, args.port) as si:
-            
+        # 解析连接信息
+        host, user, pwd, port = resolve_connection(args, cfg)
+
+        with VCenterClient(host, user, pwd, port) as si:
             inventory = VCenterInventory(si)
             executor = VCenterExecutor(si)
 
-            # --- [1] 资产深度发现 ---
             if args.action == "list_all":
-                # 包含物理机、虚拟机、模板、存储、网络的完整画像
                 response["data"] = inventory.fetch_all_inventory()
                 response["message"] = "全栈资产清单扫描完成"
 
-            # --- [2] 虚拟机状态确认 ---
             elif args.action == "get_vm":
                 if not args.hostname:
                     raise ValueError("操作 'get_vm' 必须提供 --hostname")
@@ -111,14 +180,11 @@ def main():
                 else:
                     response["data"] = vm_data
 
-            # --- [3] 深度自定义克隆 (核心逻辑) ---
             elif args.action == "clone_vm":
-                # 基础必填项校验
-                required_fields = [args.template, args.hostname, args.dc, args.cluster, args.ds, args.network]
-                if not all(required_fields):
-                    raise ValueError("克隆操作缺少必填资源定位参数 (template/hostname/dc/cluster/ds/network)")
-                
-                # 调用 executor 的高级克隆函数
+                required = [args.template, args.hostname, args.dc, args.cluster, args.ds, args.network]
+                if not all(required):
+                    raise ValueError("克隆缺少必填参数 (template/hostname/dc/cluster/ds/network)")
+
                 msg = executor.clone_vm_advanced(
                     template_name=args.template,
                     new_name=args.hostname,
@@ -126,28 +192,35 @@ def main():
                     cluster_name=args.cluster,
                     ds_name=args.ds,
                     network_name=args.network,
-                    host_name=args.host_node,   # 定向调度物理机
-                    cpus=args.cpu,              # 规格调整
-                    memory_gb=args.memory,      # 规格调整
-                    disk_gb=args.disk,          # 磁盘调整
-                    ip_address=args.ip,         # 网络注入
-                    subnet=args.mask,           # 网络注入
-                    gateway=args.gw             # 网络注入
+                    host_name=args.host_node,
+                    cpus=args.cpu,
+                    memory_gb=args.memory,
+                    disk_gb=args.disk,
+                    ip_address=args.ip,
+                    subnet=args.mask,
+                    gateway=args.gw
                 )
                 response["message"] = msg
 
-            # --- [4] 电源管理 ---
             elif args.action == "power_vm":
                 if not all([args.hostname, args.state]):
                     raise ValueError("电源管理需要 --hostname 和 --state")
                 msg = executor.set_vm_power(args.hostname, args.state)
                 response["message"] = msg
 
-            # --- [5] 删除虚拟机 ---
             elif args.action == "delete_vm":
                 if not args.hostname:
                     raise ValueError("删除操作必须提供 --hostname")
                 msg = executor.remove_vm(args.hostname)
+                response["message"] = msg
+
+            elif args.action == "snapshot":
+                if not args.hostname:
+                    raise ValueError("快照操作必须提供 --hostname")
+                if not args.state:
+                    # 默认创建快照
+                    snap_name = args.state or f"snap-{args.hostname}"
+                    msg = executor.create_snapshot(args.hostname, snap_name)
                 response["message"] = msg
 
     except Exception as e:
@@ -155,9 +228,8 @@ def main():
         response["status"] = "error"
         response["message"] = f"执行异常: {str(e)}"
 
-    # 最终结果输出给 OpenClaw / LLM
-    # ensure_ascii=False 保证中文 message 不会被转码
     print(json.dumps(response, ensure_ascii=False, indent=2))
+
 
 if __name__ == "__main__":
     main()
