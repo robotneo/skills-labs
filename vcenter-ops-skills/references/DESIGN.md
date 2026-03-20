@@ -29,7 +29,7 @@ vcenter-ops-skills/
 │   ├── executor.py         # 动作层
 │   └── handler.py          # 接口层 (用于 OpenClaw 命令行对接)
 └── references/
-    └── terminology.md      # 文档层
+    └── REFERENCE.md      # 文档层
 ```
 
 为何还需要 main.py?
@@ -38,9 +38,9 @@ vcenter-ops-skills/
 - 智能置备演示：在 main.py 中，我加入了一段简单的排序逻辑（第 3 步），它能自动选择空间最大的存储。这正是你 DeepNet-Ops 项目中“智能运维”的核心体现。
 - 调试闭环：它完整覆盖了从 Connect -> Get -> Action -> Verify -> Disconnect 的生命周期。
 
-### 项目初始化
+### 项目测试
 
-在开始开发前，需要运行 `init.sh` 脚本来初始化项目结构：
+在调试开发时，验证脚本的可行性，可以如下验证：
 
 ```bash
 # 1. 安装依赖

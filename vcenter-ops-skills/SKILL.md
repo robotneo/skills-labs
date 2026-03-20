@@ -1,16 +1,13 @@
----
-name: vCenter 运维自动化 (vcenter-ops-skills)
-description: 专门用于 VMware vCenter 的运维自动化技能。支持从全栈资源巡检到复杂的虚拟机生命周期管理（克隆、删除、规格更新）。
-license: 完整条款请参阅 LICENSE.txt 文件。
----
-
-
 ```yaml
 name: vcenter-ops-skills
-description: 支持 Datacenter 到 VDS 的全维度巡检及虚拟机置备。具备“先感知、后执行”逻辑，集成 IP 冲突检测与宿主机资源评分调度。
-version: 0.1.0
+description: 专门用于 VMware vCenter 的运维自动化技能。支持从全栈资源巡检到复杂的虚拟机生命周期管理（克隆、删除、规格更新）。
+license: Proprietary. LICENSE.txt has complete terms
+compatibility: Requires Python 3.10+
+metadata:
+  author: xiaofei
+  version: "0.1.0"
 
-entrypoint: scripts/handler.py (通过 Python 3 调度)
+entrypoint: scripts/handler.py
 
 Permissions:
   create: confirm (需用户确认规格)
@@ -78,6 +75,8 @@ vCenter Ops Skills
 - 明确资源路径：在操作前，清晰地向用户确认目标：例如“正在数据中心 [DC-01] 的 [Cluster-A] 集群中执行操作”。
 - 风险提示：执行“删除（Delete）”或“关机（Power Off）”动作前，必须请求用户二次确认。
 - 术语对齐：对于非专业用户，将 "Datastore" 解释为“存储池/硬盘空间”，将 "Inventory" 解释为“资产清单”。
+
+其他术语解释：See [the reference guide](references/REFERENCE.md) for details.
 
 ---
 
@@ -148,7 +147,7 @@ vcenter-ops-skills/
 │   ├── executor.py         # 动作层
 │   └── handler.py          # 接口层 (用于 OpenClaw 命令行对接)
 └── references/
-    └── terminology.md      # 文档层
+    └── REFERENCE.md      # 文档层
 ```
 
 ### 🧪 测试用例 (Test Cases)
