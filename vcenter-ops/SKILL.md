@@ -1,5 +1,5 @@
 ```yaml
-name: vcenter-ops-skills
+name: vcenter-ops
 description: 专门用于 VMware vCenter 的运维自动化技能。支持从全栈资源巡检到复杂的虚拟机生命周期管理（克隆、删除、规格更新）。
 license: Proprietary. LICENSE.txt has complete terms
 compatibility: Requires Python 3.10+
@@ -32,7 +32,7 @@ input_schema:
 
 ### 📌 功能说明
 
-vCenter Ops Skills
+vCenter Ops
 一个用于自动化管理 VMware vSphere 环境的专业技能集。
 
 本技能的核心逻辑是：“先感知，后执行”。在进行任何变更动作（如克隆或删除）之前，技能会优先确认物理环境的边界和资源余量，以确保操作的原子性和安全性。
