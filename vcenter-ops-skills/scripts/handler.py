@@ -7,15 +7,19 @@ Date: 2026-03-19
 """
 
 import sys
+import os
 import json
 import argparse
 import logging
 from typing import Dict, Any
 
+# 将项目根目录添加到 sys.path，确保可以从 scripts 包导入
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # 导入自定义模块
-from client import VCenterClient
-from inventory import VCenterInventory
-from executor import VCenterExecutor
+from scripts.client import VCenterClient
+from scripts.inventory import VCenterInventory
+from scripts.executor import VCenterExecutor
 
 # 配置基础日志格式：必须输出至 stderr，确保 stdout 只有干净的 JSON 数据供 LLM 解析
 logging.basicConfig(
@@ -44,7 +48,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
                         help="执行的操作类型")
 
     # --- 核心业务参数 ---
-    parser.add_argument("--vm_name", help="虚拟机名称")
+    parser.add_argument("--hostname", help="虚拟机名称")
     parser.add_argument("--template", help="克隆源模板名称")
     parser.add_argument("--dc", help="数据中心名称")
     parser.add_argument("--cluster", help="计算集群名称")
@@ -53,7 +57,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
 
     # --- 高级调度与硬件重配置参数 ---
     parser.add_argument("--host_node", help="（可选）指定目标物理宿主机节点名称")
-    parser.add_argument("--cpus", type=int, help="自定义 CPU 核数")
+    parser.add_argument("--cpu", type=int, help="自定义 CPU 核数")
     parser.add_argument("--memory", type=int, help="自定义内存大小 (MB)")
     parser.add_argument("--disk", type=int, help="自定义主磁盘容量 (GB)")
 
@@ -98,32 +102,32 @@ def main():
 
             # --- [2] 虚拟机状态确认 ---
             elif args.action == "get_vm":
-                if not args.vm_name:
-                    raise ValueError("操作 'get_vm' 必须提供 --vm_name")
-                vm_data = inventory.get_single_vm_detail(args.vm_name)
+                if not args.hostname:
+                    raise ValueError("操作 'get_vm' 必须提供 --hostname")
+                vm_data = inventory.get_single_vm_detail(args.hostname)
                 if not vm_data:
                     response["status"] = "fail"
-                    response["message"] = f"未找到该虚拟机: {args.vm_name}"
+                    response["message"] = f"未找到该虚拟机: {args.hostname}"
                 else:
                     response["data"] = vm_data
 
             # --- [3] 深度自定义克隆 (核心逻辑) ---
             elif args.action == "clone_vm":
                 # 基础必填项校验
-                required_fields = [args.template, args.vm_name, args.dc, args.cluster, args.ds, args.network]
+                required_fields = [args.template, args.hostname, args.dc, args.cluster, args.ds, args.network]
                 if not all(required_fields):
-                    raise ValueError("克隆操作缺少必填资源定位参数 (template/vm_name/dc/cluster/ds/network)")
+                    raise ValueError("克隆操作缺少必填资源定位参数 (template/hostname/dc/cluster/ds/network)")
                 
                 # 调用 executor 的高级克隆函数
                 msg = executor.clone_vm_advanced(
                     template_name=args.template,
-                    new_name=args.vm_name,
+                    new_name=args.hostname,
                     dc_name=args.dc,
                     cluster_name=args.cluster,
                     ds_name=args.ds,
                     network_name=args.network,
                     host_name=args.host_node,   # 定向调度物理机
-                    cpus=args.cpus,             # 规格调整
+                    cpus=args.cpu,              # 规格调整
                     memory_mb=args.memory,      # 规格调整
                     disk_gb=args.disk,          # 磁盘调整
                     ip_address=args.ip,         # 网络注入
@@ -134,16 +138,16 @@ def main():
 
             # --- [4] 电源管理 ---
             elif args.action == "power_vm":
-                if not all([args.vm_name, args.state]):
-                    raise ValueError("电源管理需要 --vm_name 和 --state")
-                msg = executor.set_vm_power(args.vm_name, args.state)
+                if not all([args.hostname, args.state]):
+                    raise ValueError("电源管理需要 --hostname 和 --state")
+                msg = executor.set_vm_power(args.hostname, args.state)
                 response["message"] = msg
 
             # --- [5] 删除虚拟机 ---
             elif args.action == "delete_vm":
-                if not args.vm_name:
-                    raise ValueError("删除操作必须提供 --vm_name")
-                msg = executor.remove_vm(args.vm_name)
+                if not args.hostname:
+                    raise ValueError("删除操作必须提供 --hostname")
+                msg = executor.remove_vm(args.hostname)
                 response["message"] = msg
 
     except Exception as e:

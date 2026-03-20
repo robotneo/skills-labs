@@ -88,7 +88,8 @@ class VCenterExecutor:
         network = self._get_obj(vim.Network, network_name)
 
         if not all([template, cluster, ds, dc, network]):
-            raise ValueError("克隆核心资源（模板/集群/存储/网络）缺失，请检查名称是否正确。")
+            missing = [k for k, v in {"template": template, "cluster": cluster, "ds": ds, "dc": dc, "network": network}.items() if not v]
+            raise ValueError(f"克隆核心资源缺失: {', '.join(missing)}，请检查名称是否正确。")
 
         # 2. 定向宿主机选择逻辑
         target_host = None
@@ -101,17 +102,46 @@ class VCenterExecutor:
         # 3. 构造位置与规格重配置 (RelocateSpec)
         relospec = vim.vm.RelocateSpec()
         relospec.datastore = ds
-        relospec.pool = cluster.resourcePool # 默认进入集群根池
         
+        # 优先使用指定宿主机的资源池，否则使用指定集群的资源池
         if target_host:
-            relospec.host = target_host # 强制指定宿主机
+            relospec.host = target_host
+            relospec.pool = target_host.parent.resourcePool
+        else:
+            relospec.pool = cluster.resourcePool
 
-        # 修改 CPU 和 内存 (在克隆过程中直接应用)
-        if cpus or memory_mb:
-            config_spec = vim.vm.ConfigSpec()
-            if cpus: config_spec.numCPUs = cpus
-            if memory_mb: config_spec.memoryMB = memory_mb
-            relospec.spec = config_spec
+        # --- 关键修复：确保新 VM 的网卡连接到指定的 network ---
+        # 遍历模板网卡，将其映射到目标网络
+        device_changes = []
+        for device in template.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                nic_spec = vim.vm.device.VirtualDeviceSpec()
+                nic_spec.operation = vim.vm.device.VirtualDeviceSpec.Operation.edit
+                nic_spec.device = device
+                
+                # 修改网络背板 (Backing)
+                if isinstance(network, vim.dvs.DistributedVirtualPortgroup):
+                    # 分布式交换机端口组
+                    dvs_port_connection = vim.dvs.PortConnection()
+                    dvs_port_connection.portgroupKey = network.key
+                    dvs_port_connection.switchUuid = network.config.distributedVirtualSwitch.uuid
+                    nic_spec.device.backing = vim.vm.device.VirtualEthernetCard.DistributedVirtualPortBackingInfo()
+                    nic_spec.device.backing.port = dvs_port_connection
+                else:
+                    # 标准交换机端口组
+                    nic_spec.device.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo()
+                    nic_spec.device.backing.network = network
+                    nic_spec.device.backing.deviceName = network.name
+                
+                device_changes.append(nic_spec)
+                break # 示例逻辑：仅修改第一块网卡。如需多网卡，可根据逻辑扩展。
+
+        # 准备配置规格 (ConfigSpec) 用于 CPU 和 内存 修改
+        config_spec = vim.vm.ConfigSpec()
+        if cpus: config_spec.numCPUs = cpus
+        if memory_mb: config_spec.memoryMB = memory_mb
+        if device_changes:
+            config_spec.deviceChange = device_changes
 
         # 4. 构造网络自定义规范 (CustomizationSpec)
         custom_spec = None
@@ -120,7 +150,9 @@ class VCenterExecutor:
             
             # 设置 IP 地址
             ip_settings = vim.vm.customization.IPSettings()
-            ip_settings.ip = vim.vm.customization.FixedIp(address=ip_address)
+            fixed_ip = vim.vm.customization.FixedIp()
+            fixed_ip.ipAddress = ip_address
+            ip_settings.ip = fixed_ip
             ip_settings.subnetMask = subnet
             if gateway:
                 ip_settings.gateway = [gateway]
@@ -128,6 +160,9 @@ class VCenterExecutor:
             # 绑定网卡映射
             adapter_mapping = vim.vm.customization.AdapterMapping()
             adapter_mapping.adapter = ip_settings
+            
+            # 设置全局 IP 设置 (必填项)
+            global_ip = vim.vm.customization.GlobalIPSettings()
             
             # 设置系统身份信息（以 Linux 为例，支持 Hostname 自动修改）
             ident = vim.vm.customization.LinuxPrep(
@@ -137,12 +172,14 @@ class VCenterExecutor:
             
             custom_spec = vim.vm.customization.Specification(
                 nicSettingMap=[adapter_mapping],
-                identity=ident
+                identity=ident,
+                globalIPSettings=global_ip
             )
 
         # 5. 组装并执行克隆任务
         clone_spec = vim.vm.CloneSpec(
             location=relospec,
+            config=config_spec,  # 正确的位置：在 CloneSpec.config 中修改规格
             powerOn=True if ip_address else False, # 配置了 IP 通常直接开机以触发 GuestOS 自定义
             customization=custom_spec,
             template=False
@@ -150,12 +187,12 @@ class VCenterExecutor:
 
         try:
             task = template.Clone(folder=dc.vmFolder, name=new_name, spec=clone_spec)
-            self._wait_for_task(task, f"Clone-to-{new_name}")
+            new_vm = self._wait_for_task(task, f"Clone-to-{new_name}")
 
             # 6. 后置处理：磁盘扩容
             # 限制：vSphere 不支持在克隆任务内直接改磁盘大小，需在克隆后 Reconfig
-            if disk_gb:
-                self._resize_main_disk(new_name, disk_gb)
+            if disk_gb and isinstance(new_vm, vim.VirtualMachine):
+                self._resize_vm_disk(new_vm, disk_gb)
 
             return f"成功：虚拟机 {new_name} 已部署。规格：{cpus}C/{memory_mb}MB。位置：{host_name or '集群自动选择'}"
 
@@ -163,13 +200,10 @@ class VCenterExecutor:
             logger.error(f"高级克隆流程中断: {e}")
             raise
 
-    def _resize_main_disk(self, vm_name: str, new_size_gb: int):
+    def _resize_vm_disk(self, vm: vim.VirtualMachine, new_size_gb: int):
         """
-        克隆完成后，对虚拟机主磁盘执行在线扩容。
+        对已有的虚拟机实例执行磁盘扩容。
         """
-        vm = self._get_obj(vim.VirtualMachine, vm_name)
-        if not vm: return
-
         # 寻找第一个 VirtualDisk 设备
         disk = None
         for device in vm.config.hardware.device:
@@ -181,16 +215,16 @@ class VCenterExecutor:
             # 校验：新容量必须大于旧容量
             new_capacity_kb = new_size_gb * 1024 * 1024
             if new_capacity_kb <= disk.capacityInKB:
-                logger.warning("指定磁盘容量小于或等于当前容量，跳过扩容。")
+                logger.warning(f"虚拟机 [{vm.name}] 指定磁盘容量 {new_size_gb}GB 小于或等于当前容量，跳过扩容。")
                 return
 
             disk.capacityInKB = new_capacity_kb
             spec = vim.vm.ConfigSpec()
-            dev_spec = vim.vm.device.VirtualDeviceConfigSpec(
+            dev_spec = vim.vm.device.VirtualDeviceSpec(
                 device=disk, 
-                operation=vim.vm.device.VirtualDeviceConfigSpec.Operation.edit
+                operation=vim.vm.device.VirtualDeviceSpec.Operation.edit
             )
             spec.deviceChange = [dev_spec]
             
-            logger.info(f"正在调整磁盘大小至 {new_size_gb}GB...")
+            logger.info(f"正在调整虚拟机 [{vm.name}] 磁盘大小至 {new_size_gb}GB...")
             self._wait_for_task(vm.ReconfigVM_Task(spec=spec), "Resize-Disk")

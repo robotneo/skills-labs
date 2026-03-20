@@ -80,9 +80,18 @@ class VCenterInventory:
 
                 # --- [2] 计算集群 ---
                 elif isinstance(obj, vim.ClusterComputeResource):
+                    # 安全获取父节点数据中心名称
+                    dc_name = "N/A"
+                    try:
+                        curr = obj.parent
+                        while curr and not isinstance(curr, vim.Datacenter):
+                            curr = curr.parent
+                        if curr: dc_name = curr.name
+                    except: pass
+
                     report["clusters"].append({
                         "name": obj.name,
-                        "dc_parent": obj.parent.parent.name,
+                        "dc_parent": dc_name,
                         "overall_status": str(obj.overallStatus)
                     })
 
@@ -90,12 +99,16 @@ class VCenterInventory:
                 elif isinstance(obj, vim.HostSystem):
                     # 提取物理机关键指标，用于克隆时的定向调度参考
                     hw = obj.hardware
+                    cpu_desc = "Unknown"
+                    if hw.cpuPkg and len(hw.cpuPkg) > 0:
+                        cpu_desc = hw.cpuPkg[0].description
+
                     report["hosts"].append({
                         "name": obj.name,
                         "cluster_parent": obj.parent.name if obj.parent else "N/A",
                         "status": str(obj.overallStatus),
                         "maintenance_mode": obj.runtime.inMaintenanceMode, # 是否维护模式
-                        "cpu_model": hw.cpuPkg[0].description if hw.cpuPkg else "Unknown",
+                        "cpu_model": cpu_desc,
                         "memory_gb": round(hw.memorySize / (1024**3), 2),
                         "power_state": str(obj.runtime.powerState)
                     })
@@ -131,7 +144,8 @@ class VCenterInventory:
                     if config.hardware.device:
                         for device in config.hardware.device:
                             if isinstance(device, vim.vm.device.VirtualDisk):
-                                total_storage_gb += device.capacityInBytes / (1024**3)
+                                # 兼容性写法：pyVmomi 旧版本使用 capacityInKB
+                                total_storage_gb += device.capacityInKB / (1024**2)
 
                     vm_profile = {
                         "metadata": {
@@ -181,15 +195,29 @@ class VCenterInventory:
             vm = next((v for v in container_view.view if v.name == vm_name), None)
             if not vm: return None
             
-            stats = vm.summary.quickStats
+            summary = vm.summary
+            config = vm.config
+            stats = summary.quickStats
+            
+            # 计算总磁盘容量
+            total_disk_gb = 0
+            for device in config.hardware.device:
+                if isinstance(device, vim.vm.device.VirtualDisk):
+                    total_disk_gb += device.capacityInKB / (1024**2)
+            
             return {
                 "name": vm.name,
                 "power": str(vm.runtime.powerState),
-                "ip": vm.summary.guest.ipAddress,
+                "ip": summary.guest.ipAddress or "等待 VMware Tools 启动...",
                 "host": vm.runtime.host.name if vm.runtime.host else "Unknown",
+                "config": {
+                    "cpu": config.hardware.numCPU,
+                    "memory_mb": config.hardware.memoryMB,
+                    "disk_gb": round(total_disk_gb, 2)
+                },
                 "perf": {
-                    "cpu": stats.overallCpuUsage,
-                    "mem": stats.guestMemoryUsage
+                    "cpu_mhz": stats.overallCpuUsage or 0,
+                    "mem_mb": stats.guestMemoryUsage or 0
                 }
             }
         finally:
