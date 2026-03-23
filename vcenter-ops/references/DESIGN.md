@@ -28,8 +28,9 @@ vcenter-ops-skills/
 │   ├── inventory.py        # 查询层
 │   ├── executor.py         # 动作层
 │   └── handler.py          # 接口层 (用于 OpenClaw 命令行对接)
-└── references/
-    └── REFERENCE.md      # 文档层
+└── references/             # 说明文档层
+    ├── DESIGN.md         # 设计规范
+    └── REFERENCE.md      # 接口参考
 ```
 
 为何还需要 main.py?

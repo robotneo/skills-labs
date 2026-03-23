@@ -1,5 +1,6 @@
 # vCenter 凭据配置
 # 第一次使用对话的时候需要初始化输入 vCenter 主机地址、用户名、密码
+# 后续可以在 config.yaml 中修改
 vcenter:
   host: "vcenter.example.com"
   user: "administrator@vsphere.local"
