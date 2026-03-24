@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Module: scripts.handler
 Description: vCenter Ops 技能统一入口分发器。

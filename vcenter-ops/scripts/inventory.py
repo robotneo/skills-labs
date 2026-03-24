@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Module: scripts.inventory
 Description: vCenter 资源发现与深度资产画像模块。

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Module: scripts.client
 Description: vCenter API 连接客户端封装，支持上下文管理与会话状态检查。

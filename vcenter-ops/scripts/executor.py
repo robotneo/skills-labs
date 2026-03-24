@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Module: scripts.executor
 Description: vCenter 动作执行器。支持克隆、电源管理、删除、磁盘扩容。

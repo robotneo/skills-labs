@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-vCenter 数据会话缓存管理器
+Module: scripts.cache_manager
+Description: vCenter 数据会话缓存管理器。
+功能：
+1. 首次查询 vCenter 后将全量数据保存到本地 JSON。
+2. 后续查询优先从本地读取。
+3. 大幅减少 API 调用次数（30s → <1s），降低 token 消耗。
 
-用途：首次查询 vCenter 后将全量数据保存到本地 JSON，后续查询优先从本地读取。
-      大幅减少 API 调用次数（30s → <1s），降低 token 消耗。
+Author: xiaofei
+Date: 2026-03-21
 
 使用方式：
   # 首次查询（API 调用，约 30s）
