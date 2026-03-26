@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Module: scripts.handler
 Description: vCenter Ops 技能统一入口分发器。
@@ -211,7 +210,11 @@ def main():
 
             elif args.action == "delete_vm":
                 if not args.hostname:
-                    raise ValueError("删除操作必须提供 --hostname")
+                    raise ValueError("🚫 安全策略拦截：删除操作必须通过 --hostname 指定精确的虚拟机名称，全量删除被禁止。")
+                
+                # 脚本级安全校验（双保险：handler 校验 + executor 校验）
+                VCenterExecutor._validate_delete_target(args.hostname)
+                
                 msg = executor.remove_vm(args.hostname)
                 response["message"] = msg
 

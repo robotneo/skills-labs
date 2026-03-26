@@ -55,10 +55,12 @@ VM 名称格式 **`IP-自定义名称`**。用户只提供自定义名称，Agen
 
 **Phase IP** → IP 必填，三重过滤（Ping不通 + 全vCenter VM IP + VM名称正则），用户指定IP必须 `--check` 验证
 
-**Phase 4 执行** → 三级权限确认后执行：
+**Phase 4 执行** → 三级权限确认后执行，确认环节使用单字母快捷回复（`Y`=确认 / `N`=取消）：
 - 🔵 clone: 一次确认 → `handler.py --action clone_vm ... --mask ... --gw ... --power_on` → `rename_vm` → `get_vm` 确认状态
 - 🟡 power: 二次确认（含风险提醒）
 - 🔴 delete: 二次确认 + 审批预留，`remove_vm()` 自动处理开机VM
+
+> 确认机制详见 `references/PERMISSION-SYSTEM.md`，所有确认卡片末尾固定提示：`回复 Y 确认 / N 取消`
 
 > 详细流程见 `references/CLONE-FLOW.md`，权限模板见 `references/PERMISSION-SYSTEM.md`
 
@@ -69,10 +71,24 @@ VM 名称格式 **`IP-自定义名称`**。用户只提供自定义名称，Agen
 | 巡检展示 | `cache_manager.py --refresh` + `--section xxx` | 🔵 |
 | 查询VM | `handler.py --action get_vm --hostname "xxx"` | 🔵 |
 | 电源 | `handler.py --action power_vm --hostname "xxx" --state on\|off\|reset` | 🟡 |
-| 删除 | `handler.py --action delete_vm --hostname "xxx"` | 🔴 |
+| 删除 | `handler.py --action delete_vm --hostname "xxx"` | 🔴 **必须指定名称/IP，禁止全量删除** |
 | 快照 | `handler.py --action snapshot --hostname "xxx"` | 🔵 |
 
 展示后必须引导创建虚拟机。格式规范见 `references/RESOURCE-DISPLAY.md`
+
+## 🔴 删除操作安全策略（强制）
+
+> 详见 `references/PERMISSION-SYSTEM.md`「删除操作安全策略」章节。
+
+**三条铁律，无条件执行：**
+
+| # | 规则 | 说明 |
+|---|------|------|
+| 1 | **二次确认** | 所有删除动作必须两次 Y 确认才可执行 |
+| 2 | **禁止全量删除** | "删除全部"、"删除所有VM"、"清空"等请求一律拒绝 |
+| 3 | **必须指定明确目标** | 只接受精确的虚拟机名称或 IP，不接受通配符/正则/按条件筛选 |
+
+> 适用关键词：删除、销毁、毁灭、移除、清除、delete、destroy、remove。适用对象不限于虚拟机。
 
 ## 决策规则
 
@@ -80,6 +96,7 @@ VM 名称格式 **`IP-自定义名称`**。用户只提供自定义名称，Agen
 - 存储标注 ⚠️ 低空间，宿主机排除维护模式
 - 磁盘越界/重名自动拦截
 - 操作前明确路径：`[DC]/[Cluster]`
+- 删除操作严格执行安全策略，不得绕过
 
 ## 目录结构
 

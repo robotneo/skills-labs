@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Module: scripts.executor
 Description: vCenter 动作执行器。支持克隆、电源管理、删除、磁盘扩容。
@@ -243,11 +242,68 @@ class VCenterExecutor:
     # 删除
     # ========================
 
+    @staticmethod
+    def _validate_delete_target(target: str) -> None:
+        """
+        删除操作安全校验：禁止全量/批量/通配符删除。
+        
+        校验规则：
+        1. 目标不能为空
+        2. 目标不能包含通配符（* ? [ ]）
+        3. 目标不能是全量关键词（all / 全部 / 所有 / 空字符串等）
+        4. 目标不能以"删除"语义开头（防止用户传整个指令而非目标名）
+        """
+        import re
+
+        if not target or not target.strip():
+            raise ValueError(
+                "🚫 安全策略拦截：删除目标为空。"
+                "必须指定明确的虚拟机名称或 IP，全量删除被禁止。"
+            )
+
+        target = target.strip()
+
+        # 规则 1：通配符检测
+        wildcard_chars = set("*?[](){}|^$+")
+        if any(c in target for c in wildcard_chars):
+            raise ValueError(
+                f"🚫 安全策略拦截：目标 [{target}] 包含通配符/特殊字符，全量删除被禁止。"
+                "请指定精确的虚拟机名称或 IP。"
+            )
+
+        # 规则 2：全量关键词检测
+        bulk_keywords = [
+            "all", "ALL", "全部", "所有", "所有虚拟机", "所有vm", "all vm",
+            "全量", "批量", "清空", "清理", "整集群", "整主机",
+        ]
+        if target.lower().strip() in [k.lower() for k in bulk_keywords]:
+            raise ValueError(
+                f"🚫 安全策略拦截：[{target}] 属于全量/批量删除关键词，此操作被禁止。"
+                "请指定精确的虚拟机名称或 IP。"
+            )
+
+        # 规则 3：正则模式检测（多个点+星号、连续特殊字符等）
+        regex_patterns = [
+            r'\..*\.',       # 多段点（如 test.*.vm）
+            r'.*[*?].*',     # 任何包含通配的（兜底）
+        ]
+        for pattern in regex_patterns:
+            if re.search(pattern, target):
+                raise ValueError(
+                    f"🚫 安全策略拦截：[{target}] 疑似正则/通配符模式，此操作被禁止。"
+                    "请指定精确的虚拟机名称或 IP。"
+                )
+
     def remove_vm(self, vm_name: str) -> str:
         """
         永久删除虚拟机（从磁盘移除）。
         开机状态自动关机后再删除。
+        
+        安全限制：必须指定精确的虚拟机名称，全量/批量/通配符删除被禁止。
         """
+        # 安全校验：删除前强制校验目标
+        self._validate_delete_target(vm_name)
+
         vm = self._get_obj(vim.VirtualMachine, vm_name)
         if not vm:
             raise ValueError(f"虚拟机 [{vm_name}] 不存在")
@@ -296,6 +352,10 @@ class VCenterExecutor:
 
     def remove_snapshot(self, vm_name: str, snap_name: str) -> str:
         """删除快照。"""
+        # 安全校验
+        self._validate_delete_target(vm_name)
+        self._validate_delete_target(snap_name)
+
         vm = self._get_obj(vim.VirtualMachine, vm_name)
         if not vm:
             raise ValueError(f"虚拟机 [{vm_name}] 不存在")
