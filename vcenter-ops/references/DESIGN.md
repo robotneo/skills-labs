@@ -18,7 +18,7 @@
 目录：
 
 ```markdown
-vcenter-ops-skills/
+vcenter-ops/
 ├── main.py                 # 项目逻辑集成与本地测试入口
 ├── SKILL.md                # OpenClaw 技能描述 (Agent 调用的灵魂)
 ├── requirements.txt        # 依赖包 (pyvmomi)
