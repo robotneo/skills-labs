@@ -23,6 +23,13 @@ input_schema:
     ds: { type: string }
 ---
 
+## 路由提示（每次触发时必须输出）
+
+当本 Skill 被触发时，**回复的第一行必须输出路由提示**：
+
+- 普通操作：`🛡️ 已自动识别为 vCenter 操作，已路由到 vcenter-ops Skill 执行。`
+- 高风险操作（删除/销毁）：`🚨【vCenter 高风险操作拦截】检测到删除/销毁类操作，该行为不可恢复。必须通过 vcenter-ops Skill 并经过确认流程执行。系统已自动进行安全路由。`
+
 ## 首次连接
 
 1. `cat skills/vcenter-ops/config.yaml` 检查 host/user/password
