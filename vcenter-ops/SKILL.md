@@ -3,13 +3,13 @@ name: vcenter-ops
 description: VMware vCenter 运维自动化。克隆/删除/电源/快照/资源巡检。
   触发词：创建虚拟机、VM、vCenter、巡检、克隆。
 metadata:
-  version: 0.5.0
+  version: 0.8.0
 entrypoint: scripts/handler.py
 input_schema:
   type: object
   required: [action]
   properties:
-    action: { type: string, enum: [list_all, get_vm, clone_vm, delete_vm, power_vm, snapshot] }
+    action: { type: string, enum: [list_all, get_vm, clone_vm, delete_vm, power_vm, snapshot, reconfigure, guest_exec, migrate, plan, ttl, datastore, template, batch, approval, events, quota, export] }
     hostname: { type: string }
     cpu: { type: number, default: 4 }
     memory: { type: number, default: 8 }
@@ -21,6 +21,40 @@ input_schema:
     dc: { type: string }
     cluster: { type: string }
     ds: { type: string }
+    snap_action: { type: string, enum: [create, list, revert, delete] }
+    snap_name: { type: string }
+    dry_run: { type: boolean, default: false }
+    cmd: { type: string }
+    guest_user: { type: string, default: "root" }
+    guest_pwd: { type: string }
+    target_host: { type: string }
+    plan_action: { type: string, enum: [create, execute, rollback, list, delete] }
+    plan_id: { type: string }
+    plan_steps: { type: string }
+    plan_desc: { type: string }
+    ttl_action: { type: string, enum: [set, cancel, list, cleanup] }
+    ttl_minutes: { type: number }
+    creator: { type: string, default: "agent" }
+    ds_name: { type: string }
+    ds_path: { type: string }
+    ds_scan: { type: boolean, default: false }
+    top: { type: number, default: 50 }
+    tpl_action: { type: string, enum: [list, register, convert] }
+    tpl_name: { type: string }
+    batch_action: { type: string, enum: [power] }
+    pattern: { type: string }
+    approval_action: { type: string, enum: [create, approve, reject, list, cancel] }
+    approval_id: { type: string }
+    approval_params: { type: string }
+    approval_target_action: { type: string }
+    comment: { type: string }
+    minutes: { type: number }
+    event_category: { type: string, enum: [power, create_delete, migration, snapshot, alarm] }
+    cpu_threshold: { type: number, default: 0.85 }
+    mem_threshold: { type: number, default: 0.85 }
+    disk_threshold: { type: number, default: 0.9 }
+    export_format: { type: string, enum: [json, csv, markdown], default: json }
+    output: { type: string }
 ---
 
 ## 路由提示（每次触发时必须输出）
@@ -79,7 +113,40 @@ VM 名称格式 **`IP-自定义名称`**。用户只提供自定义名称，Agen
 | 查询VM | `handler.py --action get_vm --hostname "xxx"` | 🔵 |
 | 电源 | `handler.py --action power_vm --hostname "xxx" --state on\|off\|reset` | 🟡 |
 | 删除 | `handler.py --action delete_vm --hostname "xxx"` | 🔴 **必须指定名称/IP，禁止全量删除** |
-| 快照 | `handler.py --action snapshot --hostname "xxx"` | 🔵 |
+| 快照 | `handler.py --action snapshot --hostname "xxx" --snap_action create --snap_name "xxx"` | 🔵 |
+| 快照列表 | `handler.py --action snapshot --hostname "xxx" --snap_action list` | 🔵 |
+| 快照恢复 | `handler.py --action snapshot --hostname "xxx" --snap_action revert --snap_name "xxx"` | 🔵 |
+| 快照删除 | `handler.py --action snapshot --hostname "xxx" --snap_action delete --snap_name "xxx"` | 🟡 |
+| 硬件热调整 | `handler.py --action reconfigure --hostname "xxx" --cpu 8 --memory 16 --disk 200` | 🔵 |
+| Dry-Run | `handler.py --action <any> --dry-run ...` | 🔵 |
+| 审计查询 | `handler.py --audit-query --action delete_vm --target xxx` | 🔵 |
+| Guest 命令 | `handler.py --action guest_exec --hostname "xxx" --cmd "uptime" --guest-user root --guest-pwd xxx` | 🟡 |
+| vMotion | `handler.py --action migrate --hostname "xxx" --target-host "esxi-02"` | 🟡 |
+| 计划创建 | `handler.py --action plan --plan_action create --plan_steps '[...]' --plan_desc "..."` | 🔵 |
+| 计划执行 | `handler.py --action plan --plan_action execute --plan_id "xxx"` | 🟡 |
+| 计划回滚 | `handler.py --action plan --plan_action rollback --plan_id "xxx"` | 🟡 |
+| 计划列表 | `handler.py --action plan --plan_action list` | 🔵 |
+| 计划删除 | `handler.py --action plan --plan_action delete --plan_id "xxx"` | 🔵 |
+| TTL 设置 | `handler.py --action ttl --ttl_action set --hostname "xxx" --ttl-minutes 60` | 🟡 |
+| TTL 取消 | `handler.py --action ttl --ttl_action cancel --hostname "xxx"` | 🔵 |
+| TTL 列表 | `handler.py --action ttl --ttl_action list` | 🔵 |
+| TTL 清理 | `handler.py --action ttl --ttl_action cleanup` | 🟡 |
+| 存储浏览 | `handler.py --action datastore --ds_name "datastore1" --ds_path "iso/"` | 🔵 |
+| 镜像扫描 | `handler.py --action datastore --ds_scan --top 50` | 🔵 |
+| 模板列表 | `handler.py --action template --tpl_action list` | 🔵 |
+| 注册模板 | `handler.py --action template --tpl_action register --hostname "xxx" --tpl_name "yyy"` | 🟡 |
+| 模板转VM | `handler.py --action template --tpl_action convert --hostname "xxx"` | 🟡 |
+| 批量电源 | `handler.py --action batch --batch_action power --pattern "web-*" --state on` | 🟡 |
+| 审批创建 | `handler.py --action approval --approval_action create --hostname "xxx"` | 🔵 |
+| 审批通过 | `handler.py --action approval --approval_action approve --approval_id "xxx"` | 🟡 |
+| 审批拒绝 | `handler.py --action approval --approval_action reject --approval_id "xxx"` | 🟡 |
+| 审批列表 | `handler.py --action approval --approval_action list` | 🔵 |
+| 审批取消 | `handler.py --action approval --approval_action cancel --approval_id "xxx"` | 🔵 |
+| 事件查询 | `handler.py --action events --minutes 60 --event_category power` | 🔵 |
+| 资源配额 | `handler.py --action quota --cluster "xxx" --cpu_threshold 0.85` | 🔵 |
+| 导出清单 | `handler.py --action export --export_format json --cluster "xxx"` | 🔵 |
+| 导出CSV | `handler.py --action export --export_format csv --output /tmp/vms.csv` | 🔵 |
+| 导出Markdown | `handler.py --action export --export_format markdown --output /tmp/vms.md` | 🔵 |
 
 展示后必须引导创建虚拟机。格式规范见 `references/RESOURCE-DISPLAY.md`
 
@@ -111,14 +178,23 @@ VM 名称格式 **`IP-自定义名称`**。用户只提供自定义名称，Agen
 vcenter-ops/
 ├── SKILL.md
 ├── config.yaml
+├── .env                       # 密码（chmod 600，不入 git）
+├── .gitignore
 ├── requirements.txt
 ├── scripts/
 │   ├── client.py          # 连接层
 │   ├── inventory.py       # 查询层（O(1) VM数统计）
-│   ├── executor.py        # 动作层（克隆/重命名/电源/删除/快照）
+│   ├── executor.py        # 动作层（克隆/重命名/电源/删除/快照/热调整）
+│   ├── audit.py           # 审计日志（JSONL）
 │   ├── ip_scanner.py      # IP 扫描
 │   ├── cache_manager.py   # 会话缓存
+│   ├── plan_manager.py    # 操作计划管理（多步编排）
+│   ├── ttl_manager.py     # VM TTL 自动清理
+│   ├── approval_manager.py # 操作审批管理
+│   ├── event_watcher.py    # 事件监控查询
 │   └── handler.py         # 接口层
+├── logs/
+│   └── audit.log          # 审计日志（自动生成，不入 git）
 └── references/
     ├── DESIGN.md
     ├── CLONE-FLOW.md          # 克隆流程详解

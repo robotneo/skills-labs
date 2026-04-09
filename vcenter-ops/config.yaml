@@ -1,10 +1,8 @@
-# vCenter 凭据配置
-# 第一次使用对话的时候需要初始化输入 vCenter 主机地址、用户名、密码
-# 后续可以在 config.yaml 中修改
+# vCenter 凭据配置（密码通过 .env 文件管理）
 vcenter:
   host: "vcenter.example.com"
   user: "administrator@vsphere.local"
-  password: "testpassword"
+  password_ref: "VCENTER_PASSWORD"   # 引用 .env 中的环境变量名（不再明文存储密码）
   port: 443
 
 # 环境默认值
@@ -26,6 +24,7 @@ permission:
         - get_vm          # 查询虚拟机
         - list_all        # 资源巡检
         - snapshot        # 创建快照
+        - reconfigure     # 硬件热调整
     double_confirm:
       label: "敏感操作 - 二次确认"
       description: "列出参数 → 第一次确认 → 提醒风险 → 第二次确认 → 执行"
@@ -43,5 +42,6 @@ permission:
     get_vm: "confirm"
     clone_vm: "confirm"
     snapshot: "confirm"
+    reconfigure: "confirm"
     power_vm: "double_confirm"
     delete_vm: "approval"

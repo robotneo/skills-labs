@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """
-Module: scripts.cache_manager
-Description: vCenter 数据会话缓存管理器。
-功能：
-1. 首次查询 vCenter 后将全量数据保存到本地 JSON。
-2. 后续查询优先从本地读取。
-3. 大幅减少 API 调用次数（30s → <1s），降低 token 消耗。
+vCenter 数据会话缓存管理器
 
-Author: xiaofei
-Date: 2026-03-21
+用途：首次查询 vCenter 后将全量数据保存到本地 JSON，后续查询优先从本地读取。
+      大幅减少 API 调用次数（30s → <1s），降低 token 消耗。
 
 使用方式：
   # 首次查询（API 调用，约 30s）
@@ -48,10 +43,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 # 缓存路径
-CACHE_DIR = Path("/tmp")
+SKILL_DIR = Path(__file__).resolve().parent.parent
+CACHE_DIR = SKILL_DIR / "data"
 CACHE_FILE = CACHE_DIR / "vc_session_cache.json"
 META_FILE = CACHE_DIR / "vc_session_meta.json"
-LOG_FILE = CACHE_DIR / "vc_cache.log"
+LOG_FILE = SKILL_DIR / "logs" / "vc_cache.log"
 
 # 缓存有效期（秒），0 = 不自动过期，需手动刷新
 CACHE_TTL = 0
@@ -336,11 +332,23 @@ def main():
         from scripts.inventory import VCenterInventory
         import yaml
 
-        with open(Path(__file__).parent.parent / "config.yaml") as f:
+        skill_dir = Path(__file__).parent.parent
+        with open(skill_dir / "config.yaml") as f:
             cfg = yaml.safe_load(f)
         vc = cfg["vcenter"]
 
-        with VCenterClient(vc["host"], vc["user"], vc["password"]) as si:
+        # 密码解析：明文 > .env 环境变量 > password_ref 引用
+        pwd = vc.get("password", "")
+        if not pwd:
+            env_file = skill_dir / ".env"
+            if env_file.exists():
+                from dotenv import load_dotenv
+                load_dotenv(env_file)
+            ref = vc.get("password_ref", "")
+            if ref:
+                pwd = os.environ.get(ref, "")
+
+        with VCenterClient(vc["host"], vc["user"], pwd) as si:
             inventory = VCenterInventory(si)
             data = inventory.fetch_all_inventory()
 

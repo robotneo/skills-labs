@@ -18,7 +18,7 @@
 目录：
 
 ```markdown
-vcenter-ops/
+vcenter-ops-skills/
 ├── main.py                 # 项目逻辑集成与本地测试入口
 ├── SKILL.md                # OpenClaw 技能描述 (Agent 调用的灵魂)
 ├── requirements.txt        # 依赖包 (pyvmomi)
@@ -28,9 +28,8 @@ vcenter-ops/
 │   ├── inventory.py        # 查询层
 │   ├── executor.py         # 动作层
 │   └── handler.py          # 接口层 (用于 OpenClaw 命令行对接)
-└── references/             # 说明文档层
-    ├── DESIGN.md         # 设计规范
-    └── REFERENCE.md      # 接口参考
+└── references/
+    └── REFERENCE.md      # 文档层
 ```
 
 为何还需要 main.py?
