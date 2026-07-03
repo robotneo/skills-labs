@@ -21,9 +21,36 @@ First line when triggered:
 
 ## Entry
 
+All paths in this Skill are **relative to the Skill root** (the directory that contains this `SKILL.md`).
+The AI agent runtime is expected to `cd` into the Skill root before invoking commands.
+
 ```bash
-cd /root/.openclaw/workspace-infraops/skills/vcenter-ops
+# Portable form — works on any platform that mounts the Skill into cwd
 python3 scripts/handler.py --action <action> [options]
+```
+
+### Platform install paths (reference only)
+
+| Platform | Skill root |
+| --- | --- |
+| Codex (`~/.codex`) | `~/.codex/skills/vcenter-ops` |
+| Claude Code | `~/.claude/skills/vcenter-ops` or `<project>/.claude/skills/vcenter-ops` |
+| openclaw | `/root/.openclaw/workspace-infraops/skills/vcenter-ops` |
+| qclaw | `~/.qclaw/skills/vcenter-ops` |
+| hermes | `~/.hermes/skills/vcenter-ops` |
+| OpenCode | `~/.opencode/skills/vcenter-ops` or `<project>/.opencode/skills/vcenter-ops` |
+| Generic / other agents | any directory containing this `SKILL.md`; export `SKILL_DIR` to it |
+
+Cross-shell fallback if the runtime does not auto-cd:
+
+```bash
+# Bash / Zsh (macOS, Linux)
+cd "${SKILL_DIR:-$(dirname "$0")}" && python3 scripts/handler.py --action <action> [options]
+```
+
+```powershell
+# PowerShell (Windows)
+Set-Location $env:SKILL_DIR; python scripts\handler.py --action <action> [options]
 ```
 
 ## Load when needed
