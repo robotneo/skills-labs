@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Module: scripts.handler
 Description: vCenter Ops 技能统一入口分发器。
@@ -26,6 +25,30 @@ from scripts import audit
 from scripts import plan_manager
 from scripts import ttl_manager
 from scripts import approval_manager
+from scripts.history_manager import last_clone_params, list_history, format_history_summary, format_clone_params
+from scripts.preset_manager import (
+    apply_preset, list_presets, format_preset_list, parse_preset_from_text,
+    save_preset, save_from_history, delete_preset, get_preset,
+)
+from scripts.progress_reporter import ProgressReporter, stdout_sink
+from scripts.error_dictionary import format_error_oneline
+from scripts import ip_pool
+from scripts import batch_clone as batch_clone_mod
+from scripts import webhook_subscriber
+# v1.3 安全合规
+from scripts import secret_manager
+from scripts import role_manager
+from scripts import danger_validator
+from scripts import approval_policy
+from scripts import change_window
+# v1.4 智能化
+from scripts import metrics_collector
+from scripts import recommender
+from scripts import anomaly_detector
+from scripts import capacity_forecaster
+# v1.5 标准交付 / 克隆后初始化
+from scripts import delivery_pipeline
+from scripts import post_clone_init
 
 # 技能根目录（SKILL.md 所在目录）
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -98,6 +121,10 @@ def create_arg_parser() -> argparse.ArgumentParser:
                             "snapshot", "reconfigure",
                             "guest_exec", "migrate", "plan", "ttl", "datastore",
                             "template", "batch", "approval", "events", "quota", "export",
+                            "history", "preset",
+                            "batch_clone", "ip_pool", "webhook", "audit_report",
+                            "secret", "rbac", "danger", "approval_policy", "change_window",
+                            "metrics", "recommend", "anomaly", "forecast", "delivery", "post_init",
                         ],
                         help="执行的操作类型（--audit-query 时可选）")
 
@@ -191,12 +218,122 @@ def create_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disk_threshold", type=float, help="磁盘使用率告警阈值（默认 0.9）")
 
     # --- 导出报表参数 ---
-    parser.add_argument("--export_format", choices=["json", "csv", "markdown"],
+    parser.add_argument("--export_format", choices=["json", "csv", "markdown", "html"],
                         help="导出格式（默认 json）")
     parser.add_argument("--output", help="输出文件路径")
 
     # --- 通用分页/限制 ---
     parser.add_argument("--top", type=int, default=50, help="返回结果数量限制")
+
+    # --- v1.0 预设 / 历史复用 ---
+    parser.add_argument("--preset", help="使用预设包（如 @dev-small / dev-small），参数会被同名 CLI 参数覆盖")
+    parser.add_argument("--from-last", action="store_true", dest="from_last",
+                        help="克隆时复用最近一次克隆参数（仅覆盖未指定的项）")
+    parser.add_argument("--from-vm", dest="from_vm",
+                        help="克隆时复用与指定 VM 同名的历史克隆参数")
+    parser.add_argument("--no-wait-tools", action="store_true", dest="no_wait_tools",
+                        help="克隆后不等待 VMware Tools 就绪")
+    parser.add_argument("--tools-timeout", type=int, dest="tools_timeout", default=300,
+                        help="等待 Tools 就绪超时（默认 300s）")
+
+    # --- v1.1 批量克隆 / IP 池 / Webhook / 审计报表 ---
+    parser.add_argument("--count", type=int, help="批量克隆数量")
+    parser.add_argument("--name-prefix", dest="name_prefix", default="vm-", help="批量克隆 VM 名前缀")
+    parser.add_argument("--name-start", type=int, dest="name_start", default=1, help="批量克隆编号起始")
+    parser.add_argument("--ip-pool", dest="ip_pool_spec", help="IP 池声明（CIDR/范围/单IP，逗号隔）")
+    parser.add_argument("--workers", type=int, default=3, help="批量并行度")
+
+    parser.add_argument("--preset-action", dest="preset_action",
+                        choices=["list", "save", "save-from-last", "delete", "show"],
+                        help="预设子操作")
+    parser.add_argument("--preset-name", dest="preset_name", help="预设名")
+    parser.add_argument("--preset-desc", dest="preset_desc", default="")
+    parser.add_argument("--preset-overwrite", action="store_true", dest="preset_overwrite")
+
+    parser.add_argument("--ip-action", dest="ip_action",
+                        choices=["available", "allocate", "release", "reservations", "cleanup"])
+    parser.add_argument("--ip-spec", dest="ip_spec", help="IP 池声明")
+    parser.add_argument("--ip-target", dest="ip_target", help="要释放的 IP")
+
+    parser.add_argument("--webhook-action", dest="webhook_action",
+                        choices=["list", "add", "remove", "toggle"])
+    parser.add_argument("--webhook-name", dest="webhook_name")
+    parser.add_argument("--webhook-url", dest="webhook_url")
+    parser.add_argument("--webhook-secret", dest="webhook_secret", default="")
+    parser.add_argument("--webhook-topics", nargs="+", dest="webhook_topics", default=["*"])
+    parser.add_argument("--webhook-mode", dest="webhook_mode", choices=["http", "dingtalk"], default="http")
+    parser.add_argument("--webhook-id", dest="webhook_id")
+    parser.add_argument("--webhook-enable", action="store_true")
+    parser.add_argument("--webhook-disable", action="store_true")
+
+    parser.add_argument("--report-days", type=int, dest="report_days", default=7,
+                        help="审计报表覆盖天数")
+
+    # --- v1.3 安全合规 ---
+    parser.add_argument("--actor", default="agent", dest="acting_user",
+                        help="当前操作人（用于 RBAC/审批/危险确认）")
+    parser.add_argument("--confirmed", action="store_true",
+                        help="危险操作二次确认标记")
+
+    parser.add_argument("--secret-action", dest="secret_action",
+                        choices=["list", "set", "get", "delete", "migrate", "rotate"])
+    parser.add_argument("--secret-key", dest="secret_key")
+    parser.add_argument("--secret-value", dest="secret_value")
+    parser.add_argument("--secret-desc", dest="secret_desc", default="")
+
+    parser.add_argument("--rbac-action", dest="rbac_action",
+                        choices=["roles", "users", "bind", "unbind", "check", "config"])
+    parser.add_argument("--rbac-user", dest="rbac_user")
+    parser.add_argument("--rbac-role", dest="rbac_role")
+    parser.add_argument("--rbac-target-action", dest="rbac_target_action")
+
+    parser.add_argument("--danger-action", dest="danger_action",
+                        choices=["scan", "confirm", "patterns", "config"])
+    parser.add_argument("--danger-target", dest="danger_target")
+    parser.add_argument("--danger-op", dest="danger_op", default="delete_vm")
+
+    parser.add_argument("--policy-action", dest="policy_action",
+                        choices=["list", "route", "config"])
+    parser.add_argument("--policy-target-action", dest="policy_target_action")
+    parser.add_argument("--policy-target", dest="policy_target", default="")
+
+    parser.add_argument("--window-action", dest="window_action",
+                        choices=["status", "check", "config"])
+    parser.add_argument("--window-op", dest="window_op")
+
+    # --- v1.4 智能化 ---
+    parser.add_argument("--metrics-action", dest="metrics_action",
+                        choices=["collect", "query", "cleanup"])
+    parser.add_argument("--metric-type", dest="metric_type")
+    parser.add_argument("--metric-target", dest="metric_target")
+    parser.add_argument("--metric-days", type=int, dest="metric_days", default=7)
+    parser.add_argument("--metrics-keep-days", type=int, dest="metrics_keep_days", default=30)
+    parser.add_argument("--metrics-dry-run", action="store_true", dest="metrics_dry_run")
+
+    parser.add_argument("--recommend-top", type=int, dest="recommend_top", default=3)
+    parser.add_argument("--recommend-count", type=int, dest="recommend_count", default=1)
+    parser.add_argument("--recommend-prefix", dest="recommend_prefix", default="")
+
+    parser.add_argument("--forecast-threshold", type=float, dest="forecast_threshold",
+                        default=0.9)
+
+    # --- v1.5 标准交付 / 克隆后初始化 ---
+    parser.add_argument("--delivery-action", dest="delivery_action",
+                        choices=["plan", "execute", "verify"], help="标准交付子操作")
+    parser.add_argument("--delivery-confirm", action="store_true", dest="delivery_confirm",
+                        help="确认执行 delivery execute")
+    parser.add_argument("--skip-clone", action="store_true", dest="skip_clone",
+                        help="delivery execute 时跳过真实 clone，仅验证资产/监控流程")
+    parser.add_argument("--name", dest="delivery_name", help="交付名称/自定义 VM 名")
+    parser.add_argument("--owner", dest="owner", help="负责人")
+    parser.add_argument("--env", dest="env", default="dev", help="环境 dev/test/prod")
+    parser.add_argument("--app", dest="app", default="app", help="应用名")
+    parser.add_argument("--gateway", dest="gateway", help="网关，delivery 使用")
+    parser.add_argument("--datastore", dest="datastore", help="datastore，delivery 别名")
+    parser.add_argument("--expected-hostname", dest="expected_hostname", help="post_init 期望主机名")
+    parser.add_argument("--ssh-check", action="store_true", dest="ssh_check", help="post_init 检查 SSH 端口")
+    parser.add_argument("--ssh-port", type=int, dest="ssh_port", default=22, help="post_init SSH 端口")
+    parser.add_argument("--init-timeout", type=int, dest="init_timeout", default=3, help="post_init 检查超时")
 
     return parser
 
@@ -212,7 +349,7 @@ def resolve_connection(args, cfg: Dict[str, Any]) -> tuple:
     user = args.user or vc.get("user", "")
     port = args.port or vc.get("port", 443)
 
-    # 密码：命令行 > config.yaml 明文 > .env 环境变量 > password_ref 引用
+    # 密码：v1.3 优先从 secret_manager（加密存储）取 → 命令行 → config.yaml 明文 → .env 环境变量 → password_ref 引用
     pwd = args.pwd or vc.get("password", "")
     if not pwd:
         # 尝试从 .env 文件加载
@@ -220,10 +357,18 @@ def resolve_connection(args, cfg: Dict[str, Any]) -> tuple:
         if env_file.exists():
             from dotenv import load_dotenv
             load_dotenv(env_file)
-        # 检查 password_ref
         ref = vc.get("password_ref", "")
         if ref:
-            pwd = os.environ.get(ref, "")
+            # 优先加密存储
+            try:
+                enc_val = secret_manager.resolve_password(ref)
+                if enc_val:
+                    pwd = enc_val
+                    logger.debug(f"密码从 secret_manager 加载 ({ref})")
+            except Exception as _e:
+                logger.debug(f"secret_manager 读取失败，回退环境变量: {_e}")
+            if not pwd:
+                pwd = os.environ.get(ref, "")
 
     missing = []
     if not host:
@@ -272,7 +417,11 @@ def main():
     }
 
     # --- Dry-Run 模式（不建立 vCenter 连接） ---
-    if args.dry_run:
+    # 不应需 vCenter 的查询类 action 可跳过 dry-run
+    _DRY_SKIP = {"history", "preset", "secret", "rbac", "danger", "approval_policy",
+                  "change_window", "metrics", "anomaly", "forecast",
+                  "ip_pool", "webhook", "audit_report"}
+    if args.dry_run and args.action not in _DRY_SKIP:
         params = {}
         if args.hostname:
             params["hostname"] = args.hostname
@@ -341,6 +490,76 @@ def main():
         return
 
     # ========== 无需 vCenter 连接的操作（提前处理） ==========
+
+    # --- v1.5 Delivery / Post-init（通过独立脚本编排，默认安全） ---
+    if args.action == "delivery":
+        d_action = args.delivery_action or "plan"
+        d_name = args.delivery_name or args.hostname
+        ds_value = args.datastore or args.ds
+        gw_value = args.gateway or args.gw
+        missing = []
+        for key, val in {
+            "--name/--hostname": d_name,
+            "--ip": args.ip,
+            "--owner": args.owner,
+            "--template": args.template,
+            "--dc": args.dc,
+            "--cluster": args.cluster,
+            "--datastore/--ds": ds_value,
+            "--network": args.network,
+            "--gateway/--gw": gw_value,
+        }.items():
+            if not val:
+                missing.append(key)
+        if missing:
+            raise ValueError("delivery 缺少参数: " + ", ".join(missing))
+        dp_args = argparse.Namespace(
+            action=d_action,
+            confirm=args.delivery_confirm,
+            skip_clone=args.skip_clone,
+            name=d_name,
+            vm_name=args.hostname if args.hostname and args.hostname.startswith(str(args.ip)) else None,
+            ip=args.ip,
+            owner=args.owner,
+            env=args.env or "dev",
+            app=args.app or "app",
+            preset=args.preset or "dev-small",
+            template=args.template,
+            dc=args.dc,
+            cluster=args.cluster,
+            datastore=ds_value,
+            network=args.network,
+            gateway=gw_value,
+            mask=args.mask or "255.255.255.0",
+            cpu=str(args.cpu or 2),
+            memory=str(args.memory or 4),
+            disk=str(args.disk or 40),
+        )
+        if d_action == "plan":
+            result = delivery_pipeline.do_plan(dp_args)
+        elif d_action == "execute":
+            result = delivery_pipeline.do_execute(dp_args)
+        else:
+            result = delivery_pipeline.do_verify(dp_args)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "post_init":
+        vm = args.hostname or (f"{args.ip}-{args.delivery_name}" if args.ip and args.delivery_name else None)
+        if not vm or not args.ip:
+            raise ValueError("post_init 必须提供 --hostname 或 --name，并提供 --ip")
+        pi_args = argparse.Namespace(
+            vm_name=vm,
+            ip=args.ip,
+            expected_hostname=args.expected_hostname,
+            ssh_check=args.ssh_check,
+            ssh_user=args.guest_user or "root",
+            ssh_port=args.ssh_port or 22,
+            timeout=args.init_timeout or 3,
+        )
+        result = post_clone_init.run(pi_args)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
 
     # --- Plan: create / list / delete（无需连接） ---
     if args.action == "plan":
@@ -458,11 +677,381 @@ def main():
         print(json.dumps(response, ensure_ascii=False, indent=2))
         return
 
+    # --- v1.0 预设 / 历史 查询（无需连接 vCenter） ---
+    if args.action == "preset":
+        presets = list_presets()
+        response["data"] = presets
+        response["message"] = format_preset_list(presets)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "history":
+        # 查询：--from-vm 看该 VM 最近一次 / 否则最近克隆列表
+        if args.from_vm or args.from_last:
+            info = last_clone_params(args.from_vm)
+            response["data"] = info
+            response["message"] = format_clone_params(info or {})
+        else:
+            recs = list_history(limit=args.top or 10)
+            response["data"] = recs
+            response["message"] = format_history_summary(recs)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    # ============ v1.1 离线 action：预设 CRUD / IP 池 / Webhook / 审计报表 ============
+
+    if args.action == "preset" and args.preset_action and args.preset_action != "list":
+        # 预设写操作
+        if args.preset_action == "save":
+            if not args.preset_name:
+                raise ValueError("--preset-action save 需 --preset-name")
+            params = {}
+            for k_cli, k_dst in [("template","template_name"),("dc","dc_name"),
+                                  ("cluster","cluster_name"),("ds","ds_name"),
+                                  ("network","network_name"),("host_node","host_name"),
+                                  ("cpu","cpus"),("memory","memory_gb"),
+                                  ("disk","disk_gb"),("gw","gateway")]:
+                v = getattr(args, k_cli, None)
+                if v is not None:
+                    params[k_dst] = v
+            data = save_preset(args.preset_name, params,
+                               description=args.preset_desc,
+                               overwrite=args.preset_overwrite)
+            response["data"] = data
+            response["message"] = f"✅ 预设 [{args.preset_name}] 已保存"
+        elif args.preset_action == "save-from-last":
+            if not args.preset_name:
+                raise ValueError("--preset-action save-from-last 需 --preset-name")
+            info = last_clone_params(args.from_vm)
+            if not info:
+                raise ValueError("未找到可使用的历史记录")
+            data = save_from_history(args.preset_name, info,
+                                     description=args.preset_desc,
+                                     overwrite=args.preset_overwrite)
+            response["data"] = data
+            response["message"] = f"✅ 预设 [{args.preset_name}] 已从历史保存"
+        elif args.preset_action == "delete":
+            if not args.preset_name:
+                raise ValueError("--preset-action delete 需 --preset-name")
+            ok = delete_preset(args.preset_name)
+            response["message"] = f"{'✅ 已删除' if ok else '⚠️ 未找到'}: {args.preset_name}"
+        elif args.preset_action == "show":
+            if not args.preset_name:
+                raise ValueError("--preset-action show 需 --preset-name")
+            response["data"] = get_preset(args.preset_name)
+            response["message"] = f"预设 [{args.preset_name}]" if response["data"] else "未找到预设"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "ip_pool":
+        ipa = args.ip_action or "reservations"
+        if ipa == "available":
+            if not args.ip_spec: raise ValueError("--ip-action available 需 --ip-spec")
+            pool = ip_pool.IPPool(args.ip_spec, skip_alive=True)
+            ips = pool.available(limit=args.top or 20)
+            response["data"] = ips
+            response["message"] = f"可用 IP {len(ips)} 个"
+        elif ipa == "allocate":
+            if not args.ip_spec: raise ValueError("--ip-action allocate 需 --ip-spec")
+            pool = ip_pool.IPPool(args.ip_spec, skip_alive=True)
+            recs = pool.allocate(args.count or 1, vm_name_prefix=args.name_prefix or "vm-")
+            response["data"] = recs
+            response["message"] = f"已分配 {len(recs)} 个 IP"
+        elif ipa == "release":
+            if not args.ip_target: raise ValueError("--ip-action release 需 --ip-target")
+            ok = ip_pool.release_ip(args.ip_target)
+            response["message"] = f"{'✅ 已释放' if ok else '⚠️ 未找到'}: {args.ip_target}"
+        elif ipa == "reservations":
+            recs = ip_pool.list_reservations()
+            response["data"] = recs
+            response["message"] = f"共 {len(recs)} 条预留"
+        elif ipa == "cleanup":
+            n = ip_pool.cleanup_expired()
+            response["message"] = f"清理过期预留 {n} 个"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "webhook":
+        wa = args.webhook_action or "list"
+        if wa == "list":
+            whs = webhook_subscriber.list_webhooks()
+            response["data"] = whs
+            response["message"] = webhook_subscriber.format_webhook_list(whs)
+        elif wa == "add":
+            if not (args.webhook_name and args.webhook_url):
+                raise ValueError("--webhook-action add 需 --webhook-name 和 --webhook-url")
+            wh = webhook_subscriber.add_webhook(
+                args.webhook_name, args.webhook_url,
+                secret=args.webhook_secret, topics=args.webhook_topics,
+                mode=args.webhook_mode,
+            )
+            response["data"] = wh
+            response["message"] = f"✅ Webhook [{args.webhook_name}] 已添加"
+        elif wa == "remove":
+            if not args.webhook_id: raise ValueError("--webhook-action remove 需 --webhook-id")
+            ok = webhook_subscriber.remove_webhook(args.webhook_id)
+            response["message"] = f"{'✅ 已删除' if ok else '⚠️ 未找到'}: {args.webhook_id}"
+        elif wa == "toggle":
+            if not args.webhook_id: raise ValueError("--webhook-action toggle 需 --webhook-id")
+            enabled = bool(args.webhook_enable) and not args.webhook_disable
+            ok = webhook_subscriber.toggle_webhook(args.webhook_id, enabled)
+            response["message"] = f"{'✅ 已' + ('启用' if enabled else '禁用') if ok else '⚠️ 未找到'}: {args.webhook_id}"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "audit_report":
+        summary = audit.summarize(since_days=args.report_days or 7)
+        fmt = args.export_format or "html"
+        text = audit.export_report(
+            since_days=args.report_days or 7,
+            fmt=fmt,
+            output=args.output,
+        )
+        response["data"] = summary
+        response["message"] = (
+            f"报表已导出到 {args.output}" if args.output
+            else (text[:500] + "\u2026" if fmt == "html" and len(text) > 500 else text)
+        )
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    # ============ v1.3 安全合规离线 action ============
+
+    if args.action == "secret":
+        sa = args.secret_action or "list"
+        if sa == "list":
+            response["data"] = secret_manager.list_secret_keys()
+            response["message"] = f"共 {len(response['data'])} 个加密存储项"
+        elif sa == "set":
+            if not args.secret_key or not args.secret_value:
+                raise ValueError("--secret-action set 需 --secret-key 和 --secret-value")
+            secret_manager.set_secret(args.secret_key, args.secret_value, description=args.secret_desc)
+            response["message"] = f"✅ 已加密存储: {args.secret_key}"
+        elif sa == "get":
+            if not args.secret_key: raise ValueError("--secret-action get 需 --secret-key")
+            v = secret_manager.get_secret(args.secret_key)
+            response["data"] = {"key": args.secret_key, "found": v is not None,
+                                "value": v if v else None}
+            response["message"] = "⚠️ 明文返回请谨慎使用" if v else "未找到"
+        elif sa == "delete":
+            if not args.secret_key: raise ValueError("--secret-action delete 需 --secret-key")
+            ok = secret_manager.delete_secret(args.secret_key)
+            response["message"] = f"{'✅ 已删除' if ok else '⚠️ 未找到'}: {args.secret_key}"
+        elif sa == "migrate":
+            result = secret_manager.migrate_from_env(dry_run=args.dry_run)
+            response["data"] = result
+            response["message"] = result.get("message", "")
+        elif sa == "rotate":
+            result = secret_manager.rotate_key()
+            response["data"] = result
+            response["message"] = result.get("message", "")
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "rbac":
+        ra = args.rbac_action or "roles"
+        if ra == "roles":
+            response["data"] = role_manager.list_roles()
+            response["message"] = role_manager.format_roles_table()
+        elif ra == "users":
+            response["data"] = role_manager.list_users()
+            response["message"] = role_manager.format_users_table()
+        elif ra == "bind":
+            if not args.rbac_user or not args.rbac_role:
+                raise ValueError("--rbac-action bind 需 --rbac-user 和 --rbac-role")
+            d = role_manager.bind_user(args.rbac_user, args.rbac_role)
+            response["data"] = d
+            response["message"] = f"✅ {args.rbac_user} → {args.rbac_role}"
+        elif ra == "unbind":
+            if not args.rbac_user: raise ValueError("--rbac-action unbind 需 --rbac-user")
+            ok = role_manager.unbind_user(args.rbac_user)
+            response["message"] = f"{'✅ 已解绑' if ok else '⚠️ 未找到'}: {args.rbac_user}"
+        elif ra == "check":
+            if not args.rbac_user or not args.rbac_target_action:
+                raise ValueError("--rbac-action check 需 --rbac-user 和 --rbac-target-action")
+            try:
+                role_manager.check_permission(args.rbac_user, args.rbac_target_action)
+                role = role_manager.get_user_role(args.rbac_user)
+                response["message"] = f"✅ 通过：{args.rbac_user} (role={role}) 可执行 {args.rbac_target_action}"
+            except role_manager.PermissionDenied as e:
+                response["status"] = "denied"
+                response["message"] = str(e)
+        elif ra == "config":
+            response["data"] = role_manager.load_rbac_config()
+            response["message"] = "当前 RBAC 配置"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "danger":
+        da = args.danger_action or "scan"
+        if da == "scan":
+            if not args.danger_target: raise ValueError("--danger-action scan 需 --danger-target")
+            matched = danger_validator.scan_danger(args.danger_target, args.danger_op)
+            response["data"] = matched
+            if not matched:
+                response["message"] = f"✅ [{args.danger_target}] 未命中危险词"
+            else:
+                response["status"] = "warning"
+                response["message"] = (
+                    f"⚠️ [{args.danger_target}] 命中 {len(matched)} 个危险词: "
+                    + ", ".join(m["pattern"] for m in matched)
+                )
+        elif da == "confirm":
+            if not args.danger_target: raise ValueError("--danger-action confirm 需 --danger-target")
+            danger_validator.confirm_danger(args.danger_target, args.danger_op, user=args.acting_user)
+            response["message"] = f"✅ 已确认危险操作: {args.danger_op} → {args.danger_target}"
+        elif da == "patterns":
+            response["data"] = danger_validator.load_danger_config().get("patterns", [])
+            response["message"] = f"共 {len(response['data'])} 个危险词模式"
+        elif da == "config":
+            response["data"] = danger_validator.load_danger_config()
+            response["message"] = "当前危险词配置"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "approval_policy":
+        pa = args.policy_action or "list"
+        if pa == "list":
+            response["data"] = approval_policy.load_policies().get("policies", [])
+            response["message"] = approval_policy.format_policies_table()
+        elif pa == "route":
+            if not args.policy_target_action:
+                raise ValueError("--policy-action route 需 --policy-target-action")
+            result = approval_policy.route_approval(args.policy_target_action, args.policy_target)
+            response["data"] = result
+            response["message"] = json.dumps(result, ensure_ascii=False)
+        elif pa == "config":
+            response["data"] = approval_policy.load_policies()
+            response["message"] = "当前审批策略配置"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "change_window":
+        wa = args.window_action or "status"
+        if wa == "status":
+            response["data"] = change_window.load_window_config()
+            response["message"] = change_window.format_status()
+        elif wa == "check":
+            if not args.window_op: raise ValueError("--window-action check 需 --window-op")
+            allowed, reason, nxt = change_window.is_change_allowed(
+                args.window_op, target=args.hostname or "", user=args.acting_user
+            )
+            response["data"] = {"allowed": allowed, "reason": reason, "next_allowed": nxt}
+            response["message"] = f"{'✅' if allowed else '⛔'} {reason}"
+        elif wa == "config":
+            response["data"] = change_window.load_window_config()
+            response["message"] = "当前变更窗口配置"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    # ============ v1.4 智能化 离线 action（metrics query / anomaly / forecast）============
+
+    if args.action == "metrics" and (args.metrics_action or "query") != "collect":
+        ma = args.metrics_action or "query"
+        if ma == "query":
+            recs = metrics_collector.query_history(
+                metric_type=args.metric_type,
+                target=args.metric_target,
+                since_days=args.metric_days or 7,
+            )
+            response["data"] = recs
+            response["message"] = f"查询到 {len(recs)} 条指标"
+        elif ma == "cleanup":
+            n = metrics_collector.cleanup_old(keep_days=args.metrics_keep_days or 30)
+            response["message"] = f"清理 {n} 个过期文件"
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "anomaly":
+        anomalies = anomaly_detector.detect_all(
+            since_days=args.metric_days or 7,
+            publish_events=True,
+        )
+        response["data"] = anomalies
+        response["message"] = anomaly_detector.format_anomalies(anomalies)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    if args.action == "forecast":
+        results = capacity_forecaster.forecast_all(
+            since_days=args.metric_days or 30,
+            publish_events=True,
+            config={
+                "threshold": args.forecast_threshold or 0.9,
+                "min_samples": 10,
+                "warning_days": 30,
+                "critical_days": 7,
+            },
+        )
+        response["data"] = results
+        response["message"] = capacity_forecaster.format_forecasts(results)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
     # ========== 以下操作需要 vCenter 连接 ==========
 
     try:
         # 解析连接信息
         host, user, pwd, port = resolve_connection(args, cfg)
+
+        # ============ v1.3 四重安全门（RBAC → 变更窗口 → 危险词 → 审批策略）============
+        try:
+            role_manager.check_permission(args.acting_user or "agent", args.action)
+        except role_manager.PermissionDenied as _e:
+            response["status"] = "denied"
+            response["message"] = str(_e)
+            audit.record(args.action, args.hostname or "", "rejected",
+                         operator=args.acting_user or "agent", error=str(_e))
+            print(json.dumps(response, ensure_ascii=False, indent=2))
+            return
+
+        try:
+            change_window.validate_change_window(
+                args.action, target=args.hostname or "", user=args.acting_user or "agent"
+            )
+        except change_window.ChangeWindowBlocked as _e:
+            response["status"] = "blocked"
+            response["message"] = str(_e)
+            audit.record(args.action, args.hostname or "", "rejected",
+                         operator=args.acting_user or "agent", error=str(_e))
+            print(json.dumps(response, ensure_ascii=False, indent=2))
+            return
+
+        if args.hostname:
+            try:
+                if args.confirmed:
+                    danger_validator.confirm_danger(args.hostname, args.action,
+                                                    user=args.acting_user or "agent")
+                danger_validator.validate_danger(
+                    args.hostname, args.action, user=args.acting_user or "agent"
+                )
+            except danger_validator.DangerConfirmRequired as _e:
+                response["status"] = "confirm_required"
+                response["message"] = (
+                    str(_e) + " 请重新执行并传 --confirmed 确认"
+                )
+                audit.record(args.action, args.hostname, "awaiting_confirm",
+                             operator=args.acting_user or "agent",
+                             details={"matched": _e.matched})
+                print(json.dumps(response, ensure_ascii=False, indent=2))
+                return
+
+        try:
+            approval_policy.validate_approval(args.action, target=args.hostname or "")
+        except approval_policy.ApprovalRequired as _e:
+            response["status"] = "approval_required"
+            response["message"] = str(_e)
+            audit.record(args.action, args.hostname or "", "awaiting_approval",
+                         operator=args.acting_user or "agent",
+                         details={"level": _e.level, "approvers": _e.approvers})
+            print(json.dumps(response, ensure_ascii=False, indent=2))
+            return
+
+        # 启动时挂载 Webhook 订阅到事件总线（幂等，只启动一次）
+        try:
+            webhook_subscriber.register_all_to_bus()
+        except Exception as _wh_e:
+            logger.debug(f"webhook 挂载跳过: {_wh_e}")
 
         with VCenterClient(host, user, pwd, port) as si:
             inventory = VCenterInventory(si)
@@ -485,30 +1074,184 @@ def main():
                     audit.record(args.action, args.hostname, "success")
 
             elif args.action == "clone_vm":
-                required = [args.template, args.hostname, args.dc, args.cluster, args.ds, args.network]
+                # v1.0: 支持 --preset / --from-last / --from-vm 参数合并
+                # 合并优先级（高 → 低）：CLI 参数 > history > preset > config.defaults
+                merged: Dict[str, Any] = {}
+
+                # 1) preset
+                if args.preset:
+                    try:
+                        ps = apply_preset(args.preset, user_params=None)
+                        # 换算为源字段名
+                        for k_src, k_dst in {
+                            "template_name": "template", "new_name": "hostname",
+                            "dc_name": "dc", "cluster_name": "cluster",
+                            "ds_name": "ds", "network_name": "network",
+                            "host_name": "host_node", "cpus": "cpu",
+                            "memory_gb": "memory", "disk_gb": "disk",
+                            "ip_address": "ip", "subnet": "mask", "gateway": "gw",
+                        }.items():
+                            if k_src in ps and ps[k_src] is not None:
+                                merged[k_dst] = ps[k_src]
+                        merged["_preset"] = ps.get("_preset")
+                        merged["_preset_desc"] = ps.get("_preset_desc", "")
+                    except ValueError as ve:
+                        raise ValueError(f"预设加载失败: {ve}")
+
+                # 2) history (优先级高于 preset)
+                if args.from_last or args.from_vm:
+                    info = last_clone_params(args.from_vm)
+                    if not info:
+                        raise ValueError(
+                            f"未找到可复用的历史克隆记录 "
+                            f"(--from-vm={args.from_vm or '(无)'})"
+                        )
+                    for k_src, k_dst in {
+                        "template_name": "template", "dc_name": "dc",
+                        "cluster_name": "cluster", "ds_name": "ds",
+                        "network_name": "network", "host_name": "host_node",
+                        "cpus": "cpu", "memory_gb": "memory", "disk_gb": "disk",
+                        "subnet": "mask", "gateway": "gw",
+                    }.items():
+                        v = (info.get("params") or {}).get(k_src)
+                        if v is not None:
+                            merged[k_dst] = v
+                    merged["_history_source"] = info.get("source_task_id")
+
+                # 3) CLI 显式参数 最高优先级
+                cli_overrides = {
+                    "template": args.template, "hostname": args.hostname,
+                    "dc": args.dc, "cluster": args.cluster, "ds": args.ds,
+                    "network": args.network, "host_node": args.host_node,
+                    "cpu": args.cpu, "memory": args.memory, "disk": args.disk,
+                    "ip": args.ip, "mask": args.mask, "gw": args.gw,
+                }
+                for k, v in cli_overrides.items():
+                    if v is not None:
+                        merged[k] = v
+
+                required = [merged.get("template"), merged.get("hostname"), merged.get("dc"),
+                            merged.get("cluster"), merged.get("ds"), merged.get("network")]
                 if not all(required):
-                    raise ValueError("克隆缺少必填参数 (template/hostname/dc/cluster/ds/network)")
+                    missing = [n for n,v in zip(
+                        ["template","hostname","dc","cluster","ds","network"], required) if not v]
+                    raise ValueError(
+                        f"克隆缺少必填参数: {','.join(missing)} "
+                        f"(可通过 --preset / --from-last / --from-vm 补齐)"
+                    )
+
+                # 进度接口：默认 stdout
+                rpt = ProgressReporter(
+                    op_name=f"克隆 {merged['hostname']}",
+                    sinks=[stdout_sink],
+                )
 
                 msg = executor.clone_vm_advanced(
-                    template_name=args.template,
-                    new_name=args.hostname,
-                    dc_name=args.dc,
-                    cluster_name=args.cluster,
-                    ds_name=args.ds,
-                    network_name=args.network,
-                    host_name=args.host_node,
-                    cpus=args.cpu,
-                    memory_gb=args.memory,
-                    disk_gb=args.disk,
-                    ip_address=args.ip,
-                    subnet=args.mask,
-                    gateway=args.gw
+                    template_name=merged["template"],
+                    new_name=merged["hostname"],
+                    dc_name=merged["dc"],
+                    cluster_name=merged["cluster"],
+                    ds_name=merged["ds"],
+                    network_name=merged["network"],
+                    host_name=merged.get("host_node"),
+                    cpus=merged.get("cpu"),
+                    memory_gb=merged.get("memory"),
+                    disk_gb=merged.get("disk"),
+                    ip_address=merged.get("ip"),
+                    subnet=merged.get("mask") or "255.255.255.0",
+                    gateway=merged.get("gw"),
+                    wait_tools=not args.no_wait_tools,
+                    tools_timeout=args.tools_timeout or 300,
+                    on_progress=rpt.on_update,
                 )
+                rpt.on_done({"state": "success", "progress": 100})
                 response["message"] = msg
-                audit.record(args.action, args.hostname, "success", details={
-                    "template": args.template, "cluster": args.cluster,
-                    "ds": args.ds, "ip": args.ip
+                response["data"] = {
+                    "merged_params": merged,
+                    "used_preset": merged.get("_preset"),
+                    "used_history": merged.get("_history_source"),
+                }
+                audit.record(args.action, merged["hostname"], "success", details={
+                    "template": merged.get("template"), "cluster": merged.get("cluster"),
+                    "ds": merged.get("ds"), "ip": merged.get("ip"),
+                    "preset": merged.get("_preset"),
+                    "history": merged.get("_history_source"),
                 })
+
+            elif args.action == "metrics":
+                # v1.4: 采集一轮指标到 data/metrics/
+                out = metrics_collector.collect_from_vcenter(executor)
+                response["data"] = out
+                response["message"] = f"采集 {len(out)} 条指标已落盘"
+                audit.record(args.action, "(metrics)", "success",
+                             operator=args.acting_user or "agent",
+                             details={"count": len(out)})
+
+            elif args.action == "recommend":
+                # v1.4: 资源推荐
+                cpus = args.cpu or 2
+                memory = args.memory or 4
+                disk = args.disk or 40
+                if args.preset:
+                    try:
+                        ps = apply_preset(args.preset, user_params=None)
+                        cpus = cpus if args.cpu else (ps.get("cpus") or cpus)
+                        memory = memory if args.memory else (ps.get("memory_gb") or memory)
+                        disk = disk if args.disk else (ps.get("disk_gb") or disk)
+                    except Exception:
+                        pass
+                recs = recommender.recommend(
+                    executor=executor,
+                    cpus=cpus, memory_gb=memory, disk_gb=disk,
+                    name_prefix=args.recommend_prefix or "",
+                    target_count=args.recommend_count or 1,
+                    top_n=args.recommend_top or 3,
+                )
+                response["data"] = recs
+                response["message"] = recommender.format_recommendations(recs)
+                audit.record(args.action, f"top{args.recommend_top}", "success",
+                             operator=args.acting_user or "agent",
+                             details={"cpus": cpus, "memory": memory, "disk": disk,
+                                      "count": args.recommend_count})
+
+            elif args.action == "batch_clone":
+                # v1.1: 批量克隆
+                if not args.count or args.count <= 0:
+                    raise ValueError("--count 必填且 > 0")
+                required = [args.template, args.dc, args.cluster, args.ds, args.network]
+                if not all(required):
+                    raise ValueError("批量克隆需 --template/--dc/--cluster/--ds/--network")
+                # 应用 preset
+                cpus, memory, disk, gw = args.cpu, args.memory, args.disk, args.gw
+                if args.preset:
+                    ps = apply_preset(args.preset, user_params=None)
+                    cpus = cpus or ps.get("cpus")
+                    memory = memory or ps.get("memory_gb")
+                    disk = disk or ps.get("disk_gb")
+                    gw = gw or ps.get("gateway")
+
+                specs = batch_clone_mod.generate_clone_specs(
+                    template_name=args.template, dc_name=args.dc,
+                    cluster_name=args.cluster, ds_name=args.ds,
+                    network_name=args.network, host_name=args.host_node,
+                    cpus=cpus, memory_gb=memory, disk_gb=disk,
+                    subnet=args.mask or "255.255.255.0", gateway=gw,
+                    count=args.count, name_prefix=args.name_prefix or "vm-",
+                    name_start=args.name_start or 1,
+                    ip_pool_spec=args.ip_pool_spec,
+                )
+                summary = batch_clone_mod.batch_clone(
+                    executor, specs,
+                    max_workers=args.workers or 3,
+                    wait_tools=not args.no_wait_tools,
+                    tools_timeout=args.tools_timeout or 300,
+                )
+                response["data"] = summary
+                response["message"] = batch_clone_mod.format_batch_summary(summary)
+                audit.record(args.action, f"{args.name_prefix}*({args.count})",
+                             "success" if summary["failed"] == 0 else "warning",
+                             details={"total": summary["total"], "success": summary["success"],
+                                      "failed": summary["failed"], "preset": args.preset})
 
             elif args.action == "power_vm":
                 if not all([args.hostname, args.state]):

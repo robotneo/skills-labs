@@ -97,17 +97,41 @@ def cleanup_expired(executor) -> List[Dict]:
     清理所有已过期的 VM。
     executor 是 VCenterExecutor 实例。
     返回清理结果列表。
+    v1.2: 过期事件 + 成功/失败清理事件发布到 event_bus。
     """
+    try:
+        from event_bus import publish as _bus_publish
+    except ImportError:
+        try:
+            from .event_bus import publish as _bus_publish
+        except ImportError:
+            _bus_publish = lambda *a, **k: None
+
     expired = get_expired()
+    # 过期告知
+    for vm_name in expired:
+        try:
+            _bus_publish("ttl.expired", {"vm_name": vm_name})
+        except Exception:
+            pass
+
     results = []
     for vm_name in expired:
         try:
             msg = executor.remove_vm(vm_name)
             results.append({"vm": vm_name, "status": "deleted", "message": msg})
-            # 清理 TTL 记录
             cancel_ttl(vm_name)
+            try:
+                _bus_publish("ttl.cleaned", {"vm_name": vm_name, "status": "deleted"})
+            except Exception:
+                pass
             logger.info(f"TTL cleanup: [{vm_name}] deleted")
         except Exception as e:
             results.append({"vm": vm_name, "status": "failed", "message": str(e)})
+            try:
+                _bus_publish("ttl.cleaned", {"vm_name": vm_name, "status": "failed",
+                                             "error": str(e)})
+            except Exception:
+                pass
             logger.error(f"TTL cleanup failed: [{vm_name}]: {e}")
     return results

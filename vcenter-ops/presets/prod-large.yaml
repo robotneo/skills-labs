@@ -1,0 +1,14 @@
+# vCenter 参数预设包：生产-大规格
+name: prod-large
+description: 生产环境大规格（8C/16G/200G），适合核心业务/数据库主节点
+op: clone_vm
+params:
+  cpus: 8
+  memory_gb: 16
+  disk_gb: 200
+defaults:
+  subnet: 255.255.255.0
+tags:
+  - prod
+  - large
+require_confirm: true   # 大规格必须二次确认

@@ -1,16 +1,34 @@
-#!/usr/bin/env python3
 """
 Module: scripts.executor
 Description: vCenter 动作执行器。支持克隆、电源管理、删除、磁盘扩容。
 Author: xiaofei
 Date: 2026-03-19
-Updated: 2026-03-20
+Updated: 2026-05-21  (v0.9: 接入 TaskManager / LockManager / RollbackManager)
 """
 
 import time
 import logging
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from pyVmomi import vim, vmodl
+
+try:
+    from .task_manager import TaskManager, TaskState
+    from .lock_manager import VMLock, LockBusy
+    from .rollback_manager import RollbackContext, make_pre_delete_snapshot, cleanup_partial_clone
+    from . import cache_manager as cache_mgr
+    from .tools_checker import wait_for_tools_ready, get_tools_status, assert_tools_ready
+    from .error_dictionary import format_error_oneline, format_error_detail
+    from .quota_enforcer import enforce_clone_quota, QuotaExceeded
+    from .event_bus import publish as bus_publish, Topics
+except ImportError:
+    from task_manager import TaskManager, TaskState
+    from lock_manager import VMLock, LockBusy
+    from rollback_manager import RollbackContext, make_pre_delete_snapshot, cleanup_partial_clone
+    import cache_manager as cache_mgr
+    from tools_checker import wait_for_tools_ready, get_tools_status, assert_tools_ready
+    from error_dictionary import format_error_oneline, format_error_detail
+    from quota_enforcer import enforce_clone_quota, QuotaExceeded
+    from event_bus import publish as bus_publish, Topics
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +39,7 @@ class VCenterExecutor:
     def __init__(self, si: vim.ServiceInstance):
         self.si = si
         self.content = si.RetrieveContent()
+        self.task_manager = TaskManager(si)
 
     def _get_obj(self, vim_type: Any, name: str) -> Optional[Any]:
         """按名称检索 Managed Object。"""
@@ -35,23 +54,28 @@ class VCenterExecutor:
         finally:
             container.Destroy()
 
-    def _wait_for_task(self, task: vim.Task, task_name: str, timeout: int = 600) -> Any:
-        """阻塞监控任务进度，支持超时控制。"""
-        logger.info(f"正在执行任务: {task_name}...")
-        elapsed = 0
-        while task.info.state not in [vim.TaskInfo.State.success, vim.TaskInfo.State.error]:
-            time.sleep(3)
-            elapsed += 3
-            if elapsed >= timeout:
-                raise RuntimeError(f"任务 [{task_name}] 超时（{timeout}s）")
-        
-        if task.info.state == vim.TaskInfo.State.error:
-            error_msg = task.info.error.msg
-            logger.error(f"任务 [{task_name}] 失败: {error_msg}")
-            raise RuntimeError(f"vCenter 操作失败: {error_msg}")
-        
-        logger.info(f"任务 [{task_name}] 完成。")
-        return task.info.result
+    def _wait_for_task(
+        self,
+        task: vim.Task,
+        task_name: str,
+        timeout: int = 600,
+        on_progress: Optional[Callable[[dict], None]] = None,
+        meta: Optional[dict] = None,
+    ) -> Any:
+        """
+        底层任务等待。已改造为 TaskManager 统一调度，保留反向兼容。
+        返回值：vim 结果对象（从 TaskManager record 中不可反序列化，这里直接取 task.info.result）
+        仅同进程有效。
+        :param meta: 附加到 task record 的元信息（用于历史复用）
+        """
+        task_id = self.task_manager.submit(task, task_name, meta=meta)
+        record = self.task_manager.wait(
+            task_id,
+            timeout=timeout,
+            on_progress=on_progress,
+        )
+        # 返回原始 vim 结果（使后续代码可以继续操作 VM 对象）
+        return task.info.result if task.info.state == vim.TaskInfo.State.success else record
 
     # ========================
     # 克隆
@@ -70,9 +94,16 @@ class VCenterExecutor:
                           disk_gb: Optional[int] = None,
                           ip_address: Optional[str] = None,
                           subnet: str = "255.255.255.0",
-                          gateway: Optional[str] = None) -> str:
+                          gateway: Optional[str] = None,
+                          wait_tools: bool = True,
+                          tools_timeout: int = 300,
+                          on_progress: Optional[Callable[[dict], None]] = None) -> str:
         """
         全功能克隆函数。
+        v1.0: 接入 tools_checker + meta 落盘（供 history_manager 复用）+ 错误友好化。
+        :param wait_tools: 克隆且开机后是否等待 VMware Tools 就绪
+        :param tools_timeout: 等待 Tools 超时秒数
+        :param on_progress: 任务进度回调
         """
         # 1. 资源定位
         template = self._get_obj(vim.VirtualMachine, template_name)
@@ -84,6 +115,19 @@ class VCenterExecutor:
         if not all([template, cluster, ds, dc, network]):
             missing = [k for k, v in {"template": template, "cluster": cluster, "ds": ds, "dc": dc, "network": network}.items() if not v]
             raise ValueError(f"资源缺失: {', '.join(missing)}")
+
+        # 1.5 配额硬限制检查（越限直接拒绝）
+        try:
+            enforce_clone_quota(
+                executor=self,
+                cluster_name=cluster_name,
+                ds_name=ds_name,
+                cpus=cpus,
+                memory_gb=memory_gb,
+                disk_gb=disk_gb,
+            )
+        except QuotaExceeded:
+            raise
 
         # 2. 宿主机选择
         target_host = None
@@ -164,17 +208,90 @@ class VCenterExecutor:
         )
 
         try:
-            task = template.Clone(folder=dc.vmFolder, name=new_name, spec=clone_spec)
-            new_vm = self._wait_for_task(task, f"Clone-{new_name}")
+            with RollbackContext(f"clone_vm:{new_name}") as rb:
+                task = template.Clone(folder=dc.vmFolder, name=new_name, spec=clone_spec)
+                clone_meta = {
+                    "op": "clone_vm",
+                    "template_name": template_name,
+                    "new_name": new_name,
+                    "dc_name": dc_name,
+                    "cluster_name": cluster_name,
+                    "host_name": host_name,
+                    "ds_name": ds_name,
+                    "network_name": network_name,
+                    "cpus": cpus,
+                    "memory_gb": memory_gb,
+                    "disk_gb": disk_gb,
+                    "ip_address": ip_address,
+                    "subnet": subnet,
+                    "gateway": gateway,
+                }
+                new_vm = self._wait_for_task(
+                    task,
+                    f"Clone-{new_name}",
+                    on_progress=on_progress,
+                    meta=clone_meta,
+                )
 
-            # 6. 磁盘扩容
-            if disk_gb and isinstance(new_vm, vim.VirtualMachine):
-                self._resize_vm_disk(new_vm, disk_gb)
+                # 克隆一旦生成半成品，后续步骤失败需要能清理
+                rb.register(
+                    "cleanup_partial_clone",
+                    cleanup_partial_clone(self, new_name),
+                    description=f"清理半成品 VM {new_name}",
+                )
 
-            return f"虚拟机 {new_name} 部署成功。规格: {cpus or '默认'}C/{memory_gb or '默认'}GB。位置: {host_name or '集群自动调度'}"
+                # 6. 磁盘扩容
+                if disk_gb and isinstance(new_vm, vim.VirtualMachine):
+                    self._resize_vm_disk(new_vm, disk_gb)
+
+                rb.commit()  # 到这里表示克隆主流程成功，不再回滚
+
+            # 克隆成功后失效缓存
+            try:
+                cache_mgr.invalidate_after_action("clone_vm", reason=f"cloned {new_name}")
+            except Exception:
+                pass
+
+            # 发布事件（供 webhook 等下游订阅）
+            try:
+                bus_publish(Topics.VM_CREATED, {
+                    "vm_name": new_name, "template": template_name,
+                    "cluster": cluster_name, "ds": ds_name,
+                    "ip": ip_address, "cpus": cpus, "memory_gb": memory_gb,
+                })
+            except Exception:
+                pass
+
+            # 7. 等待 VMware Tools 就绪（仅开机克隆且调用者不禁用）
+            tools_msg = ""
+            if wait_tools and ip_address and isinstance(new_vm, vim.VirtualMachine):
+                try:
+                    info = wait_for_tools_ready(
+                        new_vm, timeout=tools_timeout, interval=5, require_ip=True,
+                        on_progress=lambda i: logger.debug(
+                            f"Tools 轮询: {i.get('status')} ip={i.get('ip') or '-'}"
+                        ),
+                    )
+                    tools_msg = f" | Tools 就绪 ({info['status']}, IP={info.get('ip') or '-'})"
+                except TimeoutError as te:
+                    logger.warning(str(te))
+                    tools_msg = f" | ⚠️ Tools 未在 {tools_timeout}s 内就绪。VM 已创建，请手动检查"
+
+            return (
+                f"虚拟机 {new_name} 部署成功。规格: "
+                f"{cpus or '默认'}C/{memory_gb or '默认'}GB。位置: "
+                f"{host_name or '集群自动调度'}{tools_msg}"
+            )
 
         except Exception as e:
-            logger.error(f"克隆失败: {e}")
+            logger.error(format_error_oneline(e, op_name=f"克隆 {new_name}"))
+            try:
+                bus_publish(Topics.CLONE_FAILED, {
+                    "vm_name": new_name, "template": template_name,
+                    "error": str(e), "error_type": type(e).__name__,
+                })
+            except Exception:
+                pass
             raise
 
     def rename_vm(self, vm_name: str, new_name: str) -> str:
@@ -255,6 +372,14 @@ class VCenterExecutor:
             return f"虚拟机 [{vm_name}] 未指定任何调整参数"
 
         self._wait_for_task(vm.ReconfigVM_Task(spec=spec), f"Reconfigure-{vm_name}")
+        # v1.2: 运行期事件
+        try:
+            bus_publish(Topics.VM_RECONFIGURED, {
+                "vm_name": vm_name, "changes": changes,
+                "cpus": cpus, "memory_gb": memory_gb, "disk_gb": disk_gb,
+            })
+        except Exception:
+            pass
         return f"虚拟机 [{vm_name}] 配置变更成功: {', '.join(changes)}"
 
     # ========================
@@ -265,27 +390,41 @@ class VCenterExecutor:
         """
         虚拟机电源管理。
         :param state: on / off / reset
+        v0.9: 接入 VMLock + 缓存失效。
         """
-        vm = self._get_obj(vim.VirtualMachine, vm_name)
-        if not vm:
-            raise ValueError(f"虚拟机 [{vm_name}] 不存在")
+        with VMLock(vm_name, f"power_{state}", ttl=180):
+            vm = self._get_obj(vim.VirtualMachine, vm_name)
+            if not vm:
+                raise ValueError(f"虚拟机 [{vm_name}] 不存在")
 
-        current = str(vm.runtime.powerState)
-        logger.info(f"VM [{vm_name}] 当前状态: {current}, 目标: {state}")
+            current = str(vm.runtime.powerState)
+            logger.info(f"VM [{vm_name}] 当前状态: {current}, 目标: {state}")
 
-        task = None
-        if state == "on" and current != "poweredOn":
-            task = vm.PowerOnVM_Task()
-        elif state == "off" and current == "poweredOn":
-            task = vm.PowerOffVM_Task()
-        elif state == "reset" and current == "poweredOn":
-            task = vm.ResetVM_Task()
-        else:
-            return f"虚拟机 [{vm_name}] 当前已为 {current}，无需操作"
+            task = None
+            if state == "on" and current != "poweredOn":
+                task = vm.PowerOnVM_Task()
+            elif state == "off" and current == "poweredOn":
+                task = vm.PowerOffVM_Task()
+            elif state == "reset" and current == "poweredOn":
+                task = vm.ResetVM_Task()
+            else:
+                return f"虚拟机 [{vm_name}] 当前已为 {current}，无需操作"
 
-        if task:
-            self._wait_for_task(task, f"Power-{state}-{vm_name}")
-        return f"虚拟机 [{vm_name}] 电源操作 [{state}] 执行成功"
+            if task:
+                self._wait_for_task(task, f"Power-{state}-{vm_name}")
+            try:
+                cache_mgr.invalidate_after_action("power_vm", reason=f"{state} {vm_name}")
+            except Exception:
+                pass
+            # v1.2: 发布运行期事件
+            try:
+                topic = Topics.VM_POWER_ON if state == "on" else (
+                    Topics.VM_POWER_OFF if state == "off" else "vm.power.reset")
+                bus_publish(topic, {"vm_name": vm_name, "state": state,
+                                    "previous": current})
+            except Exception:
+                pass
+            return f"虚拟机 [{vm_name}] 电源操作 [{state}] 执行成功"
 
     # ========================
     # 删除
@@ -351,9 +490,47 @@ class VCenterExecutor:
         开机状态自动关机后再删除。
         
         安全限制：必须指定精确的虚拟机名称，全量/批量/通配符删除被禁止。
+        v0.9: 接入 VMLock + 自动删除前快照 + 缓存失效。
         """
         # 安全校验：删除前强制校验目标
         self._validate_delete_target(vm_name)
+
+        with VMLock(vm_name, "delete_vm", ttl=900):
+            # 自动删除前快照（可通过环境变量 VC_SKIP_PRE_DELETE_SNAPSHOT=1 跳过）
+            import os as _os
+            snap_info = None
+            if _os.environ.get("VC_SKIP_PRE_DELETE_SNAPSHOT") != "1":
+                vm_check = self._get_obj(vim.VirtualMachine, vm_name)
+                if vm_check:
+                    try:
+                        snap_info = make_pre_delete_snapshot(self, vm_name)
+                    except Exception as e:
+                        logger.warning(f"删除前快照创建失败，继续执行删除: {e}")
+
+            try:
+                result = self._remove_vm_impl(vm_name)
+                # 失效相关缓存
+                try:
+                    cache_mgr.invalidate_after_action("delete_vm", reason=f"deleted {vm_name}")
+                except Exception:
+                    pass
+                # v1.2: 发布删除事件
+                try:
+                    bus_publish(Topics.VM_DELETED, {
+                        "vm_name": vm_name,
+                        "pre_delete_snapshot": (snap_info or {}).get("snapshot_name"),
+                    })
+                except Exception:
+                    pass
+                if snap_info and snap_info.get("snapshot_name"):
+                    result += f" | 删除前快照: {snap_info['snapshot_name']}"
+                return result
+            except Exception:
+                logger.error(f"删除失败，保留预生成快照供恢复: {snap_info}")
+                raise
+
+    def _remove_vm_impl(self, vm_name: str) -> str:
+        """原始删除实现，供 remove_vm 调用。"""
 
         vm = self._get_obj(vim.VirtualMachine, vm_name)
         if not vm:
@@ -439,7 +616,8 @@ class VCenterExecutor:
             raise ValueError(f"虚拟机 [{vm_name}] 不存在")
 
         if not vm.guest or str(vm.guest.toolsStatus) not in ("toolsOk", "toolsOld"):
-            raise ValueError(f"虚拟机 [{vm_name}] VMware Tools 未运行，无法执行 Guest 操作")
+            # 使用友好错误提示（含修复建议）
+            assert_tools_ready(vm, op_name=f"Guest 执行")
 
         creds = vim.vm.guest.NamePasswordAuthentication(username=username, password=password)
 
@@ -519,6 +697,12 @@ class VCenterExecutor:
         logger.info(f"正在迁移 [{vm_name}] -> [{target_host}]...")
         task = vm.Migrate(migrateSpec=spec)
         self._wait_for_task(task, f"Migrate-{vm_name}-to-{target_host}")
+        # v1.2: 发布迁移事件
+        try:
+            bus_publish("vm.migrated", {"vm_name": vm_name, "target_host": target_host,
+                                          "priority": priority})
+        except Exception:
+            pass
         return f"虚拟机 [{vm_name}] 已迁移到 [{target_host}]"
 
     # ========================

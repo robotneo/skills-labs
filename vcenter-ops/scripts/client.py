@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 """
 Module: scripts.client
 Description: vCenter API 连接客户端封装，支持上下文管理与会话状态检查。
 Author: xiaofei
 Date: 2026-03-19
+Updated: 2026-05-21  (v0.9: 接入 retry_policy，连接/会话检测可重试)
 """
 
 import ssl
@@ -11,6 +11,11 @@ import logging
 from typing import Optional, Any
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim, vmodl
+
+try:
+    from .retry_policy import retry, ErrorCategory, classify_error, format_friendly_error
+except ImportError:  # 直接以脚本方式运行时的兼容
+    from retry_policy import retry, ErrorCategory, classify_error, format_friendly_error
 
 # 设置模块级日志，方便外部配置
 logger = logging.getLogger(__name__)
@@ -62,10 +67,23 @@ class VCenterClient:
         except (vmodl.RuntimeFault, Exception):
             return False
 
+    @retry(max_attempts=3, backoff=(1, 3, 9), jitter=0.3)
+    def _do_connect(self) -> vim.ServiceInstance:
+        """实际执行 SmartConnect 的底层方法，带重试。"""
+        return SmartConnect(
+            host=self.host,
+            user=self.user,
+            pwd=self.pwd,
+            port=self.port,
+            sslContext=self._ssl_context,
+            connectionPoolTimeout=self.timeout,
+        )
+
     def connect(self) -> vim.ServiceInstance:
         """
         建立 vCenter 连接。如果已存在有效连接则直接返回。
-        
+        网络/超时错误会自动重试（指数退避），认证/证书等不可恢复错误立即抛出。
+
         :return: pyVmomi ServiceInstance 对象
         :raises ConnectionError: 认证失败或网络无法到达时抛出
         """
@@ -75,27 +93,17 @@ class VCenterClient:
 
         try:
             logger.info(f"正在尝试连接 vCenter: {self.host} (User: {self.user})...")
-            
-            # SmartConnect 是连接入口
-            self.si = SmartConnect(
-                host=self.host,
-                user=self.user,
-                pwd=self.pwd,
-                port=self.port,
-                sslContext=self._ssl_context,
-                connectionPoolTimeout=self.timeout
-            )
-            
+            self.si = self._do_connect()
             logger.info(f"vCenter [{self.host}] 连接建立成功。")
             return self.si
-
         except vim.fault.InvalidLogin:
             logger.error(f"vCenter 连接失败: 用户名或密码错误 (Host: {self.host})")
             raise ConnectionError("vSphere 认证失败：请检查凭据")
         except Exception as e:
-            logger.error(f"vCenter 系统错误: {str(e)}")
-            # 将原始异常包装，方便上层业务处理
-            raise ConnectionError(f"无法建立 vCenter 通信: {e}")
+            category = classify_error(e)
+            friendly = format_friendly_error(e)
+            logger.error(f"vCenter 连接失败 [{category.value}]: {friendly}")
+            raise ConnectionError(friendly) from e
 
     def disconnect(self) -> None:
         """

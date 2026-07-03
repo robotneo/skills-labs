@@ -1,0 +1,16 @@
+# vCenter 参数预设包：开发-小规格
+# 使用：克隆 / 调整 时引用 @dev-small 即可一次性应用
+name: dev-small
+description: 开发环境标配（2C/4G/40G），适合 Web/微服务/调试节点
+op: clone_vm
+params:
+  cpus: 2
+  memory_gb: 4
+  disk_gb: 40
+  # template_name / dc_name / cluster_name / ds_name / network_name 不预设
+  # → 由用户在调用时指定，避免环境绑死
+defaults:
+  subnet: 255.255.255.0
+tags:
+  - dev
+  - small

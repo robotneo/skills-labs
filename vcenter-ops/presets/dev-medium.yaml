@@ -1,0 +1,13 @@
+# vCenter 参数预设包：开发-中规格
+name: dev-medium
+description: 开发环境中等规格（4C/8G/80G），适合数据库/中间件测试
+op: clone_vm
+params:
+  cpus: 4
+  memory_gb: 8
+  disk_gb: 80
+defaults:
+  subnet: 255.255.255.0
+tags:
+  - dev
+  - medium

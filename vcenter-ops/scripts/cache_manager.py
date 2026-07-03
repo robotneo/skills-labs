@@ -49,8 +49,20 @@ CACHE_FILE = CACHE_DIR / "vc_session_cache.json"
 META_FILE = CACHE_DIR / "vc_session_meta.json"
 LOG_FILE = SKILL_DIR / "logs" / "vc_cache.log"
 
-# 缓存有效期（秒），0 = 不自动过期，需手动刷新
-CACHE_TTL = 0
+# 缓存有效期（秒），0 = 不自动过期；默认 300s（5 分钟）
+CACHE_TTL = int(os.environ.get("VC_CACHE_TTL", "300"))
+
+# 受写操作影响的 section：可以被针对性失效
+SECTION_INVALIDATION_MAP = {
+    "clone_vm": ["vms", "hosts", "datastores"],
+    "delete_vm": ["vms", "hosts", "datastores"],
+    "power_vm": ["vms"],
+    "reconfigure": ["vms"],
+    "migrate": ["vms", "hosts"],
+    "snapshot": ["vms"],
+    "template": ["templates", "vms"],
+    "rename": ["vms"],
+}
 
 logger = logging.getLogger("cache_manager")
 
@@ -119,6 +131,46 @@ def is_cache_valid() -> bool:
         mtime = os.path.getmtime(CACHE_FILE)
         return (time.time() - mtime) < CACHE_TTL
     return True  # TTL=0 时不自动过期
+
+
+def cache_age_seconds() -> Optional[float]:
+    """返回缓存年龄（秒），不存在返回 None。"""
+    if not CACHE_FILE.exists():
+        return None
+    return time.time() - os.path.getmtime(CACHE_FILE)
+
+
+def invalidate_cache(sections: Optional[list] = None, reason: str = "") -> Dict[str, Any]:
+    """
+    使缓存失效。
+    设计简化：当前不支持部分 section 失效（未拆文件），统一删除主缓存，下次读取自动重新拉取。
+    后续如果拆分 section 文件可以升级为精细失效。
+    """
+    info = {"removed": False, "reason": reason, "sections": sections or ["*"]}
+    if CACHE_FILE.exists():
+        try:
+            CACHE_FILE.unlink()
+            info["removed"] = True
+        except Exception as e:
+            logger.warning(f"删除缓存失败: {e}")
+    if META_FILE.exists():
+        try:
+            # 保留 meta，仅标记失效
+            meta = load_meta() or {}
+            meta["invalidated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            meta["invalidated_reason"] = reason
+            meta["invalidated_sections"] = info["sections"]
+            META_FILE.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+        except Exception:
+            pass
+    logger.info(f"🧹 缓存已失效: sections={info['sections']} reason={reason}")
+    return info
+
+
+def invalidate_after_action(action: str, reason: str = "") -> Dict[str, Any]:
+    """根据动作类型失效相关 section。供 executor 写操作后统一调用。"""
+    sections = SECTION_INVALIDATION_MAP.get(action, ["*"])
+    return invalidate_cache(sections=sections, reason=reason or f"action:{action}")
 
 
 # ============================================================
