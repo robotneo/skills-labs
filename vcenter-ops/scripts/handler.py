@@ -1,18 +1,24 @@
 """
 Module: scripts.handler
-Description: vCenter Ops 技能统一入口分发器。
-支持从 config.yaml 自动读取连接信息，也可通过命令行参数覆盖。
-Author: xiaofei
-Date: 2026-03-19
-Updated: 2026-04-08
+Description: vCenter Ops Skill entry-point dispatcher.
+
+职责
+----
+- 组装 CLI 参数（委托给 :mod:`scripts.cli.arguments`）。
+- 加载并解析 vCenter 连接信息（委托给 :mod:`scripts.config_loader`）。
+- 根据 ``--action`` 分发到相应处理逻辑，落盘审计并输出统一 JSON 信封。
+
+CLI 契约
+--------
+- ``python3 scripts/handler.py --help`` 中 22 个 action 与参数名保持稳定。
+- 输出结构默认 ``{status, action, data, message}``，Dry-Run 特例为
+  ``{status, action, params, message}``（由 :class:`Response` 保证）。
 """
 
 import sys
 import os
 import json
-import argparse
 import logging
-from pathlib import Path
 from typing import Dict, Any
 
 # 将项目根目录添加到 sys.path
@@ -36,270 +42,22 @@ from scripts import ip_pool
 from scripts import secret_manager
 from scripts import danger_validator
 
-# 技能根目录（SKILL.md 所在目录）
-SKILL_DIR = Path(__file__).resolve().parent.parent
-CONFIG_FILE = SKILL_DIR / "config.yaml"
+# 新的公共基础设施
+from scripts.cli.arguments import build_parser
+from scripts.cli.dry_run import build_dry_run_params, DRY_RUN_SKIP_ACTIONS
+from scripts.cli.response import Response, Status
+from scripts.config_loader import load_config, save_config, resolve_connection
+from scripts.logging_setup import configure_logging
+from scripts.paths import SKILL_DIR, CONFIG_FILE  # 兼容旧引用
 
-# 日志输出至 stderr，stdout 只输出干净 JSON
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stderr
-)
+# 日志统一走 stderr，stdout 只输出干净 JSON。
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
-def load_config() -> Dict[str, Any]:
-    """
-    从 config.yaml 读取 vCenter 连接信息与环境默认值。
-    config.yaml 不存在或格式异常时返回空 dict。
-    """
-    if not CONFIG_FILE.exists():
-        logger.warning(f"配置文件不存在: {CONFIG_FILE}")
-        return {}
-
-    try:
-        import yaml
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            cfg = yaml.safe_load(f) or {}
-        logger.info(f"已加载配置文件: {CONFIG_FILE}")
-        return cfg
-    except ImportError:
-        logger.warning("缺少 PyYAML 依赖，无法读取 config.yaml，请执行: pip install pyyaml")
-        return {}
-    except Exception as e:
-        logger.warning(f"读取 config.yaml 失败: {e}")
-        return {}
-
-
-def save_config(cfg: Dict[str, Any]) -> bool:
-    """
-    将配置写回 config.yaml。
-    """
-    try:
-        import yaml
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
-        logger.info(f"配置已保存到: {CONFIG_FILE}")
-        return True
-    except Exception as e:
-        logger.error(f"保存 config.yaml 失败: {e}")
-        return False
-
-
-def create_arg_parser() -> argparse.ArgumentParser:
-    """
-    命令行参数解析器。
-    --host / --user / --pwd 改为可选，未提供时自动从 config.yaml 读取。
-    """
-    parser = argparse.ArgumentParser(description="vCenter Ops Handler")
-
-    # --- 连接参数（可选，降级读 config.yaml） ---
-    parser.add_argument("--host", help="vCenter 主机地址（可选，默认读 config.yaml）")
-    parser.add_argument("--user", help="用户名（可选，默认读 config.yaml）")
-    parser.add_argument("--pwd", help="密码（可选，默认读 config.yaml）")
-    parser.add_argument("--port", type=int, help="端口（可选，默认读 config.yaml）")
-
-    # --- 动作控制 ---
-    parser.add_argument("--action",
-                        choices=[
-                            "list_all", "get_vm", "clone_vm", "delete_vm", "power_vm",
-                            "snapshot", "reconfigure",
-                            "guest_exec", "migrate", "plan", "ttl", "datastore",
-                            "template", "batch", "events", "quota", "export",
-                            "history", "preset",
-                            "ip_pool", "audit_report",
-                            "secret", "danger",
-                        ],
-                        help="执行的操作类型（--audit-query 时可选）")
-
-    # --- 核心业务参数 ---
-    parser.add_argument("--hostname", help="虚拟机名称")
-    parser.add_argument("--template", help="克隆源模板名称")
-    parser.add_argument("--dc", help="数据中心名称")
-    parser.add_argument("--cluster", help="计算集群名称")
-    parser.add_argument("--ds", help="存储池名称")
-    parser.add_argument("--network", help="目标网络/VLAN 名称")
-
-    # --- 高级调度与硬件参数 ---
-    parser.add_argument("--host_node", help="指定物理宿主机节点名称")
-    parser.add_argument("--cpu", type=int, help="CPU 核数")
-    parser.add_argument("--memory", type=int, help="内存大小 (GB)")
-    parser.add_argument("--disk", type=int, help="主磁盘容量 (GB)")
-
-    # --- 网络参数 ---
-    parser.add_argument("--ip", help="静态 IP 地址")
-    parser.add_argument("--mask", help="子网掩码")
-    parser.add_argument("--gw", help="默认网关")
-
-    # --- 辅助控制 ---
-    parser.add_argument("--state", choices=["on", "off", "reset"], help="电源操作状态")
-    parser.add_argument("--power_on", action="store_true", help="完成后是否开机")
-
-    # --- 快照子操作参数 ---
-    parser.add_argument("--snap_action", choices=["create", "list", "revert", "delete"],
-                        help="快照子操作类型（create/list/revert/delete）")
-    parser.add_argument("--snap_name", help="快照名称")
-
-    # --- Dry-Run 模式 ---
-    parser.add_argument("--dry-run", action="store_true", dest="dry_run",
-                        help="Dry-Run 模式：只输出将要执行的操作，不实际执行")
-
-    # --- 审计日志查询 ---
-    parser.add_argument("--audit-query", action="store_true", dest="audit_query",
-                        help="查询审计日志（配合 --action 和 --hostname 筛选）")
-
-    # --- Guest OS 操作参数 ---
-    parser.add_argument("--cmd", help="Guest OS 中要执行的命令")
-    parser.add_argument("--guest-user", default="root", help="Guest OS 用户名（默认 root）")
-    parser.add_argument("--guest-pwd", default="", help="Guest OS 密码")
-
-    # --- vMotion 参数 ---
-    parser.add_argument("--target_host", help="vMotion 目标宿主机名/IP")
-
-    # --- Plan 操作参数 ---
-    parser.add_argument("--plan_action", choices=["create", "execute", "rollback", "list", "delete"],
-                        help="计划子操作类型")
-    parser.add_argument("--plan_id", help="计划 ID")
-    parser.add_argument("--plan_steps", help="计划步骤列表（JSON 格式）")
-    parser.add_argument("--plan_desc", help="计划描述")
-
-    # --- TTL 参数 ---
-    parser.add_argument("--ttl_action", choices=["set", "cancel", "list", "cleanup"],
-                        help="TTL 子操作类型")
-    parser.add_argument("--ttl_minutes", type=int, help="TTL 分钟数")
-    parser.add_argument("--creator", default="agent", help="TTL 设置者")
-
-    # --- 数据存储参数 ---
-    parser.add_argument("--ds_name", help="数据存储名称")
-    parser.add_argument("--ds_path", default="", help="数据存储子路径")
-    parser.add_argument("--ds_scan", action="store_true", help="扫描所有数据存储中的镜像文件")
-
-    # --- 模板管理参数 ---
-    parser.add_argument("--tpl_action", choices=["list", "register", "convert"],
-                        help="模板子操作类型（list/register/convert）")
-    parser.add_argument("--tpl_name", help="模板名称（register 时使用）")
-
-    # --- 批量操作参数 ---
-    parser.add_argument("--batch_action", choices=["power"], help="批量子操作类型")
-    parser.add_argument("--pattern", help="VM 名称匹配模式（支持 * 和 ? 通配符）")
-
-    # --- 事件查询参数 ---
-    parser.add_argument("--minutes", type=int, help="查询最近 N 分钟的事件（默认 60）")
-    parser.add_argument("--event_category", choices=["power", "create_delete", "migration", "snapshot", "alarm"],
-                        help="事件类别过滤")
-
-    # --- 资源配额参数 ---
-    parser.add_argument("--cpu_threshold", type=float, help="CPU 使用率告警阈值（0-1，默认 0.85）")
-    parser.add_argument("--mem_threshold", type=float, help="内存使用率告警阈值（默认 0.85）")
-    parser.add_argument("--disk_threshold", type=float, help="磁盘使用率告警阈值（默认 0.9）")
-
-    # --- 导出报表参数 ---
-    parser.add_argument("--export_format", choices=["json", "csv", "markdown", "html"],
-                        help="导出格式（默认 json）")
-    parser.add_argument("--output", help="输出文件路径")
-
-    # --- 通用分页/限制 ---
-    parser.add_argument("--top", type=int, default=50, help="返回结果数量限制")
-
-    # --- v1.0 预设 / 历史复用 ---
-    parser.add_argument("--preset", help="使用预设包（如 @dev-small / dev-small），参数会被同名 CLI 参数覆盖")
-    parser.add_argument("--from-last", action="store_true", dest="from_last",
-                        help="克隆时复用最近一次克隆参数（仅覆盖未指定的项）")
-    parser.add_argument("--from-vm", dest="from_vm",
-                        help="克隆时复用与指定 VM 同名的历史克隆参数")
-    parser.add_argument("--no-wait-tools", action="store_true", dest="no_wait_tools",
-                        help="克隆后不等待 VMware Tools 就绪")
-    parser.add_argument("--tools-timeout", type=int, dest="tools_timeout", default=300,
-                        help="等待 Tools 就绪超时（默认 300s）")
-
-    # --- IP 池 / 审计报表 ---
-    parser.add_argument("--preset-action", dest="preset_action",
-                        choices=["list", "save", "save-from-last", "delete", "show"],
-                        help="预设子操作")
-    parser.add_argument("--preset-name", dest="preset_name", help="预设名")
-    parser.add_argument("--preset-desc", dest="preset_desc", default="")
-    parser.add_argument("--preset-overwrite", action="store_true", dest="preset_overwrite")
-
-    parser.add_argument("--ip-action", dest="ip_action",
-                        choices=["available", "allocate", "release", "reservations", "cleanup"])
-    parser.add_argument("--ip-spec", dest="ip_spec", help="IP 池声明")
-    parser.add_argument("--ip-target", dest="ip_target", help="要释放的 IP")
-
-    parser.add_argument("--report-days", type=int, dest="report_days", default=7,
-                        help="审计报表覆盖天数")
-
-    # --- 安全合规 ---
-    parser.add_argument("--actor", default="agent", dest="acting_user",
-                        help="当前操作人（用于审计/危险确认）")
-    parser.add_argument("--confirmed", action="store_true",
-                        help="危险操作二次确认标记")
-
-    parser.add_argument("--secret-action", dest="secret_action",
-                        choices=["list", "set", "get", "delete", "migrate", "rotate"])
-    parser.add_argument("--secret-key", dest="secret_key")
-    parser.add_argument("--secret-value", dest="secret_value")
-    parser.add_argument("--secret-desc", dest="secret_desc", default="")
-
-    parser.add_argument("--danger-action", dest="danger_action",
-                        choices=["scan", "confirm", "patterns", "config"])
-    parser.add_argument("--danger-target", dest="danger_target")
-    parser.add_argument("--danger-op", dest="danger_op", default="delete_vm")
-
-    return parser
-
-
-def resolve_connection(args, cfg: Dict[str, Any]) -> tuple:
-    """
-    合并连接参数：命令行 > config.yaml 明文 > .env 环境变量 > password_ref 引用。
-    返回 (host, user, pwd, port)。
-    """
-    vc = cfg.get("vcenter", {})
-
-    host = args.host or vc.get("host", "")
-    user = args.user or vc.get("user", "")
-    port = args.port or vc.get("port", 443)
-
-    # 密码：v1.3 优先从 secret_manager（加密存储）取 → 命令行 → config.yaml 明文 → .env 环境变量 → password_ref 引用
-    pwd = args.pwd or vc.get("password", "")
-    if not pwd:
-        # 尝试从 .env 文件加载
-        env_file = SKILL_DIR / ".env"
-        if env_file.exists():
-            from dotenv import load_dotenv
-            load_dotenv(env_file)
-        ref = vc.get("password_ref", "")
-        if ref:
-            # 优先加密存储
-            try:
-                enc_val = secret_manager.resolve_password(ref)
-                if enc_val:
-                    pwd = enc_val
-                    logger.debug(f"密码从 secret_manager 加载 ({ref})")
-            except Exception as _e:
-                logger.debug(f"secret_manager 读取失败，回退环境变量: {_e}")
-            if not pwd:
-                pwd = os.environ.get(ref, "")
-
-    missing = []
-    if not host:
-        missing.append("host")
-    if not user:
-        missing.append("user")
-    if not pwd:
-        missing.append("password")
-
-    if missing:
-        raise ValueError(
-            f"vCenter 连接信息缺失: {', '.join(missing)}。"
-            f"请检查 .env 文件或 config.yaml。"
-        )
-
-    return host, user, pwd, port
-
 
 def main():
-    parser = create_arg_parser()
+    parser = build_parser()
     args = parser.parse_args()
 
     # 读取配置文件
@@ -328,75 +86,12 @@ def main():
     }
 
     # --- Dry-Run 模式（不建立 vCenter 连接） ---
-    # 不应需 vCenter 的查询类 action 可跳过 dry-run
-    _DRY_SKIP = {"history", "preset", "secret", "danger",
-                 "ip_pool", "audit_report"}
-    if args.dry_run and args.action not in _DRY_SKIP:
-        params = {}
-        if args.hostname:
-            params["hostname"] = args.hostname
-        if args.template:
-            params["template"] = args.template
-        if args.dc:
-            params["dc"] = args.dc
-        if args.cluster:
-            params["cluster"] = args.cluster
-        if args.ds:
-            params["ds"] = args.ds
-        if args.network:
-            params["network"] = args.network
-        if args.host_node:
-            params["host_node"] = args.host_node
-        if args.cpu:
-            params["cpu"] = args.cpu
-        if args.memory:
-            params["memory_gb"] = args.memory
-        if args.disk:
-            params["disk_gb"] = args.disk
-        if args.ip:
-            params["ip"] = args.ip
-        if args.mask:
-            params["mask"] = args.mask
-        if args.gw:
-            params["gw"] = args.gw
-        if args.state:
-            params["state"] = args.state
-        if args.power_on:
-            params["power_on"] = True
-        if args.snap_action:
-            params["snap_action"] = args.snap_action
-        if args.snap_name:
-            params["snap_name"] = args.snap_name
-        if args.cmd:
-            params["cmd"] = args.cmd
-        if args.target_host:
-            params["target_host"] = args.target_host
-        if args.plan_action:
-            params["plan_action"] = args.plan_action
-        if args.plan_steps:
-            params["plan_steps"] = args.plan_steps
-        if args.plan_desc:
-            params["plan_desc"] = args.plan_desc
-        if args.ttl_action:
-            params["ttl_action"] = args.ttl_action
-        if args.ttl_minutes:
-            params["ttl_minutes"] = args.ttl_minutes
-        if args.ds_name:
-            params["ds_name"] = args.ds_name
-        if args.ds_path:
-            params["ds_path"] = args.ds_path
-        if args.ds_scan:
-            params["ds_scan"] = True
-
-        target = args.hostname or "(无目标)"
-        audit.record(args.action, target, "dry_run", details=params)
-
-        print(json.dumps({
-            "status": "dry_run",
-            "action": args.action,
-            "params": params,
-            "message": "Dry-Run 模式，未执行任何操作"
-        }, ensure_ascii=False, indent=2))
+    # 声明式白名单在 :mod:`scripts.cli.dry_run` 中维护，此处只做分发。
+    if args.dry_run and args.action not in DRY_RUN_SKIP_ACTIONS:
+        params = build_dry_run_params(args)
+        audit.record(args.action, args.hostname or "(无目标)",
+                     "dry_run", details=params)
+        Response.dry_run(args.action, params=params).emit()
         return
 
     # ========== 无需 vCenter 连接的操作（提前处理） ==========
@@ -535,28 +230,28 @@ def main():
         return
 
     if args.action == "ip_pool":
-        ipa = args.ip_action or "reservations"
-        if ipa == "available":
+        ip_op = args.ip_action or "reservations"
+        if ip_op == "available":
             if not args.ip_spec: raise ValueError("--ip-action available 需 --ip-spec")
             pool = ip_pool.IPPool(args.ip_spec, skip_alive=True)
             ips = pool.available(limit=args.top or 20)
             response["data"] = ips
             response["message"] = f"可用 IP {len(ips)} 个"
-        elif ipa == "allocate":
+        elif ip_op == "allocate":
             if not args.ip_spec: raise ValueError("--ip-action allocate 需 --ip-spec")
             pool = ip_pool.IPPool(args.ip_spec, skip_alive=True)
             recs = pool.allocate(args.count or 1, vm_name_prefix=args.name_prefix or "vm-")
             response["data"] = recs
             response["message"] = f"已分配 {len(recs)} 个 IP"
-        elif ipa == "release":
+        elif ip_op == "release":
             if not args.ip_target: raise ValueError("--ip-action release 需 --ip-target")
             ok = ip_pool.release_ip(args.ip_target)
             response["message"] = f"{'✅ 已释放' if ok else '⚠️ 未找到'}: {args.ip_target}"
-        elif ipa == "reservations":
+        elif ip_op == "reservations":
             recs = ip_pool.list_reservations()
             response["data"] = recs
             response["message"] = f"共 {len(recs)} 条预留"
-        elif ipa == "cleanup":
+        elif ip_op == "cleanup":
             n = ip_pool.cleanup_expired()
             response["message"] = f"清理过期预留 {n} 个"
         print(json.dumps(response, ensure_ascii=False, indent=2))
@@ -581,30 +276,30 @@ def main():
     # ============ v1.3 安全合规离线 action ============
 
     if args.action == "secret":
-        sa = args.secret_action or "list"
-        if sa == "list":
+        secret_op = args.secret_action or "list"
+        if secret_op == "list":
             response["data"] = secret_manager.list_secret_keys()
             response["message"] = f"共 {len(response['data'])} 个加密存储项"
-        elif sa == "set":
+        elif secret_op == "set":
             if not args.secret_key or not args.secret_value:
                 raise ValueError("--secret-action set 需 --secret-key 和 --secret-value")
             secret_manager.set_secret(args.secret_key, args.secret_value, description=args.secret_desc)
             response["message"] = f"✅ 已加密存储: {args.secret_key}"
-        elif sa == "get":
+        elif secret_op == "get":
             if not args.secret_key: raise ValueError("--secret-action get 需 --secret-key")
             v = secret_manager.get_secret(args.secret_key)
             response["data"] = {"key": args.secret_key, "found": v is not None,
                                 "value": v if v else None}
             response["message"] = "⚠️ 明文返回请谨慎使用" if v else "未找到"
-        elif sa == "delete":
+        elif secret_op == "delete":
             if not args.secret_key: raise ValueError("--secret-action delete 需 --secret-key")
             ok = secret_manager.delete_secret(args.secret_key)
             response["message"] = f"{'✅ 已删除' if ok else '⚠️ 未找到'}: {args.secret_key}"
-        elif sa == "migrate":
+        elif secret_op == "migrate":
             result = secret_manager.migrate_from_env(dry_run=args.dry_run)
             response["data"] = result
             response["message"] = result.get("message", "")
-        elif sa == "rotate":
+        elif secret_op == "rotate":
             result = secret_manager.rotate_key()
             response["data"] = result
             response["message"] = result.get("message", "")
@@ -612,8 +307,8 @@ def main():
         return
 
     if args.action == "danger":
-        da = args.danger_action or "scan"
-        if da == "scan":
+        danger_op_kind = args.danger_action or "scan"
+        if danger_op_kind == "scan":
             if not args.danger_target: raise ValueError("--danger-action scan 需 --danger-target")
             matched = danger_validator.scan_danger(args.danger_target, args.danger_op)
             response["data"] = matched
@@ -625,14 +320,14 @@ def main():
                     f"⚠️ [{args.danger_target}] 命中 {len(matched)} 个危险词: "
                     + ", ".join(m["pattern"] for m in matched)
                 )
-        elif da == "confirm":
+        elif danger_op_kind == "confirm":
             if not args.danger_target: raise ValueError("--danger-action confirm 需 --danger-target")
             danger_validator.confirm_danger(args.danger_target, args.danger_op, user=args.acting_user)
             response["message"] = f"✅ 已确认危险操作: {args.danger_op} → {args.danger_target}"
-        elif da == "patterns":
+        elif danger_op_kind == "patterns":
             response["data"] = danger_validator.load_danger_config().get("patterns", [])
             response["message"] = f"共 {len(response['data'])} 个危险词模式"
-        elif da == "config":
+        elif danger_op_kind == "config":
             response["data"] = danger_validator.load_danger_config()
             response["message"] = "当前危险词配置"
         print(json.dumps(response, ensure_ascii=False, indent=2))
@@ -642,7 +337,8 @@ def main():
 
     try:
         # 解析连接信息
-        host, user, pwd, port = resolve_connection(args, cfg)
+        conn = resolve_connection(args, cfg)
+        host, user, pwd, port = conn.as_tuple()
 
         # ============ 安全门：危险词校验（单人管理员场景仅保留此项）============
         if args.hostname:
@@ -653,14 +349,14 @@ def main():
                 danger_validator.validate_danger(
                     args.hostname, args.action, user=args.acting_user or "agent"
                 )
-            except danger_validator.DangerConfirmRequired as _e:
+            except danger_validator.DangerConfirmRequired as error:
                 response["status"] = "confirm_required"
                 response["message"] = (
-                    str(_e) + " 请重新执行并传 --confirmed 确认"
+                    str(error) + " 请重新执行并传 --confirmed 确认"
                 )
                 audit.record(args.action, args.hostname, "awaiting_confirm",
                              operator=args.acting_user or "agent",
-                             details={"matched": _e.matched})
+                             details={"matched": error.matched})
                 print(json.dumps(response, ensure_ascii=False, indent=2))
                 return
 

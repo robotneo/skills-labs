@@ -1,40 +1,56 @@
 # skills-labs
 
-这里存放了我日常使用的效率提升与运维开发相关的 Codex Skills 与 Hooks。仓库定位是「个人 Skills 实验室」：一部分是长期迭代的运维自动化 Skill，一部分是零依赖的桌面小工具，一部分是围绕 Skill 的安全/路由 Hook。
+这里存放了我日常使用的效率提升与运维开发相关的 Codex Skills 与 Hooks。仓库定位是「个人 Skills 实验室」——面向单人 IT 管理员场景，包含长期迭代的运维自动化 Skill、零依赖的桌面小工具，以及围绕 Skill 的安全/路由 Hook。
 
 ## 目录一览
 
 | 类型 | 名称 | 作用 |
 | --- | --- | --- |
-| Skill | `vcenter-ops` | VMware vCenter 全生命周期运维自动化 |
+| Skill | `vcenter-ops` | VMware vCenter 单人管理员运维自动化 |
 | Skill | `wifi_health_detector` | macOS / Windows Wi-Fi 健康度检测 |
 | Hook | `hooks/vcenter-guard` | vCenter 操作前置管控与安全路由 |
 
 ---
 
-## 运维工具
+## Skills
 
 ### vcenter-ops
 
 - **Skill 名称**：`vcenter-ops`
-- **当前版本**：v1.5.0
+- **当前版本**：v2.0（solo-admin edition）
 - **入口**：`scripts/handler.py`
-- **核心定位**：将「创建 / 管理虚拟机」从人工点击 → 转换为「对话驱动的自动化交付流程」
+- **核心定位**：把单人 IT 管理员每天的 vCenter 常规操作（查询 / 交付 / 电源 / 快照 / 迁移 / 批量）折叠成一条对话指令，可 Dry-Run、可回滚、可审计。
 
 **能力矩阵**
 
 - 生命周期：清单查询、克隆交付、电源控制、快照管理、硬件热调整、删除销毁
 - 高级操作：vMotion 跨宿主机热迁移、Guest OS 命令执行、模板 / VM 互转、数据存储浏览
-- 编排与批量：Plan / Apply 多步事务 + 回滚、通配符批量操作 + 并发控制、TTL 自动清理
-- 安全与治理：审批工作流、审计日志、Dry-Run 模式、删除三层校验、密码四级回退
-- 观测与运营：资源配额检查、事件告警、报表导出（JSON / CSV / Markdown）
+- 编排与批量：Plan / Apply 多步事务 + 回滚、通配符批量操作、TTL 自动清理、预设 / 历史复用
+- 安全底座：Dry-Run 预演、危险词二次确认、删除三层校验、审计日志、加密密钥（Fernet）
+- 观测与运营：资源配额检查、事件查询、库存导出（JSON / CSV / Markdown / HTML）、IP 池管理
 
 **安全特性**
 
-- 删除类操作强制走 `_validate_delete_target()` 三层校验
-- 高危操作前置审批（创建 / 审批 / 拒绝 / 超时自动过期）
-- 密码通过 `.env` (chmod 600) + `config.yaml password_ref` 四级回退加载
-- 所有变更操作支持 `--dry-run` 预演
+- 删除类操作强制走 `_validate_delete_target()` 三层校验（禁止通配 / 保留名单 / 显式命名）
+- 危险词二次确认：命中黑名单的操作必须携带 `--confirmed` 才能落地
+- 密码通过 `--pwd` → `config.yaml` 明文 → `secret_manager` 加密存储 → `.env` / 环境变量四级回退加载
+- 所有变更操作支持 `--dry-run` 预演，且 Dry-Run 与实际执行走同一套参数解析
+
+**常用示例**
+
+```bash
+# 全量清单
+python3 vcenter-ops/scripts/handler.py --action list_all
+
+# 克隆虚拟机（先 Dry-Run，再实际交付）
+python3 vcenter-ops/scripts/handler.py --action clone_vm --dry-run \
+  --hostname web-01 --template ubuntu22-tmpl --dc DC1 --cluster C1 \
+  --ds DS1 --network VLAN10 --ip 10.0.0.11 --mask 255.255.255.0 --gw 10.0.0.1
+
+# 批量开机（支持 * / ? 通配符）
+python3 vcenter-ops/scripts/handler.py --action batch \
+  --batch-action power --pattern 'web-*' --state on
+```
 
 ### wifi_health_detector
 

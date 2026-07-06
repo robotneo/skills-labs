@@ -1,9 +1,24 @@
 """
 Module: scripts.executor
-Description: vCenter 动作执行器。支持克隆、电源管理、删除、磁盘扩容。
-Author: xiaofei
-Date: 2026-03-19
-Updated: 2026-05-21  (v0.9: 接入 TaskManager / LockManager / RollbackManager)
+Description: vCenter 动作执行器 —— 面向单人 IT 管理员场景的精简版执行器。
+
+职责
+----
+- 提供 :class:`VCenterExecutor`，聚合克隆 / 电源 / 快照 / 迁移 /
+  重配置 / Guest OS 命令 / 数据存储浏览 / 模板管理 / 批量操作 /
+  事件与配额 / 库存导出等能力。
+- 每个公共方法保持"单进单出"的语义：接收具名参数、返回易读消息或
+  结构化数据（列表 / 字典），不打印、不落盘。
+
+与其他模块的边界
+----------------
+- :mod:`scripts.task_manager` / :mod:`scripts.lock_manager` /
+  :mod:`scripts.rollback_manager` 负责任务追踪、并发锁、回滚补偿。
+- :mod:`scripts.audit` 由上层调用方 (:mod:`scripts.handler`) 记录，
+  执行器只关心 vCenter 侧动作。
+- 事件总线 (``event_bus`` 模块) 在 v2 精简版中已下线，本文件保留了
+  :func:`bus_publish` no-op 兜底与 ``Topics`` 常量占位，避免历史发布
+  语句抛异常，便于未来重新接入。
 """
 
 import time
