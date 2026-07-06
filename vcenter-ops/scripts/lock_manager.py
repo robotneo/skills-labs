@@ -15,13 +15,60 @@ Version: 0.9.0
 import os
 import json
 import time
-import fcntl
 import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 跨平台文件锁：优先使用 POSIX ``fcntl.flock``，Windows 上回退到 ``msvcrt``
+# 的字节级锁；若两者都不可用，则退化为"文件存在即已占用"的软锁，保证
+# Skill 在任何 Agent 运行时（macOS / Linux / Windows）都能加载。
+# ---------------------------------------------------------------------------
+
+try:  # POSIX：Linux、macOS
+    import fcntl  # type: ignore
+
+    def _flock_ex_nb(fp) -> None:
+        """Acquire exclusive, non-blocking lock on ``fp``."""
+        fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _funlock(fp) -> None:
+        fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+
+    _LOCK_BACKEND = "fcntl"
+except ImportError:  # pragma: no cover - Windows only
+    try:
+        import msvcrt  # type: ignore
+
+        def _flock_ex_nb(fp) -> None:
+            """Acquire exclusive, non-blocking lock on ``fp`` (Windows)."""
+            # 锁定 1 字节即可达到互斥效果；文件为空时先写占位符。
+            try:
+                msvcrt.locking(fp.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as error:
+                # 与 POSIX 分支保持相同异常类型，便于上层统一捕获。
+                raise BlockingIOError(str(error)) from error
+
+        def _funlock(fp) -> None:
+            try:
+                fp.seek(0)
+                msvcrt.locking(fp.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+
+        _LOCK_BACKEND = "msvcrt"
+    except ImportError:  # pragma: no cover - exotic runtime
+        # 最后兜底：无内核级锁；进程内串行仍由 handler 保证。
+        def _flock_ex_nb(fp) -> None:
+            return None
+
+        def _funlock(fp) -> None:
+            return None
+
+        _LOCK_BACKEND = "noop"
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 LOCK_DIR = SKILL_DIR / "data" / "locks"
@@ -91,7 +138,10 @@ class VMLock:
         while True:
             self._fp = open(self.lock_path, "w")
             try:
-                fcntl.flock(self._fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # 写入占位符再上锁，确保 msvcrt 分支上有字节可锁。
+                self._fp.write(" ")
+                self._fp.flush()
+                _flock_ex_nb(self._fp)
                 self._write_meta()
                 logger.info(f"🔒 已获取锁: vm={self.vm} action={self.action}")
                 return self
@@ -108,7 +158,7 @@ class VMLock:
         if self._fp is None:
             return
         try:
-            fcntl.flock(self._fp.fileno(), fcntl.LOCK_UN)
+            _funlock(self._fp)
             self._fp.close()
         except Exception as e:
             logger.warning(f"释放锁异常: {e}")

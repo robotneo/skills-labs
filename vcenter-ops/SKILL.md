@@ -31,16 +31,20 @@ The AI agent runtime is expected to `cd` into the Skill root before invoking com
 python3 scripts/handler.py --action <action> [options]
 ```
 
+> Windows users can substitute `python` for `python3`; the argument surface
+> is identical.
+
 ### Platform install paths (reference only)
 
 | Platform | Skill root |
 | --- | --- |
 | Codex (`~/.codex`) | `~/.codex/skills/vcenter-ops` |
 | Claude Code | `~/.claude/skills/vcenter-ops` or `<project>/.claude/skills/vcenter-ops` |
+| Cursor | `~/.cursor/skills/vcenter-ops` or `<project>/.cursor/skills/vcenter-ops` |
+| OpenCode | `~/.opencode/skills/vcenter-ops` or `<project>/.opencode/skills/vcenter-ops` |
+| hermes | `~/.hermes/skills/vcenter-ops` |
 | openclaw | `/root/.openclaw/workspace-infraops/skills/vcenter-ops` |
 | qclaw | `~/.qclaw/skills/vcenter-ops` |
-| hermes | `~/.hermes/skills/vcenter-ops` |
-| OpenCode | `~/.opencode/skills/vcenter-ops` or `<project>/.opencode/skills/vcenter-ops` |
 | Generic / other agents | any directory containing this `SKILL.md`; export `SKILL_DIR` to it |
 
 Cross-shell fallback if the runtime does not auto-cd:
@@ -54,6 +58,27 @@ cd "${SKILL_DIR:-$(dirname "$0")}" && python3 scripts/handler.py --action <actio
 # PowerShell (Windows)
 Set-Location $env:SKILL_DIR; python scripts\handler.py --action <action> [options]
 ```
+
+## First-run install
+
+Skill 只依赖 4 个纯 Python 包，任何 agent 平台都可以走同一条命令完成初始化：
+
+```bash
+# macOS / Linux
+cd <skill_root> && python3 -m pip install -r requirements.txt
+
+# Windows PowerShell
+cd <skill_root>; python -m pip install -r requirements.txt
+```
+
+初始化后建议先跑一次自检：
+
+```bash
+python3 scripts/healthcheck.py --no-vcenter
+```
+
+期望通过 ≥6/7；`密码加密` 项在设置好 `VC_MASTER_KEY` 或 `data/.master_key`
+之后会转绿。
 
 ## Load when needed
 

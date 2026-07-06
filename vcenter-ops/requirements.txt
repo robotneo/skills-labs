@@ -1,0 +1,20 @@
+# vCenter Ops runtime dependencies (v2.0 solo-admin edition)
+#
+# Any agent runtime (Codex, Claude Code, OpenCode, Cursor, hermes,
+# openclaw, qclaw, ...) can bootstrap the Skill with:
+#     pip install -r requirements.txt
+#
+# All packages are pure-Python wheels available on both macOS/Linux
+# and Windows.
+
+# vCenter SDK (SOAP + managed objects)
+pyVmomi>=8.0
+
+# YAML config (config.yaml)
+PyYAML>=6.0
+
+# Encrypted secret store (scripts/secret_manager.py)
+cryptography>=41.0
+
+# Optional .env loader used when password_ref points at an env var
+python-dotenv>=1.0
