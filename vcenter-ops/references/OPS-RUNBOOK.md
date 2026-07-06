@@ -1,327 +1,95 @@
-# vCenter Ops 生产 Runbook
+# vcenter-ops 运维 Runbook（v2.0 精简版）
 
-路径：`/root/.openclaw/workspace-infraops/skills/vcenter-ops`
+> 单人 IT 管理员场景，涵盖日常巡检、备份、故障处理与灾难演练。
 
-原则：先巡检、再变更；高风险必确认；所有操作可审计、可回滚、可验证。
+## 1. 目录结构
 
-## 1. 快速检查
-
-```bash
-cd /root/.openclaw/workspace-infraops/skills/vcenter-ops
-python3 scripts/healthcheck.py
-pytest -q
-./scripts/observability_loop.sh
-```
-
-验收：
-
-```text
-healthcheck 10/10
-pytest 全部通过
-observability_loop success
-```
-
-## 2. 关键文件
-
-| 路径 | 作用 | 要求 |
+| 路径 | 作用 | 建议策略 |
 |---|---|---|
-| `config.yaml` | 主配置 | 变更前备份 |
-| `.env` | 密码环境变量 | `chmod 600` |
-| `data/.master_key` | 加密主密钥 | 必须离线备份 |
-| `data/secrets.json` | 加密密钥库 | 与主密钥一起备份 |
-| `logs/audit.log` | 审计日志 | 长期保留 |
-| `data/metrics/*.jsonl` | 指标数据 | 定期清理/归档 |
-| `reports/` | 报告 | 归档 |
+| `config.yaml` | 连接 + 权限映射 | 提交 Git，敏感字段仅保留 `password_ref` |
+| `.env` | 密码/密钥引用 | 严禁提交 Git，权限 chmod 600 |
+| `data/audit/*.jsonl` | 审计日志 | 归档保留 ≥ 180 天 |
+| `data/cache/` | 库存缓存 | 长期占位，异常时可清空重建 |
+| `data/tasks/*.json` | 任务/历史 | 供 `history` action 使用 |
+| `data/locks/` | VM 锁 | 异常残留可手工清理 |
+| `data/secrets/` | 加密存储 | 与 `.master.key` 一起备份 |
+| `logs/` | 运行日志 / cron 输出 | 定期切割 |
 
-权限修复：
+## 2. 风险分级
 
-```bash
-chmod 600 .env data/.master_key data/secrets.json 2>/dev/null || true
-chmod 700 data logs reports 2>/dev/null || true
-```
-
-## 3. 操作分级
-
-| 级别 | 操作 | 要求 |
+| 级别 | Action | 处理策略 |
 |---|---|---|
-| 🔵 查询 | `list_all/get_vm/events/quota/export/history/preset` | 可直接执行 |
-| 🟡 变更 | `clone_vm/power_vm/snapshot/reconfigure/migrate/ttl/batch` | 至少一次确认 |
-| 🔴 高危 | `delete_vm/secret/rbac/approval_policy/change_window` | 二次确认 + 审批/审计 |
+| 🔴 高危 | `delete_vm` | 精确名称/IP + `--confirmed` + 审计留痕 |
+| 🟡 中危 | `power_vm`、`migrate`、`reconfigure`、`guest_exec`、`batch`、`ttl`、`secret set/delete`、`plan execute/rollback`、`template register/convert` | 建议先 `--dry-run` |
+| 🔵 低危 | `list_all`、`get_vm`、`quota`、`events`、`export`、`snapshot list`、`history`、`preset`、`ip_pool available`、`datastore`、`audit_report`、`plan list` | 可随意执行 |
 
-## 4. 创建 VM 标准流程
-
-### 4.1 巡检
+## 3. 日常巡检
 
 ```bash
-python3 scripts/cache_manager.py --refresh
-python3 scripts/cache_manager.py --summary
-python3 scripts/handler.py --action recommend --cpu 4 --memory 8 --disk 100 --recommend-top 3
+python3 scripts/healthcheck.py           # 环境自检：依赖 / 配置 / 缓存 / 锁 / 加密 / vCenter 连通性
+python3 scripts/handler.py --action list_all
+python3 scripts/handler.py --action quota --cluster CL01
+python3 scripts/handler.py --action events --minutes 60
 ```
 
-### 4.2 查看模板/预设
+## 4. 备份
+
+至少每周把以下内容备份到独立位置：
+
+- `.env`（密码环境变量）
+- `data/secrets/` + `data/.master.key`（加密存储和主密钥；缺一不可）
+- `config.yaml`
+- `presets/`
+- `data/audit/`
+
+推荐一条 tar 备份：
 
 ```bash
-python3 scripts/handler.py --action preset
-python3 scripts/handler.py --action template --tpl_action list
+tar czf /var/backups/vcenter-ops-$(date +%F).tgz \
+  .env config.yaml presets \
+  data/secrets data/.master.key data/audit
 ```
 
-### 4.3 IP 检查
+## 5. 灾难演练
 
-```bash
-python3 scripts/ip_scanner.py --check <IP>
-```
+1. 在测试机上把备份还原到新的 Skill 目录。
+2. `python3 scripts/healthcheck.py --no-vcenter` 确认加密存储/依赖 OK。
+3. 打开 `.env`，把密码替换为演练账号。
+4. `python3 scripts/handler.py --action list_all` 确认可以正常读到清单。
+5. `python3 scripts/handler.py --action audit-query` 抽查审计日志完整性。
 
-### 4.4 克隆
+## 6. 常见故障
 
-```bash
-python3 scripts/handler.py --action clone_vm \
-  --preset dev-small \
-  --hostname "<IP>-<name>" \
-  --template "<template>" \
-  --dc "<dc>" \
-  --cluster "<cluster>" \
-  --ds "<datastore>" \
-  --network "<network>" \
-  --ip "<IP>" \
-  --mask "255.255.255.0" \
-  --gw "<gateway>" \
-  --power_on
-```
+| 现象 | 排查 | 处理 |
+|---|---|---|
+| `handler.py` 报连接失败 | `healthcheck.py` 显示 vCenter 项 ❌ | 核对 host/user/`password_ref`；检查 `.env` 权限 |
+| 密码解密失败 | `data/.master.key` 丢失 | 从备份还原；否则用 `secret --secret-action rotate` 重建 |
+| VM 锁残留 | `data/locks/` 有过期文件 | 确认没有进程后手工删除锁文件 |
+| 删除被危险词拦截 | 提示 "confirm_required" | 精确指定 `--hostname`，重跑并加 `--confirmed` |
+| 缓存脏 | 库存显示与真实 vCenter 不一致 | `python3 scripts/cache_manager.py --refresh` |
 
-### 4.5 验证
-
-```bash
-python3 scripts/handler.py --action get_vm --hostname "<IP>-<name>"
-ping -c 3 <IP>
-grep "clone_vm" logs/audit.log | tail -5
-```
-
-## 5. 删除 VM 标准流程
-
-删除铁律：
-
-```text
-禁止删除全部/清空/通配符删除。
-必须指定精确 VM 名称或 IP。
-必须二次确认。
-生产环境必须审批。
-删除前必须留证据。
-```
-
-### 5.1 删除前取证
-
-```bash
-VM="<vm-name>"
-TS="$(date +%F-%H%M%S)"
-python3 scripts/handler.py --action get_vm --hostname "$VM" > "reports/predelete-${VM}-${TS}.json"
-python3 scripts/handler.py --action snapshot --hostname "$VM" --snap_action list > "reports/predelete-${VM}-${TS}-snapshots.json"
-python3 scripts/handler.py --action events --minutes 1440 > "reports/predelete-${VM}-${TS}-events.json"
-```
-
-### 5.2 执行删除
-
-```bash
-python3 scripts/handler.py --action delete_vm --hostname "$VM"
-```
-
-### 5.3 删除后验证
-
-```bash
-python3 scripts/handler.py --action get_vm --hostname "$VM"
-grep "delete_vm" logs/audit.log | tail -10
-```
-
-## 6. 常用变更命令
-
-### 电源
-
-```bash
-python3 scripts/handler.py --action power_vm --hostname "<vm>" --state on
-python3 scripts/handler.py --action power_vm --hostname "<vm>" --state off
-python3 scripts/handler.py --action power_vm --hostname "<vm>" --state reset
-```
-
-### 快照
-
-```bash
-python3 scripts/handler.py --action snapshot --hostname "<vm>" --snap_action create --snap_name "before-change-$(date +%F-%H%M)"
-python3 scripts/handler.py --action snapshot --hostname "<vm>" --snap_action list
-python3 scripts/handler.py --action snapshot --hostname "<vm>" --snap_action revert --snap_name "<snap>"
-python3 scripts/handler.py --action snapshot --hostname "<vm>" --snap_action delete --snap_name "<snap>"
-```
-
-### 规格调整
-
-```bash
-python3 scripts/handler.py --action reconfigure --hostname "<vm>" --cpu 8 --memory 16 --disk 200
-```
-
-注意：磁盘扩容通常不可缩小。
-
-### 迁移
-
-```bash
-python3 scripts/handler.py --action migrate --hostname "<vm>" --target_host "<esxi-host>"
-```
-
-## 7. TTL 生命周期
-
-```bash
-python3 scripts/handler.py --action ttl --ttl_action set --hostname "<vm>" --ttl_minutes 1440 --creator "<owner>"
-python3 scripts/handler.py --action ttl --ttl_action list
-python3 scripts/handler.py --action ttl --ttl_action cancel --hostname "<vm>"
-python3 scripts/handler.py --action ttl --ttl_action cleanup
-```
-
-建议：临时测试 VM 必须设置 TTL；生产 VM 不建议自动删除。
-
-## 8. 可观测闭环
-
-```bash
-./scripts/observability_loop.sh
-python3 scripts/handler.py --action metrics --metrics-action collect
-python3 scripts/handler.py --action anomaly --metric-days 7
-python3 scripts/handler.py --action forecast --metric-days 60 --forecast-threshold 0.9
-python3 scripts/handler.py --action recommend --cpu 4 --memory 8 --disk 100 --recommend-top 3
-```
-
-推荐 cron：
+## 7. 推荐 cron
 
 ```cron
-*/5 * * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && ./scripts/observability_loop.sh
-0 3 * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action metrics --metrics-action cleanup --metrics-keep-days 30 >> logs/cron-cleanup.log 2>&1
-0 9 * * 1 cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action audit_report --report-days 7 --export_format html --output reports/audit-week-$(date +\%F).html >> logs/cron-audit.log 2>&1
+# TTL 到期清理（每小时）
+0 * * * * cd /path/to/vcenter-ops && python3 scripts/handler.py --action ttl --ttl_action cleanup >> logs/ttl.log 2>&1
+
+# 每日审计报表
+0 3 * * * cd /path/to/vcenter-ops && python3 scripts/handler.py --action audit_report --export_format html --output logs/audit-$(date +\%F).html >> logs/audit-cron.log 2>&1
+
+# 每 30 分钟刷新一次库存缓存
+*/30 * * * * cd /path/to/vcenter-ops && python3 scripts/cache_manager.py --refresh >> logs/cache.log 2>&1
 ```
 
-验收：
-
-```text
-reports/healthcheck-latest.md 存在且 10/10
-reports/anomaly-latest.json 存在
-reports/forecast-latest.json 存在
-data/metrics/当天日期.jsonl 行数 > 0
-```
-
-## 9. 审计和报表
+## 8. 密钥轮换
 
 ```bash
-grep "success" logs/audit.log | tail -20
-grep "delete_vm" logs/audit.log | tail -20
-python3 scripts/handler.py --action audit_report --report-days 7 --export_format html --output "reports/audit-week-$(date +%F).html"
-```
+# 备份主密钥
+cp data/.master.key /var/backups/master.key.$(date +%F)
 
-保留建议：
+# 轮换主密钥（自动重新加密所有 secret）
+python3 scripts/handler.py --action secret --secret-action rotate
 
-| 数据 | 保留周期 |
-|---|---|
-| `logs/audit.log` | ≥180 天 |
-| `reports/audit-*.html` | ≥1 年 |
-| `reports/predelete-*` | ≥1 年 |
-| `data/metrics/*.jsonl` | 30-180 天 |
-
-## 10. 备份恢复
-
-### 备份
-
-```bash
-mkdir -p /backup/vcenter-ops
-TS="$(date +%F-%H%M%S)"
-tar -czf "/backup/vcenter-ops/vcops-${TS}.tgz" data/ config.yaml .env logs/audit.log reports/
-chmod 600 "/backup/vcenter-ops/vcops-${TS}.tgz"
-```
-
-### 恢复
-
-```bash
-tar -xzf /backup/vcenter-ops/vcops-YYYY-MM-DD-HHMMSS.tgz -C /tmp/vcops-restore
-cp -a /tmp/vcops-restore/data ./
-cp -a /tmp/vcops-restore/config.yaml ./
-cp -a /tmp/vcops-restore/.env ./
-chmod 600 .env data/.master_key data/secrets.json
-python3 scripts/healthcheck.py
-```
-
-主密钥丢失：
-
-```text
-如果 data/.master_key 和备份都丢失，secrets.json 无法解密，只能重录 secret。
-```
-
-## 11. 升级流程
-
-```bash
-python3 scripts/healthcheck.py
-pytest -q
-TS="$(date +%F-%H%M%S)"
-tar -czf "/backup/vcenter-ops/pre-upgrade-${TS}.tgz" data/ config.yaml .env SKILL.md references/OPS-RUNBOOK.md references/ scripts/ tests/
-
-# 升级后验证
-python3 -m py_compile scripts/*.py
-pytest -q
-python3 scripts/handler.py --help >/tmp/vcenter-ops-help.txt
-python3 scripts/healthcheck.py
-./scripts/observability_loop.sh
-```
-
-## 12. 故障处置
-
-| 故障 | 命令 | 处理 |
-|---|---|---|
-| vCenter 不通 | `python3 scripts/healthcheck.py` | 查地址、账号、网络、443 端口 |
-| 指标过期 | `python3 scripts/handler.py --action metrics --metrics-action collect` | 修复采集/cron |
-| 锁残留 | `find data/locks -type f -print -exec cat {} \;` | 确认无任务后清理过期锁 |
-| 审计日志大 | `tail -n 20000 logs/audit.log > /tmp/audit.log.new` | 归档后截断 |
-| Webhook 失败 | `python3 scripts/handler.py --action webhook --webhook-action list` | 查 URL/secret/网络 |
-| 误关机 | `power_vm --state on` | 立即恢复并通知业务 |
-| 误扩容 | 记录原规格反向调整 | 磁盘不可直接缩小 |
-| 误删除 | 停止后续清理 | 查备份、快照、审计、存储残留 |
-
-## 13. 安全上线清单
-
-- [ ] `.env`、`.master_key`、`secrets.json` 权限 600
-- [ ] 主密钥已离线备份
-- [ ] healthcheck 10/10
-- [ ] pytest 通过
-- [ ] RBAC 至少一个 admin
-- [ ] 删除操作二次确认可用
-- [ ] 审批策略已验证
-- [ ] 变更窗口已验证
-- [ ] observability_loop 已跑通
-- [ ] audit_report 可生成
-
-## 14. 日常巡检
-
-### 每日
-
-```bash
-python3 scripts/healthcheck.py
-python3 scripts/handler.py --action anomaly --metric-days 7
-python3 scripts/handler.py --action events --minutes 1440
-```
-
-### 每周
-
-```bash
-python3 scripts/handler.py --action audit_report --report-days 7 --export_format html --output reports/audit-week-$(date +%F).html
-python3 scripts/handler.py --action forecast --metric-days 60 --forecast-threshold 0.9
-python3 scripts/handler.py --action ttl --ttl_action list
-python3 scripts/handler.py --action ip_pool --ip-action reservations
-```
-
-### 每月
-
-```bash
-python3 scripts/handler.py --action audit_report --report-days 30 --export_format html --output reports/audit-month-$(date +%Y%m).html
-python3 scripts/handler.py --action metrics --metrics-action cleanup --metrics-keep-days 90
-pytest -q
-```
-
-## 15. 当前已知状态
-
-```text
-healthcheck: 10/10
-pytest: 24 passed
-metrics collect: 正常
-observability_loop: 正常
-已知告警：43.59-data 使用率约 96.12%，超过 90% 阈值
+# 再次备份
+cp data/.master.key /var/backups/master.key.$(date +%F).new
 ```

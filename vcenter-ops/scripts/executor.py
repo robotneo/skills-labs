@@ -18,8 +18,6 @@ try:
     from . import cache_manager as cache_mgr
     from .tools_checker import wait_for_tools_ready, get_tools_status, assert_tools_ready
     from .error_dictionary import format_error_oneline, format_error_detail
-    from .quota_enforcer import enforce_clone_quota, QuotaExceeded
-    from .event_bus import publish as bus_publish, Topics
 except ImportError:
     from task_manager import TaskManager, TaskState
     from lock_manager import VMLock, LockBusy
@@ -27,8 +25,24 @@ except ImportError:
     import cache_manager as cache_mgr
     from tools_checker import wait_for_tools_ready, get_tools_status, assert_tools_ready
     from error_dictionary import format_error_oneline, format_error_detail
-    from quota_enforcer import enforce_clone_quota, QuotaExceeded
-    from event_bus import publish as bus_publish, Topics
+
+
+# --- Event bus 已在精简版下线：提供 no-op 兜底，保持发布语句不改动 ---
+def bus_publish(topic, payload=None):  # noqa: D401
+    """No-op replacement for the removed event_bus module."""
+    return None
+
+
+class _TopicsStub:
+    VM_CREATED = "vm.created"
+    CLONE_FAILED = "vm.clone_failed"
+    VM_RECONFIGURED = "vm.reconfigured"
+    VM_POWER_ON = "vm.power.on"
+    VM_POWER_OFF = "vm.power.off"
+    VM_DELETED = "vm.deleted"
+
+
+Topics = _TopicsStub()
 
 logger = logging.getLogger(__name__)
 
@@ -115,19 +129,6 @@ class VCenterExecutor:
         if not all([template, cluster, ds, dc, network]):
             missing = [k for k, v in {"template": template, "cluster": cluster, "ds": ds, "dc": dc, "network": network}.items() if not v]
             raise ValueError(f"资源缺失: {', '.join(missing)}")
-
-        # 1.5 配额硬限制检查（越限直接拒绝）
-        try:
-            enforce_clone_quota(
-                executor=self,
-                cluster_name=cluster_name,
-                ds_name=ds_name,
-                cpus=cpus,
-                memory_gb=memory_gb,
-                disk_gb=disk_gb,
-            )
-        except QuotaExceeded:
-            raise
 
         # 2. 宿主机选择
         target_host = None

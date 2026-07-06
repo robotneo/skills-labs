@@ -6,9 +6,9 @@
 
 | 级别 | 标识 | 操作 | 确认次数 | 审批 |
 |------|------|------|---------|------|
-| confirm | 🔵 普通 | clone_vm, get_vm, list_all, snapshot | 1 次 | 无 |
-| double_confirm | 🟡 敏感 | power_vm | 2 次 | 无 |
-| approval | 🔴 高风险 | delete_vm | 2 次 | 预留接口 |
+| confirm | 🔵 普通 | clone_vm, get_vm, list_all, snapshot, reconfigure | 1 次 | 无 |
+| double_confirm | 🟡 敏感 | power_vm、migrate、guest_exec、batch、ttl、secret set/delete、plan execute/rollback、template register/convert | 2 次 | 无 |
+| high_risk | 🔴 高风险 | delete_vm | 2 次 + 精确目标 | 审计留痕 |
 
 ## 权限配置来源
 
@@ -161,7 +161,7 @@ IP: 172.17.40.5 / 255.255.254.0 / 172.17.40.1
 
 ---
 
-## 🔴 Level: approval（删除虚拟机）
+## 🔴 Level: high_risk（删除虚拟机）
 
 > ⚠️ 删除操作同时受上方「删除操作安全策略」约束，以下为确认模板。
 

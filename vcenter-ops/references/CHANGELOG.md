@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## v2.0.0 — 单人管理员精简
+
+> 目标：将 Skill 收敛到单人 IT 管理员实际使用的能力面，砍掉多人协作/企业治理/规模化智能相关的枝叶。
+
+### ❌ 移除
+
+- 审批工作流（approval_manager / approval_policy）与相关 CLI（`approval`, `approval_policy`）
+- RBAC（role_manager）与相关 CLI（`rbac`）
+- 变更窗口（change_window）与相关 CLI（`change_window`）
+- Webhook 订阅（webhook_subscriber / event_bus）与相关 CLI（`webhook`）
+- 智能化四件套：metrics_collector / recommender / recommend_plus / anomaly_detector / capacity_forecaster / alarm_poller（`metrics`, `recommend`, `anomaly`, `forecast`）
+- 资产监控与 Prometheus SD 集成：asset_registry / monitoring_integrator
+- 企业级安全门禁：batch_guard / preflight_gate / danger_token / evidence_collector / secret_audit
+- 交付流水线：delivery_pipeline / delivery_state / post_clone_init / batch_clone（`delivery`, `post_init`, `batch_clone`）
+- 其它：async_runner / inventory_cache_index / quota_enforcer / observability_loop.sh
+- 对应 references 与 tests 一并清理
+
+### ✅ 保留
+
+- 生命周期：`clone_vm` / `power_vm` / `snapshot` / `reconfigure` / `migrate` / `delete_vm` / `guest_exec`
+- 巡检：`list_all` / `get_vm` / `events` / `quota` / `export` / `audit_report` / `history` / `preset` / `datastore` / `template` / `ip_pool`
+- 编排：`plan` / `batch` / `ttl`
+- 安全：`secret` / `danger`
+
+### 🔧 兼容处理
+
+- `executor.py` 内部保留 `bus_publish` no-op 实现，历史事件发布语句无需删除。
+- `ttl_manager.py` 已有 event_bus 缺失时的 fallback，无需改动。
+- `SKILL.md` 版本更新到 `2.0.0`，权限分级与 action 表同步刷新。
+
+
 ## v1.2.0 — 2026-05-22 — 可观测性增强
 
 > Phase 6：打通全运行期事件、接入 vCenter 原生告警、一键健康自检。

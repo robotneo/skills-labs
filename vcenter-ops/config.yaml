@@ -30,9 +30,9 @@ permission:
       description: "列出参数 → 第一次确认 → 提醒风险 → 第二次确认 → 执行"
       actions:
         - power_vm        # 电源操作（开/关/重启）
-    approval:
-      label: "高风险操作 - 二次确认 + 审批"
-      description: "列出参数 → 第一次确认 → 提醒风险 → 第二次确认 → 执行（预留审批接口）"
+    high_risk:
+      label: "高风险操作 - 强二次确认 + 审计留痕"
+      description: "列出参数 → 第一次确认 → 提醒风险 → 精确名称/IP 校验 → 第二次确认 → 审计落盘 → 执行"
       actions:
         - delete_vm       # 删除虚拟机
 
@@ -44,4 +44,4 @@ permission:
     snapshot: "confirm"
     reconfigure: "confirm"
     power_vm: "double_confirm"
-    delete_vm: "approval"
+    delete_vm: "high_risk"

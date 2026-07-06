@@ -11,25 +11,13 @@
 ## 专题流程
 
 - `CLONE-FLOW.md`：克隆 VM 标准流程与预检查。
-- `DELIVERY-FLOW.md`：标准交付与初始化流程。
 - `CACHE-STRATEGY.md`：库存缓存刷新与复用策略。
-- `PERMISSION-SYSTEM.md`：权限、审批、危险操作分级。
-- `SAFETY-GATE.md`：安全门禁与高风险操作拦截。
-
-## 能力说明
-
-- `ASSET-MONITORING.md`：资产监控集成。
-- `OBSERVABILITY-LOOP.md`：可观测闭环。
-- `PERFORMANCE-OPTIMIZATION.md`：性能优化说明。
-- `RESOURCE-DISPLAY.md`：资源展示格式。
-- `DESIGN.md`：设计说明。
-- `REFERENCE.md`：补充参考。
+- `PERMISSION-SYSTEM.md`：权限与危险操作分级。
 
 ## 版本治理
 
 - `VERSION-MATRIX.md`：版本能力矩阵。
 - `CHANGELOG.md`：变更记录。
-- `ROADMAP.md`：后续路线。
 
 ## 整理原则
 

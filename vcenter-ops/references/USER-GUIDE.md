@@ -1,274 +1,180 @@
-# vCenter Ops 用户操作手册
+# vcenter-ops 使用手册（v2.0 精简版）
+
+> 单人 IT 管理员日常操作手册。所有命令均以 `python3 scripts/handler.py` 为入口，运行前请 `cd` 到 Skill 根目录。
 
 ## 1. 快速开始
 
 ```bash
-# 测试连接
+# 环境检查（依赖 / 配置 / 缓存 / vCenter 连通性）
 python3 scripts/healthcheck.py
 
-# 全量巡检
+# 全量清单
 python3 scripts/handler.py --action list_all
 
-# 查询单 VM
-python3 scripts/handler.py --action get_vm --hostname web-test01
+# 查询单台 VM
+python3 scripts/handler.py --action get_vm --hostname 10.0.0.11-web01
 ```
+
+首次运行前把 `.env` 文件的 `chmod 600`，并在 `config.yaml` 里通过 `password_ref` 引用密码环境变量名，避免明文落盘。
 
 ## 2. 克隆 VM
 
-### 2.1 单台克隆
+### 2.1 手工指定完整参数
 
 ```bash
 python3 scripts/handler.py --action clone_vm \
-  --template Ubuntu20.04-2c4g60g-lvm2 --hostname web01 \
-  --dc 数据中心 --cluster MD1200 --ds 43.7-data --network VLAN10 \
-  --cpu 2 --memory 4 --disk 60 \
-  --ip 10.0.0.10 --mask 255.255.255.0 --gw 10.0.0.1
+  --hostname 10.0.0.20-web02 \
+  --template centos7-tpl \
+  --dc DC01 --cluster CL01 --ds ds-ssd-01 --network VLAN10 \
+  --cpu 4 --memory 8 --disk 100 \
+  --ip 10.0.0.20 --mask 255.255.255.0 --gw 10.0.0.1 \
+  --power_on
 ```
 
-### 2.2 使用预设（推荐）
+### 2.2 使用预设
 
 ```bash
 # 查看预设
-python3 scripts/handler.py --action preset
+python3 scripts/handler.py --action preset --preset-action list
 
-# 应用预设（CPU/内存/磁盘自动套用）
-python3 scripts/handler.py --action clone_vm --preset dev-small \
-  --hostname web02 --template Ubuntu20.04-2c4g60g-lvm2 \
-  --dc 数据中心 --cluster MD1200 --ds 43.7-data --network VLAN10 \
-  --ip 10.0.0.11
+# 使用预设 dev-small，仅指定必要的差异项
+python3 scripts/handler.py --action clone_vm \
+  --preset dev-small \
+  --hostname 10.0.0.30-app01 \
+  --ip 10.0.0.30
 ```
 
-### 2.3 按上次配置克隆
+### 2.3 复用上次参数
 
 ```bash
-# 完全复用上次参数，只换名字+IP
-python3 scripts/handler.py --action clone_vm --from-last \
-  --hostname web03 --ip 10.0.0.12
+python3 scripts/handler.py --action clone_vm --from-last --hostname 10.0.0.31-app02 --ip 10.0.0.31
 ```
 
-### 2.4 批量克隆
+## 3. 变更操作
 
 ```bash
-python3 scripts/handler.py --action batch_clone \
-  --preset dev-small --count 5 \
-  --template Ubuntu20.04-2c4g60g-lvm2 \
-  --dc 数据中心 --cluster MD1200 --ds 43.7-data --network VLAN10 \
-  --ip-pool "10.0.10.20-10.0.10.50" \
-  --name-prefix web- --workers 3
+# 电源
+python3 scripts/handler.py --action power_vm --hostname web02 --state off
+
+# 快照
+python3 scripts/handler.py --action snapshot --hostname web02 --snap_action create --snap_name pre-upgrade
+python3 scripts/handler.py --action snapshot --hostname web02 --snap_action list
+
+# 硬件热调整
+python3 scripts/handler.py --action reconfigure --hostname web02 --cpu 8 --memory 16
+
+# vMotion
+python3 scripts/handler.py --action migrate --hostname web02 --target_host esxi-03
+
+# Guest OS 命令
+python3 scripts/handler.py --action guest_exec --hostname web02 \
+  --cmd 'uptime' --guest-user root --guest-pwd '***'
 ```
 
-## 3. 智能化辅助
-
-### 3.1 资源推荐
+## 4. 批量与编排
 
 ```bash
-# 给出 Top-3 集群/宿主机/DS 推荐
-python3 scripts/handler.py --action recommend \
-  --cpu 4 --memory 8 --disk 100 \
-  --recommend-count 2 --recommend-prefix web- --recommend-top 3
+# 批量电源：通配符匹配 + 并发
+python3 scripts/handler.py --action batch --batch_action power --pattern 'web-*' --state on
+
+# Plan/Apply：多步事务 + 回滚
+python3 scripts/handler.py --action plan --plan_action create \
+  --plan_steps '[{"op":"power","target":"web-01","state":"off"},{"op":"snapshot","target":"web-01","name":"pre-patch"}]' \
+  --plan_desc "patch pre-check"
+python3 scripts/handler.py --action plan --plan_action execute --plan_id <id>
+python3 scripts/handler.py --action plan --plan_action rollback --plan_id <id>
 ```
 
-### 3.2 异常检测 / 容量预测
+## 5. IP 池
 
 ```bash
-# 异常扫描（自动推送 alarm 事件）
-python3 scripts/handler.py --action anomaly --metric-days 7
+# 查看某网段可用 IP
+python3 scripts/handler.py --action ip_pool --ip-action available --ip-spec 10.0.0.0/24
 
-# 容量预测（按 90% 阈值）
-python3 scripts/handler.py --action forecast --forecast-threshold 0.9
+# 分配一个 IP（会写入本地占用表）
+python3 scripts/handler.py --action ip_pool --ip-action allocate --ip-spec 10.0.0.0/24
+
+# 释放已分配 IP
+python3 scripts/handler.py --action ip_pool --ip-action release --ip-target 10.0.0.20
 ```
 
-### 3.3 指标采集（建议 cron 每 5min）
+## 6. TTL 自动清理
 
 ```bash
-python3 scripts/handler.py --action metrics    # 单次采集（连 vCenter）
-python3 scripts/handler.py --action metrics --metrics-action query --metric-type ds_used --metric-days 7
+# 给某台 VM 设置 60 分钟 TTL
+python3 scripts/handler.py --action ttl --ttl_action set --hostname test-vm --ttl_minutes 60
+
+# 查看 TTL 列表
+python3 scripts/handler.py --action ttl --ttl_action list
+
+# 手动触发一次到期清理（推荐挂 cron）
+python3 scripts/handler.py --action ttl --ttl_action cleanup
 ```
 
-## 4. 安全合规
-
-### 4.1 密码加密
+## 7. 巡检 / 审计
 
 ```bash
-# 从 .env 迁移到加密存储
-python3 scripts/secret_manager.py migrate --dry-run    # 预览
-python3 scripts/secret_manager.py migrate              # 执行
+# 事件（最近 60 分钟内的电源/迁移/快照/告警）
+python3 scripts/handler.py --action events --minutes 60 --event_category power
 
-# 手动加密
+# 资源配额展示
+python3 scripts/handler.py --action quota --cluster CL01 --cpu_threshold 0.85
+
+# 导出全量 VM 报表
+python3 scripts/handler.py --action export --export_format html --output /tmp/vms.html
+
+# 审计报表（HTML）
+python3 scripts/handler.py --action audit_report --export_format html --output /tmp/vcenter-audit.html
+
+# 审计日志查询
+python3 scripts/handler.py --audit-query --action delete_vm --hostname web02
+```
+
+## 8. 密码与密钥
+
+```bash
+# 迁移 .env 中的密码到加密存储（推荐首次运行）
+python3 scripts/handler.py --action secret --secret-action migrate
+
+# 查看加密存储中已保存的键
+python3 scripts/handler.py --action secret --secret-action list
+
+# 设置一个新密钥
 python3 scripts/handler.py --action secret --secret-action set \
-  --secret-key VCENTER_PASSWORD --secret-value 'mypass'
+  --secret-key VCENTER_PASSWORD --secret-value '***'
 
-# 主密钥轮换
-python3 scripts/secret_manager.py rotate
+# 轮换主密钥（会重新加密所有 secret）
+python3 scripts/handler.py --action secret --secret-action rotate
 ```
 
-### 4.2 RBAC
-
-```yaml
-# config.yaml 启用
-rbac:
-  enabled: true
-  default_role: guest
-```
+## 9. 删除操作（高危）
 
 ```bash
-python3 scripts/handler.py --action rbac --rbac-action bind \
-  --rbac-user alice --rbac-role operator
+# 第 1 步：先扫描一下危险词（可选）
+python3 scripts/handler.py --action danger --danger-action scan --danger-target web02
 
-# 检查权限
-python3 scripts/handler.py --action rbac --rbac-action check \
-  --rbac-user alice --rbac-target-action delete_vm
+# 第 2 步：Dry-run 预演
+python3 scripts/handler.py --dry-run --action delete_vm --hostname web02
+
+# 第 3 步：正式删除（必须带 --confirmed）
+python3 scripts/handler.py --action delete_vm --hostname web02 --confirmed
 ```
 
-### 4.3 危险词与确认
+删除会自动打预删除快照，出错后可通过快照回滚。
 
-```bash
-# 扫描
-python3 scripts/handler.py --action danger --danger-action scan \
-  --danger-target prod-mysql-master
-
-# 危险目标删除：先报错要求确认，再用 --confirmed 重试
-python3 scripts/handler.py --action delete_vm --hostname prod-mysql-master \
-  --actor alice                            # 报错 confirm_required
-python3 scripts/handler.py --action delete_vm --hostname prod-mysql-master \
-  --actor alice --confirmed                # 通过
-```
-
-### 4.4 变更窗口
-
-```yaml
-# config.yaml 启用
-change_window:
-  enabled: true
-  block_windows:
-    - {weekdays: [0,1,2,3,4,5,6], start: "00:00", end: "06:00", reason: "夜间静默期"}
-  blackout_dates: ["2026-01-01", "2026-02-15"]
-```
-
-### 4.5 审批策略
-
-```yaml
-approval_policy:
-  enabled: true
-  # 默认 4 条策略（生产/会签/删除等），可在此追加
-```
-
-## 5. 事件推送
-
-### 5.1 Webhook（钉钉）
-
-```bash
-python3 scripts/handler.py --action webhook --webhook-action add \
-  --webhook-name ops-bot \
-  --webhook-url "https://oapi.dingtalk.com/robot/send?access_token=***" \
-  --webhook-secret 'SEC***' \
-  --webhook-mode dingtalk \
-  --webhook-topics "vm.created" "vm.deleted" "clone.failed" "alarm" "quota.breach"
-```
-
-### 5.2 已支持的事件主题
-
-| 主题 | 触发时机 |
-|------|----------|
-| `vm.created` | 克隆成功 |
-| `vm.deleted` | 删除成功 |
-| `vm.reconfigured` | 硬件变更 |
-| `vm.power.on` / `vm.power.off` | 电源变更 |
-| `vm.migrated` | vMotion 完成 |
-| `clone.failed` | 克隆失败 |
-| `ttl.expired` / `ttl.cleaned` | TTL 到期 |
-| `alarm` | 异常检测或 vCenter 原生告警 |
-| `quota.breach` | 容量预测预警 |
-
-### 5.3 vCenter 原生告警轮询
-
-```bash
-# 立刻拉一次（建议 cron 每 5min）
-python3 scripts/alarm_poller.py poll
-
-# 列出当前所有活动告警（不去重）
-python3 scripts/alarm_poller.py list
-```
-
-## 6. 运维与诊断
-
-### 6.1 健康自检
-
-```bash
-python3 scripts/healthcheck.py                # 含 vCenter 连通性
-python3 scripts/healthcheck.py --no-vcenter   # 仅本地
-python3 scripts/healthcheck.py --json         # JSON 输出
-```
-
-### 6.2 审计报表
-
-```bash
-# HTML 报表（推荐）
-python3 scripts/handler.py --action audit_report --report-days 30 \
-  --output /tmp/audit-month.html
-
-# Markdown
-python3 scripts/handler.py --action audit_report --report-days 7 \
-  --export_format markdown --output /tmp/audit-week.md
-```
-
-### 6.3 删除操作（高危）
-
-```bash
-# 1) 普通删除（自动打 pre-delete 快照）
-python3 scripts/handler.py --action delete_vm --hostname dev-tmp01
-
-# 2) 跳过删除前快照（节省时间）
-VC_SKIP_PRE_DELETE_SNAPSHOT=1 \
-  python3 scripts/handler.py --action delete_vm --hostname dev-tmp01
-```
-
-## 7. 推荐 cron 任务
+## 10. 推荐 cron 任务
 
 ```cron
-# 每 5 分钟采集指标
-*/5 * * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action metrics >> logs/metrics.log 2>&1
+# 每小时清一次 TTL 到期 VM
+0 * * * * cd /path/to/vcenter-ops && python3 scripts/handler.py --action ttl --ttl_action cleanup >> logs/ttl.log 2>&1
 
-# 每 5 分钟轮询 vCenter 告警
-*/5 * * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/alarm_poller.py poll >> logs/alarm.log 2>&1
-
-# 每 30 分钟跑异常检测
-*/30 * * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action anomaly >> logs/anomaly.log 2>&1
-
-# 每天凌晨 2 点容量预测
-0 2 * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action forecast >> logs/forecast.log 2>&1
-
-# 每周一 9 点生成审计周报
-0 9 * * 1 cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action audit_report --report-days 7 --output reports/audit-$(date +\%F).html
-
-# 每日 3 点清理过期任务/指标
-0 3 * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/handler.py --action metrics --metrics-action cleanup --metrics-keep-days 30
-
-# 每日 4 点健康自检（失败发邮件）
-0 4 * * * cd /root/.openclaw/workspace-infraops/skills/vcenter-ops && python3 scripts/healthcheck.py >> logs/health.log 2>&1 || mail -s "vcenter-ops health FAIL" admin@example.com < logs/health.log
+# 每天 03:00 导出审计报表
+0 3 * * * cd /path/to/vcenter-ops && python3 scripts/handler.py --action audit_report --export_format html --output logs/audit-$(date +\%F).html >> logs/audit-cron.log 2>&1
 ```
 
-## 8. 主密钥备份（极其重要）
+## 11. 常见问题
 
-`data/.master_key` 丢失 = 所有加密密码无法解密。
-
-```bash
-# 备份到本机另一目录（chmod 600）
-cp data/.master_key /root/.master_key.backup
-chmod 600 /root/.master_key.backup
-
-# 离线备份到加密 U 盘 / 内网保险柜
-# 不要把它放进 git！.gitignore 已默认排除 data/
-```
-
-## 9. 故障排查 FAQ
-
-| 现象 | 排查 |
-|------|------|
-| `secrets.json` 解密失败 | 检查 `data/.master_key` 是否被改 / 是否设了 `VC_MASTER_KEY` 环境变量 |
-| `change_window` 拦截 | `--action change_window --window-action status` 查当前状态 |
-| `confirm_required` | 加 `--confirmed` 参数重试 |
-| `approval_required` | 当前审批未对接外部系统，需在 config.yaml 调整 `approval_policy.enabled: false` 或调整策略 |
-| `quota` 拦截 | 检查 `config.yaml.quota_enforce.per_vm` 上限 |
-| webhook 投递失败 | `--action webhook --webhook-action list` 看 last_error，检查 URL/签名 |
-| Tools 等待超时 | `--no-wait-tools` 跳过；或 `--tools-timeout 600` 加长 |
+- **连不上 vCenter**：先跑 `python3 scripts/healthcheck.py`，再核对 `config.yaml` 与 `.env` 里的 host / password_ref。
+- **密码泄漏担忧**：改用 `secret_manager` 加密存储，不要把密码写进 `config.yaml`。
+- **批量误操作**：先 `--dry-run`，再看输出的 `params` 是否符合预期，再去掉 `--dry-run` 正式执行。
+- **删除不了 VM**：确认没有触发危险词校验，如果是有意为之请补 `--confirmed`；仍失败请查 `logs/audit.log`。

@@ -1,8 +1,8 @@
 ---
 name: vcenter-ops
-description: "Operate VMware vCenter VMs: inventory, clone, power, snapshot, migrate, delete, audit, quota, metrics, RBAC, and lifecycle automation."
+description: "Operate VMware vCenter VMs for a solo IT admin: inventory, clone, power, snapshot, reconfigure, migrate, delete, batch, plan/apply, IP pool, audit, quota, events, and secrets."
 metadata:
-  version: 1.5.0
+  version: 2.0.0
   entrypoint: scripts/handler.py
   schema_ref: references/SCHEMA.md
   action_matrix_ref: references/ACTION-MATRIX.md
@@ -10,7 +10,9 @@ metadata:
 
 # vCenter Ops
 
-Use for VMware vCenter operations: inventory/query, clone/delivery, power, snapshot, reconfigure, guest command, migrate, datastore/template, batch, TTL, approval, audit, quota, metrics, recommendation, anomaly/forecast, RBAC, secrets, change windows, webhooks, IP pool, and lifecycle automation.
+Solo-admin edition. Use for VMware vCenter operations: inventory/query, clone, power, snapshot, reconfigure, guest command, migrate, datastore/template, batch, plan/apply, TTL, audit, quota, events, IP pool, and secrets.
+
+> Approval workflow, RBAC, change window, webhook, metrics/recommend/anomaly/forecast, and delivery pipeline have been removed in v2.0 to keep this Skill focused on a single administrator.
 
 ## Route banner
 
@@ -58,7 +60,7 @@ Set-Location $env:SKILL_DIR; python scripts\handler.py --action <action> [option
 - Action list/examples: `references/ACTION-MATRIX.md`
 - Full CLI schema: `references/SCHEMA.md`
 - Clone preflight flow: `references/CLONE-FLOW.md`
-- Permission/safety: `references/PERMISSION-SYSTEM.md`, `references/SAFETY-GATE.md`
+- Permission/safety: `references/PERMISSION-SYSTEM.md`
 - Cache strategy: `references/CACHE-STRATEGY.md`
 - User guide: `references/USER-GUIDE.md`
 - Production runbook: `references/OPS-RUNBOOK.md`
@@ -94,19 +96,18 @@ Detailed flow: `references/CLONE-FLOW.md`.
 
 ## Permission levels
 
-- 🔵 Query/low-risk: inventory, get VM, list snapshots, export, preset/history, quota/events.
-- 🟡 Sensitive change: power, guest command, migrate, batch, TTL cleanup, webhook/secret/RBAC/config changes.
-- 🔴 Delete/destroy: delete VM or irreversible cleanup.
+- 🔵 Query/low-risk: `list_all`, `get_vm`, `snapshot list`, `export`, `preset`, `history`, `quota`, `events`, `ip_pool`, `audit_report`, `datastore`, `plan list`.
+- 🟡 Sensitive change: `power_vm`, `snapshot create/revert/delete`, `reconfigure`, `guest_exec`, `migrate`, `batch`, `template`, `ttl`, `plan execute/rollback`, `secret set/delete`.
+- 🔴 Delete/destroy: `delete_vm`.
 
 ## Delete safety rules
 
 Hard rules, no exception:
 
 1. Two confirmations are required.
-2. Reject “delete all / 清空 / 通配符删除 / 条件批量删除”.
+2. Reject "delete all / 清空 / 通配符删除 / 条件批量删除".
 3. Require exact VM name or exact IP.
-4. Prefer approval flow when enabled.
-5. Record audit evidence before and after execution.
+4. Record audit evidence before and after execution.
 
 Permission details: `references/PERMISSION-SYSTEM.md`.
 

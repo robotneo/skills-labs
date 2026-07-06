@@ -149,41 +149,6 @@ def check_vcenter_connectivity() -> Dict[str, Any]:
         return {"name": "vCenter 连通性", "ok": False, "detail": str(e)[:80]}
 
 
-def check_webhooks() -> Dict[str, Any]:
-    """检查 webhook 配置。"""
-    try:
-        from scripts.webhook_subscriber import list_webhooks
-        whs = list_webhooks()
-        enabled = sum(1 for w in whs if w.get("enabled"))
-        failed = sum(1 for w in whs if w.get("last_error"))
-        return {
-            "name": "Webhook 订阅",
-            "ok": failed == 0,
-            "detail": f"总 {len(whs)}, 启用 {enabled}, 失败 {failed}",
-        }
-    except Exception as e:
-        return {"name": "Webhook 订阅", "ok": False, "detail": str(e)}
-
-
-def check_metrics() -> Dict[str, Any]:
-    """检查指标采集状态。"""
-    metrics_dir = SKILL_DIR / "data" / "metrics"
-    if not metrics_dir.exists():
-        return {"name": "指标采集", "ok": False, "detail": "metrics 目录不存在"}
-    files = sorted(metrics_dir.glob("*.jsonl"))
-    if not files:
-        return {"name": "指标采集", "ok": False, "detail": "无采集数据"}
-    latest = files[-1]
-    age = datetime.now().timestamp() - latest.stat().st_mtime
-    age_h = age / 3600
-    ok = age_h < 24
-    return {
-        "name": "指标采集",
-        "ok": ok,
-        "detail": f"最新文件 {latest.name}, 年龄 {age_h:.1f}h",
-    }
-
-
 # ============================================================
 # 汇总
 # ============================================================
@@ -196,8 +161,6 @@ CHECKS = [
     check_locks,
     check_cache,
     check_audit_log,
-    check_webhooks,
-    check_metrics,
     check_vcenter_connectivity,
 ]
 
