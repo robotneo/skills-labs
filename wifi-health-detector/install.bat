@@ -7,7 +7,7 @@ if "%WIFI_HEALTH_DETECTOR_REPO%"=="" (
   set "REPO_URL=%WIFI_HEALTH_DETECTOR_REPO%"
 )
 
-set "SKILL_NAME=wifi_health_detector"
+set "SKILL_NAME=wifi-health-detector"
 if "%CODEX_HOME%"=="" (
   set "SKILL_DIR=%USERPROFILE%\.codex\skills\%SKILL_NAME%"
 ) else (

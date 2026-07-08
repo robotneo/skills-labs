@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="${WIFI_HEALTH_DETECTOR_REPO:-https://github.com/robotneo/skills-labs.git}"
-SKILL_NAME="wifi_health_detector"
+SKILL_NAME="wifi-health-detector"
 SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/$SKILL_NAME"
 
 if ! command -v git >/dev/null 2>&1; then

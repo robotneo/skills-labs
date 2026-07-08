@@ -1,5 +1,5 @@
 ---
-name: wifi_health_detector
+name: wifi-health-detector
 description: Detect Wi-Fi and wireless network quality on macOS and Windows. Use when the user asks to check Wi-Fi quality, wireless network status, SSID, band, channel, channel width, RSSI or signal strength, negotiated rate, IP address, gateway, MAC address, packet loss, latency, co-channel interference, health score, or optimization suggestions.
 ---
 
@@ -12,8 +12,8 @@ Use local/elevated execution when possible. Latency, packet loss, Wi-Fi scan, an
 ## Commands
 
 ```bash
-python3 /Users/hua/Documents/Codex/skills/wifi_health_detector/main.py
-python3 /Users/hua/Documents/Codex/skills/wifi_health_detector/main.py --interface en0
+python3 main.py
+python3 main.py --interface en0
 ```
 
 ## Output Contract

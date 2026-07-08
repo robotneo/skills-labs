@@ -1,5 +1,5 @@
 {
-  "id": "wifi_health_detector",
+  "id": "wifi-health-detector",
   "name": "无线网络健康检测",
   "version": "1.1.0",
   "author": "hua",
@@ -9,5 +9,5 @@
   "requirements": ["python>=3.7"],
   "entry": "main.py",
   "output_type": ["text", "json", "csv"],
-  "repository": "https://github.com/robotneo/skills-labs/tree/main/wifi_health_detector"
+  "repository": "https://github.com/robotneo/skills-labs/tree/main/wifi-health-detector"
 }

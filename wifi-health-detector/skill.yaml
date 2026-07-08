@@ -1,4 +1,4 @@
-skill_id: wifi_health_detector
+skill_id: wifi-health-detector
 name: 无线网络健康检测
 version: 1.1.0
 author: hua
@@ -6,4 +6,4 @@ description: 检测当前 macOS/Windows 设备的 Wi-Fi 参数、网关时延、
 support_os: [macos, windows]
 entry: python3 main.py
 output_format: text
-repo: https://github.com/robotneo/skills-labs/tree/main/wifi_health_detector
+repo: https://github.com/robotneo/skills-labs/tree/main/wifi-health-detector

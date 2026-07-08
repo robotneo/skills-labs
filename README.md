@@ -7,7 +7,7 @@
 | 类型 | 名称 | 作用 |
 | --- | --- | --- |
 | Skill | `vcenter-ops` | VMware vCenter 单人管理员运维自动化 |
-| Skill | `wifi_health_detector` | macOS / Windows Wi-Fi 健康度检测 |
+| Skill | `wifi-health-detector` | macOS / Windows Wi-Fi 健康度检测 |
 | Hook | `hooks/vcenter-guard` | vCenter 操作前置管控与安全路由 |
 
 ---
@@ -52,9 +52,9 @@ python3 vcenter-ops/scripts/handler.py --action batch \
   --batch-action power --pattern 'web-*' --state on
 ```
 
-### wifi_health_detector
+### wifi-health-detector
 
-- **Skill 名称**：`wifi_health_detector`
+- **Skill 名称**：`wifi-health-detector`
 - **入口**：`main.py`
 - **平台支持**：macOS / Windows
 - **依赖**：零第三方依赖，Python 3.7+
@@ -68,8 +68,8 @@ python3 vcenter-ops/scripts/handler.py --action batch \
 **使用示例**
 
 ```bash
-python3 wifi_health_detector/main.py
-python3 wifi_health_detector/main.py --interface en0
+python3 wifi-health-detector/main.py
+python3 wifi-health-detector/main.py --interface en0
 ```
 
 建议本地或提权执行；沙箱内运行会影响时延、丢包与 Wi-Fi 扫描等指标的准确性。

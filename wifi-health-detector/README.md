@@ -16,7 +16,7 @@
 
 ```bash
 WIFI_HEALTH_DETECTOR_REPO="https://github.com/robotneo/skills-labs.git" \
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/robotneo/skills-labs/main/wifi_health_detector/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/robotneo/skills-labs/main/wifi-health-detector/install.sh)"
 ```
 
 ### Windows
@@ -24,7 +24,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/robotneo/skills-labs/mai
 下载并运行：
 
 ```text
-https://raw.githubusercontent.com/robotneo/skills-labs/main/wifi_health_detector/install.bat
+https://raw.githubusercontent.com/robotneo/skills-labs/main/wifi-health-detector/install.bat
 ```
 
 发布到 GitHub 前，把 `robotneo` 替换成真实用户名。
