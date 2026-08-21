@@ -21,7 +21,7 @@ FIELD_LABELS_ZH = {
     "target": "测试目标", "reachable": "可达状态", "latency": "平均延迟", "jitter": "网络抖动", "packet_loss": "丢包率", "dns_latency": "DNS 解析延迟", "download_speed": "下载速度",
 }
 FIELD_LABELS_EN = {name: name.replace("_", " ").title() for name in FIELD_LABELS_ZH}
-FIELD_LABELS_EN.update({"ssid": "Wi-Fi Name (SSID)", "bssid": "Access Point BSSID", "rssi": "Signal (RSSI)", "snr": "Signal-to-Noise Ratio (SNR)", "tx_rate": "Transmit Link Rate", "rx_rate": "Receive Link Rate"})
+FIELD_LABELS_EN.update({"ssid": "Wi-Fi Name (SSID)", "bssid": "Access Point BSSID", "rssi": "Signal (RSSI)", "snr": "Signal-to-Noise Ratio (SNR)", "tx_rate": "Transmit Link Rate", "rx_rate": "Receive Link Rate", "dns_latency": "DNS Latency", "dns_servers": "DNS Servers", "ipv4": "IPv4 Address", "ipv6": "IPv6 Address", "dhcp_enabled": "DHCP Status", "dhcp_lease": "DHCP Lease"})
 
 SENSITIVE_FIELDS = {"ssid", "bssid", "mac", "ipv4", "ipv6", "gateway", "dns_servers"}
 ZH_RECOMMENDATIONS = {
@@ -93,6 +93,7 @@ def _display_field(report, section, name, language, mask=False, include_unit=Tru
     if not item.available:
         return "—（系统未提供：%s）" % _reason(item.reason, language) if language == "zh" else "— (Unavailable: %s)" % _reason(item.reason, language)
     value = _masked(name, item.value) if mask and name in SENSITIVE_FIELDS else item.value
+    if isinstance(value, bool): value = ("是" if value else "否") if language == "zh" else ("Yes" if value else "No")
     shown = _escape(value)
     return shown + (" " + item.unit if include_unit and item.unit else "")
 
@@ -137,6 +138,23 @@ def _core_rows(report, language, mask):
     return list(zip(labels, values))
 
 
+def _render_quality_sections(report, language, mask):
+    zh = language == "zh"; field_labels = FIELD_LABELS_ZH if zh else FIELD_LABELS_EN
+    sections = (
+        ("local_quality", "## 🏠 " + ("本地网络质量" if zh else "Local Network Quality"), ("target", "reachable", "latency", "jitter", "packet_loss")),
+        ("public_quality", "## 🌐 " + ("公网质量" if zh else "Public Network Quality"), ("target", "reachable", "dns_latency", "latency", "jitter", "packet_loss", "download_speed")),
+    )
+    headers = ("参数", "当前值", "状态") if zh else ("Parameter", "Current Value", "Status")
+    lines = []
+    for section, heading, names in sections:
+        lines.extend(["", heading, "", "| %s | %s | %s |" % headers, "| --- | --- | :---: |"])
+        for name in names:
+            item = report.get(section, name)
+            status = ("可用" if item.available else "不可用") if zh else ("Available" if item.available else "Unavailable")
+            lines.append("| %s | %s | %s |" % (field_labels[name], _display_field(report, section, name, language, mask), status))
+    return lines
+
+
 def _render_dashboard(report, language, mask):
     zh = language == "zh"; diagnosis = report.diagnosis or {}
     title = "# 📶 Wi-Fi 健康报告" if zh else "# 📶 Wi-Fi Health Report"
@@ -146,6 +164,7 @@ def _render_dashboard(report, language, mask):
     core_headers = ("核心参数", "当前值") if zh else ("Metric", "Current Value")
     lines = [title, "", "> " + metadata, "", "| %s | %s | %s |" % status_headers, "| :---: | :---: | :---: |", "| %s | **%s/100** | **%s%%** |" % (badge, diagnosis.get("score", "—"), diagnosis.get("confidence_percent", 0)), "", "## ⭐ " + ("核心参数" if zh else "Core Metrics"), "", "| %s | %s |" % core_headers, "| --- | --- |"]
     lines.extend("| %s | %s |" % row for row in _core_rows(report, language, mask))
+    lines.extend(_render_quality_sections(report, language, mask))
     lines.extend(["", "## 🧭 " + ("诊断与建议" if zh else "Diagnostics & Recommendations"), "", "### " + ("主要问题" if zh else "Main Issues"), ""])
     issues = diagnosis.get("issues", []); issue_labels = ZH_ISSUES if zh else EN_ISSUES
     lines.extend(("- %s" % issue_labels.get(item, item) for item in issues) if issues else ["- 未发现明确问题" if zh else "- No specific issue was identified"])

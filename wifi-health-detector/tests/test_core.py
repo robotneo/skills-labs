@@ -174,6 +174,34 @@ class OutputContractTests(unittest.TestCase):
             self.assertIn("| %s |" % label, text)
         self.assertIn("—（系统未提供", text)
 
+    def test_summary_has_fixed_local_and_public_quality_sections(self):
+        report = self._sample_report()
+        report.sections["local_quality"]["target"] = Field("192.168.1.1", source="fixture")
+        report.sections["local_quality"]["reachable"] = Field(True, source="fixture")
+        report.sections["local_quality"]["jitter"] = Field(1.1, "ms", source="fixture")
+        report.sections["public_quality"]["target"] = Field("1.1.1.1", source="fixture")
+        report.sections["public_quality"]["reachable"] = Field(True, source="fixture")
+        report.sections["public_quality"]["dns_latency"] = Field(25.0, "ms", source="fixture")
+        report.sections["public_quality"]["latency"] = Field(40.0, "ms", source="fixture")
+        report.sections["public_quality"]["jitter"] = Field(2.0, "ms", source="fixture")
+        report.sections["public_quality"]["packet_loss"] = Field(0.0, "%", source="fixture")
+        text = render_text(report, language="zh", view="summary")
+        headings = ["## ⭐ 核心参数", "## 🏠 本地网络质量", "## 🌐 公网质量", "## 🧭 诊断与建议"]
+        positions = [text.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        for label in ("测试目标", "可达状态", "平均延迟", "网络抖动", "丢包率", "DNS 解析延迟"):
+            self.assertIn("| %s |" % label, text)
+
+    def test_quality_sections_keep_unavailable_rows_and_match_english_layout(self):
+        report = Report.empty()
+        report.diagnosis = diagnose(report)
+        zh = render_text(report, language="zh", view="summary")
+        en = render_text(report, language="en", view="summary")
+        self.assertGreaterEqual(zh.count("—（系统未提供"), 12)
+        self.assertIn("## 🏠 Local Network Quality", en)
+        self.assertIn("## 🌐 Public Network Quality", en)
+        self.assertIn("| DNS Latency |", en)
+
     def test_summary_view_omits_details_but_exports_remain_complete(self):
         report = self._sample_report()
         summary = render_text(report, language="zh", view="summary")

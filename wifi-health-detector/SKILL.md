@@ -25,7 +25,7 @@ Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedte
 
 ## Output Contract
 
-The Markdown report always starts with the complete fixed dashboard: status badge, score, confidence, ten core metric rows, issues, and prioritized recommendations. Relay this dashboard without removing rows. Use `--view summary` when the user asks for a concise check. The default `--view full` appends all eight fixed detail sections; relay those details when the user asks for complete parameters or raw diagnostic evidence. Preserve unavailable values and their reasons.
+The Markdown report always starts with the complete fixed dashboard: status badge, score, confidence, ten core metric rows, the fixed local-quality and public-quality tables, issues, and prioritized recommendations. Relay this dashboard without removing rows. Use `--view summary` when the user asks for a concise check. The default `--view full` appends all eight fixed detail sections; relay those details when the user asks for complete parameters or raw diagnostic evidence. Preserve unavailable values and their reasons.
 
 Terminal output contains raw network identifiers. Use `--mask` before sharing or exporting results outside the user's private context. Throughput testing is opt-in with `--speedtest`; default public checks are only DNS and lightweight ping.
 
