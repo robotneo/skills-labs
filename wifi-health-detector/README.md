@@ -1,6 +1,6 @@
 # Wi-Fi Health Detector Skill
 
-无线网络健康检测 Skill 2.0，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。采用原生启动器和统一 Python 核心，能够区分 Python/权限/系统命令问题与真实 Wi-Fi 故障。
+无线网络健康检测 Skill 2.1，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。采用原生启动器和统一 Python 核心，能够区分 Python/权限/系统命令问题与真实 Wi-Fi 故障。
 
 ## 特性
 
@@ -11,6 +11,7 @@
 - 分项评分、数据置信度和基于证据的优先级建议
 - 支持敏感信息打码、自动/指定网卡、稳定 JSON 2.0 和完整 CSV
 - 默认轻量 DNS/公网检测，1 MB 下载测速需显式开启
+- 默认输出固定 Markdown 仪表盘和完整详情；`--view summary` 仅展示核心参数与建议
 
 ## 安装
 
@@ -39,6 +40,7 @@ macOS：
 ./run.sh
 ./run.sh --interface en0 --mask
 ./run.sh --json result.json --csv result.csv
+./run.sh --view summary
 ```
 
 Windows：
@@ -47,9 +49,10 @@ Windows：
 run.bat
 run.bat --language zh --mask
 run.bat --json result.json --csv result.csv
+run.bat --view summary
 ```
 
-通用参数：`--speedtest` 开启吞吐测试，`--no-public-test` 仅检测本地链路，`--timeout` 设置超时，`--verbose` 保留诊断警告。`main.py` 仅作为已知 Python 可用时的兼容入口。
+通用参数：`--view full|summary` 控制完整或摘要视图，`--speedtest` 开启吞吐测试，`--no-public-test` 仅检测本地链路，`--timeout` 设置超时，`--verbose` 保留诊断警告。`main.py` 仅作为已知 Python 可用时的兼容入口。JSON/CSV 始终包含全部字段，不受视图参数影响。
 
 在 Codex 或其他 AI 助手中，用户可以说：
 

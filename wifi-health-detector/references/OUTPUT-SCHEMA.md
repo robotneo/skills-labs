@@ -1,5 +1,9 @@
 # Output schema 2.0
 
+The package version is 2.1; the machine-readable schema remains 2.0 because
+the dashboard and `--view full|summary` only change Markdown presentation.
+JSON and CSV always retain every field regardless of the selected view.
+
 JSON reports contain `schema_version`, `sections`, `diagnosis`, and `warnings`.
 Every entry inside `sections` has the same shape:
 
