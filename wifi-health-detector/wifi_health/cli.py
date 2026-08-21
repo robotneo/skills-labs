@@ -17,6 +17,7 @@ def build_parser():
     parser.add_argument("--no-public-test", action="store_true", help="skip DNS and public connectivity tests")
     parser.add_argument("--timeout", type=int, default=10, help="command/network timeout in seconds")
     parser.add_argument("--language", choices=("zh", "en"), default="zh", help="report language")
+    parser.add_argument("--view", choices=("full", "summary"), default="full", help="full dashboard and details, or summary dashboard only")
     parser.add_argument("--verbose", action="store_true", help="retain diagnostic warnings")
     parser.add_argument("--mask", action="store_true", help="mask network identifiers and addresses")
     parser.add_argument("--json", metavar="PATH", help="write the complete JSON report")
@@ -63,7 +64,7 @@ def main(argv=None):
         report = collect_report(runner, args.interface)
         apply_quality(report, runner, not args.no_public_test, args.speedtest, args.timeout)
         report.diagnosis = diagnose(report)
-        print(render_text(report, args.language, args.mask), end="")
+        print(render_text(report, args.language, args.mask, args.view), end="")
         if args.json: _write(args.json, render_json(report, args.mask))
         if args.csv: _write(args.csv, render_csv(report, args.mask))
         return 0

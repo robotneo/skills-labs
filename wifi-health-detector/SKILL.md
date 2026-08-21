@@ -21,11 +21,11 @@ run.bat
 
 The launchers validate Python 3.7+ before starting and distinguish a broken Apple `xcrun` proxy from Wi-Fi problems. Keep `python3 main.py` only as a compatibility fallback when a known-good interpreter is already available.
 
-Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedtest`, `--no-public-test`, `--timeout`, `--language zh|en`, and `--verbose`. Run `--help` for details.
+Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedtest`, `--no-public-test`, `--timeout`, `--language zh|en`, `--view full|summary`, and `--verbose`. Run `--help` for details.
 
 ## Output Contract
 
-Relay every generated report section in order: system, adapter, connection, radio, link, IP, local quality, public quality, and diagnosis. Preserve unavailable fields and their reasons. Include the score, confidence, evidence, and prioritized recommendations; do not summarize away fields.
+The Markdown report always starts with the complete fixed dashboard: status badge, score, confidence, ten core metric rows, issues, and prioritized recommendations. Relay this dashboard without removing rows. Use `--view summary` when the user asks for a concise check. The default `--view full` appends all eight fixed detail sections; relay those details when the user asks for complete parameters or raw diagnostic evidence. Preserve unavailable values and their reasons.
 
 Terminal output contains raw network identifiers. Use `--mask` before sharing or exporting results outside the user's private context. Throughput testing is opt-in with `--speedtest`; default public checks are only DNS and lightweight ping.
 

@@ -12,6 +12,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from wifi_health.diagnose import diagnose
+from wifi_health.cli import build_parser
 from wifi_health.models import Field, Report, unavailable
 from wifi_health.output import flatten_report, render_csv, render_json, render_text
 from wifi_health.parsers import (
@@ -141,6 +142,65 @@ class DiagnosisTests(unittest.TestCase):
 
 
 class OutputContractTests(unittest.TestCase):
+    def _sample_report(self):
+        report = Report.empty()
+        report.sections["system"]["checked_at"] = Field("2026-08-21T14:00:00+08:00", source="fixture")
+        report.sections["system"]["os"] = Field("Darwin", source="fixture")
+        report.sections["adapter"]["interface"] = Field("en0", source="fixture")
+        report.sections["connection"]["ssid"] = Field("Office", source="fixture")
+        report.sections["connection"]["band"] = Field("5 GHz", source="fixture")
+        report.sections["connection"]["channel"] = Field(149, source="fixture")
+        report.sections["radio"]["rssi"] = Field(-55, "dBm", source="fixture")
+        report.sections["local_quality"]["latency"] = Field(3.2, "ms", source="fixture")
+        report.sections["local_quality"]["packet_loss"] = Field(0.0, "%", source="fixture")
+        report.diagnosis = diagnose(report)
+        return report
+
+    def test_default_full_report_has_dashboard_before_fixed_details(self):
+        text = render_text(self._sample_report(), language="zh")
+        headings = ["# 📶 Wi-Fi 健康报告", "## ⭐ 核心参数", "## 🧭 诊断与建议", "## 📋 完整参数详情"]
+        positions = [text.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(text.count("### "), 10)  # issues, recommendations, and 8 fixed detail sections
+
+    def test_dashboard_keeps_all_core_rows_when_values_are_unavailable(self):
+        report = Report.empty()
+        report.diagnosis = diagnose(report)
+        text = render_text(report, language="zh", view="summary")
+        for label in (
+            "Wi-Fi 名称", "无线接口", "频段 / 信道 / 频宽", "信号强度", "信噪比",
+            "发送 / 接收速率", "网关延迟", "网关抖动 / 丢包", "公网延迟 / 丢包", "安全类型",
+        ):
+            self.assertIn("| %s |" % label, text)
+        self.assertIn("—（系统未提供", text)
+
+    def test_summary_view_omits_details_but_exports_remain_complete(self):
+        report = self._sample_report()
+        summary = render_text(report, language="zh", view="summary")
+        payload = json.loads(render_json(report))
+        rows = list(csv.DictReader(io.StringIO(render_csv(report))))
+        self.assertNotIn("完整参数详情", summary)
+        self.assertEqual(len(payload["sections"]), 8)
+        self.assertEqual(len(rows), sum(len(fields) for fields in report.sections.values()))
+
+    def test_cli_defaults_to_full_and_accepts_summary(self):
+        parser = build_parser()
+        self.assertEqual(parser.parse_args([]).view, "full")
+        self.assertEqual(parser.parse_args(["--view", "summary"]).view, "summary")
+
+    def test_verdict_badges_are_stable_in_both_languages(self):
+        expected = {
+            "healthy": ("✅ 健康", "✅ Healthy"),
+            "warning": ("⚠️ 一般/需关注", "⚠️ Warning"),
+            "poor": ("❌ 较差", "❌ Poor"),
+            "insufficient_data": ("❔ 数据不足", "❔ Insufficient data"),
+        }
+        for verdict, labels in expected.items():
+            report = Report.empty()
+            report.diagnosis = {"verdict": verdict, "score": 80, "confidence_percent": 50, "issues": [], "recommendations": []}
+            self.assertIn(labels[0], render_text(report, language="zh", view="summary"))
+            self.assertIn(labels[1], render_text(report, language="en", view="summary"))
+
     def test_all_sections_and_unavailable_reasons_are_preserved(self):
         report = Report.empty()
         report.sections["connection"]["ssid"] = Field("Office", source="fixture")
@@ -164,6 +224,17 @@ class OutputContractTests(unittest.TestCase):
         self.assertIn("靠近接入点", text)
         self.assertNotIn("Recommendations:", text)
 
+    def test_chinese_dashboard_localizes_evidence_and_runtime_notes(self):
+        report = Report.empty()
+        report.sections["radio"]["rssi"] = Field(-80, "dBm", source="fixture")
+        report.warnings.append("Unable to identify the Wi-Fi interface; using en0 fallback.")
+        report.diagnosis = diagnose(report)
+        text = render_text(report, language="zh", view="summary")
+        self.assertIn("RSSI 为 -80 dBm", text)
+        self.assertIn("无法自动识别 Wi-Fi 接口，已使用 en0", text)
+        self.assertNotIn("Move closer", text)
+        self.assertNotIn("Unable to identify", text)
+
     def test_masking_applies_to_text_json_and_csv(self):
         report = Report.empty()
         report.sections["connection"]["ssid"] = Field("SecretSSID", source="fixture")
@@ -171,7 +242,8 @@ class OutputContractTests(unittest.TestCase):
         report.sections["ip"]["ipv4"] = Field("192.168.10.24", source="fixture")
         report.diagnosis = diagnose(report)
         outputs = [
-            render_text(report, mask=True),
+            render_text(report, mask=True, view="full"),
+            render_text(report, mask=True, view="summary"),
             render_json(report, mask=True),
             render_csv(report, mask=True),
         ]
