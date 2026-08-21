@@ -1,14 +1,16 @@
 # Wi-Fi Health Detector Skill
 
-无线网络健康检测 Skill，用于在 macOS 和 Windows 上检测当前 Wi-Fi 参数、网关时延、丢包率、同信道干扰数量，并输出健康评分和优化建议。
+无线网络健康检测 Skill 2.0，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。采用原生启动器和统一 Python 核心，能够区分 Python/权限/系统命令问题与真实 Wi-Fi 故障。
 
 ## 特性
 
-- 支持 macOS 和 Windows
+- 支持 macOS 10.12+、Windows 10/11
 - 仅依赖 Python 3.7+，无第三方库
-- 输出 Wi-Fi 核心参数：SSID、频段、信道、频宽、信号强度、协商速率、IP、网关、MAC、时延、丢包率
-- 输出健康评分和优化建议
-- 支持敏感信息打码、指定网卡、JSON/CSV 输出
+- 完整输出系统、适配器、连接、射频、链路、IP、本地质量、公网质量和诊断字段
+- 不可获取字段保留原因，不用“未知”或虚假默认值扣分
+- 分项评分、数据置信度和基于证据的优先级建议
+- 支持敏感信息打码、自动/指定网卡、稳定 JSON 2.0 和完整 CSV
+- 默认轻量 DNS/公网检测，1 MB 下载测速需显式开启
 
 ## 安装
 
@@ -31,13 +33,23 @@ https://raw.githubusercontent.com/robotneo/skills-labs/main/wifi-health-detector
 
 ## 使用
 
+macOS：
+
 ```bash
-python3 main.py
-python3 main.py --interface en0
-python3 main.py --mask
-python3 main.py --json result.json
-python3 main.py --csv result.csv
+./run.sh
+./run.sh --interface en0 --mask
+./run.sh --json result.json --csv result.csv
 ```
+
+Windows：
+
+```bat
+run.bat
+run.bat --language zh --mask
+run.bat --json result.json --csv result.csv
+```
+
+通用参数：`--speedtest` 开启吞吐测试，`--no-public-test` 仅检测本地链路，`--timeout` 设置超时，`--verbose` 保留诊断警告。`main.py` 仅作为已知 Python 可用时的兼容入口。
 
 在 Codex 或其他 AI 助手中，用户可以说：
 
@@ -48,4 +60,6 @@ python3 main.py --csv result.csv
 
 ## 权限说明
 
-Wi-Fi 参数、网关 ping、丢包率和周边热点扫描需要读取本机真实网络接口。若在沙箱中运行，网络质量指标可能不准确；请使用本机权限运行。
+Wi-Fi 参数、网关 ping、丢包率和周边热点扫描需要读取真实网络接口。沙箱或普通权限可能隐藏部分字段；报告会明确显示“不可用”和原因。终端默认展示完整 SSID、BSSID、MAC 和地址，公开分享前请使用 `--mask`。
+
+macOS 若系统 `python3` 报 `invalid active developer path`，请直接运行 `run.sh`。启动器会优先寻找独立 Python；若仍不可用，会提示安装 Python，而不会误报 Wi-Fi 未连接。

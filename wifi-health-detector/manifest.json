@@ -1,13 +1,13 @@
 {
   "id": "wifi-health-detector",
   "name": "无线网络健康检测",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "author": "hua",
-  "description": "检测当前 macOS/Windows 设备的 Wi-Fi 参数、网关时延、丢包率、同信道干扰，并输出健康评分和优化建议。",
+  "description": "检测 macOS 10.12+ 与 Windows 10/11 的完整 Wi-Fi、射频、IP、本地及公网质量，并输出带置信度的诊断建议。",
   "platforms": ["codex", "claude", "openclaw", "qclaw", "hermes", "opencode", "generic"],
-  "support_os": ["macos", "windows"],
+  "support_os": ["macos>=10.12", "windows-10", "windows-11"],
   "requirements": ["python>=3.7"],
-  "entry": "main.py",
+  "entry": {"macos": "run.sh", "windows": "run.bat", "compatibility": "main.py"},
   "output_type": ["text", "json", "csv"],
   "repository": "https://github.com/robotneo/skills-labs/tree/main/wifi-health-detector"
 }

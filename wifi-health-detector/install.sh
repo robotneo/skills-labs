@@ -29,4 +29,5 @@ fi
 
 cp -R "$TMP_DIR/repo/$SKILL_NAME" "$SKILL_DIR"
 echo "无线网络检测 Skill 安装成功: $SKILL_DIR"
-echo "使用方式：对 AI 助手说『检测 WiFi 质量』或运行 python3 $SKILL_DIR/main.py"
+chmod +x "$SKILL_DIR/run.sh"
+echo "使用方式：对 AI 助手说『检测 WiFi 质量』或运行 $SKILL_DIR/run.sh"

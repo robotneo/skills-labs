@@ -30,7 +30,6 @@ if not exist "%TMP_DIR%\repo\%SKILL_NAME%" (
   exit /b 1
 )
 
-mkdir "%USERPROFILE%\.codex\skills" 2>nul
 if exist "%SKILL_DIR%" (
   set "BACKUP_DIR=%SKILL_DIR%.backup.%DATE:/=-%-%TIME::=-%"
   set "BACKUP_DIR=!BACKUP_DIR: =0!"
@@ -38,9 +37,10 @@ if exist "%SKILL_DIR%" (
   echo 已备份旧版本到: !BACKUP_DIR!
 )
 
-xcopy "%TMP_DIR%\repo\%SKILL_NAME%" "%SKILL_DIR%\" /E /I /Y >nul
+mkdir "%SKILL_DIR%" 2>nul
+xcopy "%TMP_DIR%\repo\%SKILL_NAME%\*" "%SKILL_DIR%\" /E /I /Y >nul
 rmdir /s /q "%TMP_DIR%"
 
 echo 无线网络检测 Skill 安装成功: %SKILL_DIR%
-echo 使用方式：对 AI 助手说 检测 WiFi 质量 或运行 python "%SKILL_DIR%\main.py"
+echo 使用方式：对 AI 助手说 检测 WiFi 质量 或运行 "%SKILL_DIR%\run.bat"
 pause
