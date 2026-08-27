@@ -17,7 +17,7 @@ def build_parser():
     parser.add_argument("--no-public-test", action="store_true", help="skip DNS and public connectivity tests")
     parser.add_argument("--timeout", type=int, default=10, help="command/network timeout in seconds")
     parser.add_argument("--language", choices=("zh", "en"), default="zh", help="report language")
-    parser.add_argument("--view", choices=("full", "summary"), default="full", help="full dashboard and details, or summary dashboard only")
+    parser.add_argument("--view", choices=("full", "summary"), default="summary", help="fixed dashboard by default; full also appends raw details")
     parser.add_argument("--verbose", action="store_true", help="retain diagnostic warnings")
     parser.add_argument("--mask", action="store_true", help="mask network identifiers and addresses")
     parser.add_argument("--json", metavar="PATH", help="write the complete JSON report")

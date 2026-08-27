@@ -25,7 +25,11 @@ Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedte
 
 ## Output Contract
 
-The Markdown report always starts with the complete fixed dashboard: status badge, score, confidence, ten core metric rows, the fixed local-quality and public-quality tables, issues, and prioritized recommendations. Relay this dashboard without removing rows. Use `--view summary` when the user asks for a concise check. The default `--view full` appends all eight fixed detail sections; relay those details when the user asks for complete parameters or raw diagnostic evidence. Preserve unavailable values and their reasons.
+Run the platform launcher without `--view full`. Its default Markdown is the final answer and must be relayed verbatim. Do not summarize it, rewrite diagnoses, translate values, add commentary inside it, or remove, merge, rename, or reorder rows. If execution fails, report the runtime error separately instead of fabricating a report.
+
+The default report always contains exactly five top-level sections in this order: `📶 Wi-Fi Health Report`, `⭐ Core Metrics`, `🏠 Local Network Quality`, `🌐 Public Network Quality`, and `🧭 Diagnostics & Recommendations` (localized when `--language zh` is used). It does not include Complete Parameter Details. The core table always keeps these 18 rows in order: OS version, chip architecture, MAC address, Wi-Fi name, wireless interface, band, channel, channel width, RSSI, SNR, transmit rate, receive rate, gateway latency, gateway jitter, gateway loss, public latency, public loss, and security type. Preserve unavailable values in their fixed positions together with their reasons.
+
+Use `--view full` only when the user explicitly requests raw diagnostic evidence or the eight detailed data sections. JSON and CSV exports always remain complete regardless of the Markdown view.
 
 Terminal output contains raw network identifiers. Use `--mask` before sharing or exporting results outside the user's private context. Throughput testing is opt-in with `--speedtest`; default public checks are only DNS and lightweight ping.
 

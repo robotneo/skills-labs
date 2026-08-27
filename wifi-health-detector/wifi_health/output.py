@@ -124,16 +124,39 @@ def _localized_warning(warning, language):
 
 
 def _core_rows(report, language, mask):
-    labels = (("Wi-Fi 名称", "无线接口", "频段 / 信道 / 频宽", "信号强度", "信噪比", "发送 / 接收速率", "网关延迟", "网关抖动 / 丢包", "公网延迟 / 丢包", "安全类型") if language == "zh" else ("Wi-Fi Name", "Wireless Interface", "Band / Channel / Width", "Signal Strength", "Signal-to-Noise Ratio", "Transmit / Receive Rate", "Gateway Latency", "Gateway Jitter / Loss", "Public Latency / Loss", "Security"))
+    labels = ((
+        "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
+        "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
+        "发送速率", "接收速率", "网关延迟", "网关抖动", "网关丢包",
+        "公网延迟", "公网丢包", "安全类型",
+    ) if language == "zh" else (
+        "Operating System Version", "Chip Architecture", "MAC Address", "Wi-Fi Name", "Wireless Interface",
+        "Wi-Fi Band", "Wireless Channel", "Channel Width", "Signal Strength (RSSI)", "Signal-to-Noise Ratio (SNR)",
+        "Transmit Rate", "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
+        "Public Latency", "Public Packet Loss", "Security Type",
+    ))
+    operating_system = "%s %s" % (
+        _display_field(report, "system", "os", language, mask),
+        _display_field(report, "system", "os_version", language, mask),
+    )
     values = [
-        _display_field(report, "connection", "ssid", language, mask), _display_field(report, "adapter", "interface", language, mask),
-        " / ".join((_display_field(report, "connection", "band", language, mask), _display_field(report, "connection", "channel", language, mask), _display_field(report, "connection", "channel_width", language, mask))),
+        operating_system,
+        _display_field(report, "system", "architecture", language, mask),
+        _display_field(report, "adapter", "mac", language, mask),
+        _display_field(report, "connection", "ssid", language, mask),
+        _display_field(report, "adapter", "interface", language, mask),
+        _display_field(report, "connection", "band", language, mask),
+        _display_field(report, "connection", "channel", language, mask),
+        _display_field(report, "connection", "channel_width", language, mask),
         _display_field(report, "radio", "rssi", language, mask), _display_field(report, "radio", "snr", language, mask),
-        " / ".join((_display_field(report, "link", "tx_rate", language, mask), _display_field(report, "link", "rx_rate", language, mask))),
+        _display_field(report, "link", "tx_rate", language, mask),
+        _display_field(report, "link", "rx_rate", language, mask),
         _display_field(report, "local_quality", "latency", language, mask),
-        " / ".join((_display_field(report, "local_quality", "jitter", language, mask), _display_field(report, "local_quality", "packet_loss", language, mask))),
-        " / ".join((_display_field(report, "public_quality", "latency", language, mask), _display_field(report, "public_quality", "packet_loss", language, mask))),
-        " / ".join((_display_field(report, "connection", "security", language, mask), _display_field(report, "connection", "authentication", language, mask), _display_field(report, "connection", "cipher", language, mask))),
+        _display_field(report, "local_quality", "jitter", language, mask),
+        _display_field(report, "local_quality", "packet_loss", language, mask),
+        _display_field(report, "public_quality", "latency", language, mask),
+        _display_field(report, "public_quality", "packet_loss", language, mask),
+        _display_field(report, "connection", "security", language, mask),
     ]
     return list(zip(labels, values))
 
@@ -192,7 +215,7 @@ def _render_details(report, language, mask):
     return lines
 
 
-def render_text(report, language="zh", mask=False, view="full"):
+def render_text(report, language="zh", mask=False, view="summary"):
     language = language if language in SECTION_LABELS else "zh"; view = view if view in ("full", "summary") else "full"
     lines = _render_dashboard(report, language, mask)
     if view == "full": lines.extend(_render_details(report, language, mask))

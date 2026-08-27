@@ -156,8 +156,8 @@ class OutputContractTests(unittest.TestCase):
         report.diagnosis = diagnose(report)
         return report
 
-    def test_default_full_report_has_dashboard_before_fixed_details(self):
-        text = render_text(self._sample_report(), language="zh")
+    def test_explicit_full_report_has_dashboard_before_fixed_details(self):
+        text = render_text(self._sample_report(), language="zh", view="full")
         headings = ["# 📶 Wi-Fi 健康报告", "## ⭐ 核心参数", "## 🧭 诊断与建议", "## 📋 完整参数详情"]
         positions = [text.index(heading) for heading in headings]
         self.assertEqual(positions, sorted(positions))
@@ -168,11 +168,43 @@ class OutputContractTests(unittest.TestCase):
         report.diagnosis = diagnose(report)
         text = render_text(report, language="zh", view="summary")
         for label in (
-            "Wi-Fi 名称", "无线接口", "频段 / 信道 / 频宽", "信号强度", "信噪比",
-            "发送 / 接收速率", "网关延迟", "网关抖动 / 丢包", "公网延迟 / 丢包", "安全类型",
+            "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
+            "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
+            "发送速率", "接收速率", "网关延迟", "网关抖动", "网关丢包",
+            "公网延迟", "公网丢包", "安全类型",
         ):
             self.assertIn("| %s |" % label, text)
         self.assertIn("—（系统未提供", text)
+
+    def test_core_dashboard_uses_fixed_complete_parameter_rows_in_order(self):
+        report = self._sample_report()
+        report.sections["system"]["os_version"] = Field("13.7.8", source="fixture")
+        report.sections["system"]["architecture"] = Field("x86_64", source="fixture")
+        report.sections["adapter"]["mac"] = Field("38:f9:d3:5f:4b:77", source="fixture")
+        text = render_text(report, language="zh", view="summary")
+        labels = (
+            "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
+            "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
+            "发送速率", "接收速率", "网关延迟", "网关抖动", "网关丢包",
+            "公网延迟", "公网丢包", "安全类型",
+        )
+        positions = [text.index("| %s |" % label) for label in labels]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(len(positions), 18)
+
+    def test_english_core_dashboard_matches_complete_chinese_layout(self):
+        report = Report.empty()
+        report.diagnosis = diagnose(report)
+        text = render_text(report, language="en", view="summary")
+        labels = (
+            "Operating System Version", "Chip Architecture", "MAC Address", "Wi-Fi Name",
+            "Wireless Interface", "Wi-Fi Band", "Wireless Channel", "Channel Width",
+            "Signal Strength (RSSI)", "Signal-to-Noise Ratio (SNR)", "Transmit Rate",
+            "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
+            "Public Latency", "Public Packet Loss", "Security Type",
+        )
+        positions = [text.index("| %s |" % label) for label in labels]
+        self.assertEqual(positions, sorted(positions))
 
     def test_summary_has_fixed_local_and_public_quality_sections(self):
         report = self._sample_report()
@@ -211,10 +243,28 @@ class OutputContractTests(unittest.TestCase):
         self.assertEqual(len(payload["sections"]), 8)
         self.assertEqual(len(rows), sum(len(fields) for fields in report.sections.values()))
 
-    def test_cli_defaults_to_full_and_accepts_summary(self):
+    def test_cli_defaults_to_fixed_summary_and_keeps_full_as_opt_in(self):
         parser = build_parser()
-        self.assertEqual(parser.parse_args([]).view, "full")
+        self.assertEqual(parser.parse_args([]).view, "summary")
         self.assertEqual(parser.parse_args(["--view", "summary"]).view, "summary")
+        self.assertEqual(parser.parse_args(["--view", "full"]).view, "full")
+
+    def test_default_cli_view_renders_only_the_five_fixed_sections(self):
+        report = self._sample_report()
+        view = build_parser().parse_args([]).view
+        text = render_text(report, language="zh", view=view)
+        headings = (
+            "# 📶 Wi-Fi 健康报告", "## ⭐ 核心参数", "## 🏠 本地网络质量",
+            "## 🌐 公网质量", "## 🧭 诊断与建议",
+        )
+        positions = [text.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("完整参数详情", text)
+
+    def test_renderer_default_is_the_same_fixed_summary(self):
+        text = render_text(self._sample_report(), language="zh")
+        self.assertIn("## 🧭 诊断与建议", text)
+        self.assertNotIn("完整参数详情", text)
 
     def test_verdict_badges_are_stable_in_both_languages(self):
         expected = {
@@ -234,7 +284,7 @@ class OutputContractTests(unittest.TestCase):
         report.sections["connection"]["ssid"] = Field("Office", source="fixture")
         report.sections["radio"]["noise"] = unavailable("not exposed by OS")
         report.diagnosis = diagnose(report)
-        text = render_text(report, language="en")
+        text = render_text(report, language="en", view="full")
         payload = json.loads(render_json(report))
         self.assertIn("System", text)
         self.assertIn("Diagnostics", text)
