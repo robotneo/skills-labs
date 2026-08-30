@@ -19,10 +19,5 @@ __pycache__/
 .idea/
 .python-version
 
-# 忽略所有 __init__.py
-**/__init__.py
-requirements.txt
-main.py
-
 # 打包产物（Skill hub 上传用）
 *.zip
