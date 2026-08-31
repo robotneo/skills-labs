@@ -77,6 +77,13 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "fields"):
             build_envelope(MARKDOWN, invalid, "摘要", "host_agent", "2.4.0")
 
+    def test_validator_rejects_available_field_with_null_value(self):
+        invalid = copy.deepcopy(REPORT)
+        invalid["sections"]["adapter"]["interface"]["availability"] = "available"
+        invalid["sections"]["adapter"]["interface"]["value"] = None
+        with self.assertRaisesRegex(ContractError, "available field"):
+            build_envelope(MARKDOWN, invalid, "摘要", "host_agent", "2.4.0")
+
     def test_build_envelope_accepts_detector_english_standard_report(self):
         report = Report.empty()
         report.sections["system"]["checked_at"] = Field(

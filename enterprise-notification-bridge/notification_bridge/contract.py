@@ -149,5 +149,7 @@ def _validate_field(field):
         raise ContractError("report JSON field availability is invalid")
     if not isinstance(field["reason"], str):
         raise ContractError("report JSON field reason is invalid")
+    if field["availability"] == "available" and field["value"] is None:
+        raise ContractError("report JSON available field is invalid")
     if field["availability"] == "unavailable" and (field["value"] is not None or not field["reason"]):
         raise ContractError("report JSON unavailable field is invalid")
