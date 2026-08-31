@@ -22,7 +22,7 @@ def ping_target(runner, target, count=3):
     return parsed
 
 
-def dns_test(host="www.example.com"):
+def dns_test(host):
     start = time.monotonic()
     try:
         socket.getaddrinfo(host, 443)

@@ -21,16 +21,18 @@ run.bat
 
 The launchers validate Python 3.7+ before starting and distinguish a broken Apple `xcrun` proxy from Wi-Fi problems. Keep `python3 main.py` only as a compatibility fallback when a known-good interpreter is already available.
 
-Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedtest`, `--no-public-test`, `--timeout`, `--language zh|en`, `--view full|summary`, and `--verbose`. Run `--help` for details.
+Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedtest`, `--no-public-test`, `--timeout`, `--language zh|en`, `--view summary`, and `--verbose`. Run `--help` for details.
 
 ## Output Contract
 
-Run the platform launcher without `--view full`. Its default Markdown is the final answer and must be relayed verbatim. Do not summarize it, rewrite diagnoses, translate values, add commentary inside it, or remove, merge, rename, or reorder rows. If execution fails, report the runtime error separately instead of fabricating a report.
+The platform launcher's stdout is the complete final response. After a successful run, return stdout byte-for-byte as the entire answer: no preface, code fence, summary, interpretation, translation, conclusion, or trailing note. Do not reconstruct the report from JSON/CSV. If execution fails, report only the runtime error; never fabricate a report.
 
-The default report always contains exactly five top-level sections in this order: `📶 Wi-Fi Health Report`, `⭐ Core Metrics`, `🏠 Local Network Quality`, `🌐 Public Network Quality`, and `🧭 Diagnostics & Recommendations` (localized when `--language zh` is used). It does not include Complete Parameter Details. The core table always keeps these 18 rows in order: OS version, chip architecture, MAC address, Wi-Fi name, wireless interface, band, channel, channel width, RSSI, SNR, transmit rate, receive rate, gateway latency, gateway jitter, gateway loss, public latency, public loss, and security type. Preserve unavailable values in their fixed positions together with their reasons.
+The report always contains exactly five top-level sections in this order: `📶 Wi-Fi Health Report`, `⭐ Core Metrics`, `🏠 Local Network Quality`, `🌐 Public Network Quality`, and `🧭 Diagnostics & Recommendations` (localized when `--language zh` is used). The core table always keeps these 18 rows in order: OS version, chip architecture, MAC address, Wi-Fi name, wireless interface, band, channel, channel width, RSSI, SNR, transmit rate, receive rate, gateway latency, gateway jitter, gateway loss, public latency, public loss, and security type. Missing values remain in their fixed positions with reasons. The executable validates this contract before printing and rejects nonstandard Markdown views.
 
-Use `--view full` only when the user explicitly requests raw diagnostic evidence or the eight detailed data sections. JSON and CSV exports always remain complete regardless of the Markdown view.
+JSON and CSV are explicit machine-data exports and retain all eight raw data sections. They never change or extend the Markdown report.
 
-Terminal output contains raw network identifiers. Use `--mask` before sharing or exporting results outside the user's private context. Throughput testing is opt-in with `--speedtest`; default public checks are only DNS and lightweight ping.
+Run without `--mask` so the standard report shows the Wi-Fi name. Add `--mask` only when the user explicitly requests redaction or says the report will be shared publicly; never hide the SSID by default. Throughput testing is opt-in with `--speedtest`. Default public checks aggregate mainland-China targets: AliDNS `223.5.5.5` and `223.6.6.6`, Tencent Public DNS `119.29.29.29`, Baidu `www.baidu.com`, and Taobao `www.taobao.com`.
+
+Keep both transmit and receive rate rows. Windows reports independent association Rx/Tx PHY rates. Current macOS tools normally expose only the transmit PHY rate, so the receive row must remain visible with its specific unavailable reason; never infer it from transmit rate or replace it with zero. Channel width comes from full `system_profiler SPAirPortDataType` on macOS. On Windows, use the direct `netsh` field when present and otherwise derive current width from Native Wi-Fi BSS operation information elements; never substitute the adapter's configured maximum width.
 
 The skill has no third-party Python dependencies. For the schema and field semantics, read [references/OUTPUT-SCHEMA.md](references/OUTPUT-SCHEMA.md) only when integrating JSON/CSV output.

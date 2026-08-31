@@ -33,7 +33,7 @@ BADGES = {
     "zh": {"healthy": "✅ 健康", "warning": "⚠️ 一般/需关注", "poor": "❌ 较差", "insufficient_data": "❔ 数据不足"},
     "en": {"healthy": "✅ Healthy", "warning": "⚠️ Warning", "poor": "❌ Poor", "insufficient_data": "❔ Insufficient data"},
 }
-REASON_ZH = {"not provided by operating system": "操作系统未提供", "not found": "未找到", "permission denied": "权限不足", "unsupported": "当前系统不支持", "default gateway not available": "默认网关不可用", "disabled by --no-public-test": "已通过 --no-public-test 禁用", "enable with --speedtest": "使用 --speedtest 开启", "download test failed": "下载测速失败"}
+REASON_ZH = {"not provided by operating system": "操作系统未提供", "not found": "未找到", "permission denied": "权限不足", "unsupported": "当前系统不支持", "default gateway not available": "默认网关不可用", "disabled by --no-public-test": "已通过 --no-public-test 禁用", "enable with --speedtest": "使用 --speedtest 开启", "download test failed": "下载测速失败", "macOS does not expose the current receive PHY rate": "macOS 未提供当前接收 PHY 速率"}
 
 
 def _masked(name, value):
@@ -115,14 +115,6 @@ def _localized_evidence(item, language):
     return (template % value) if template and "%s" in template else (template or reason)
 
 
-def _localized_warning(warning, language):
-    if language != "zh": return warning
-    match = re.match(r"Unable to identify the Wi-Fi interface; using (\S+) fallback\.", warning)
-    if match: return "无法自动识别 Wi-Fi 接口，已使用 %s 作为备用接口。" % match.group(1)
-    if warning.startswith("Wireless details unavailable:"): return warning.replace("Wireless details unavailable:", "无线详情不可用：", 1)
-    return warning
-
-
 def _core_rows(report, language, mask):
     labels = ((
         "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
@@ -198,25 +190,40 @@ def _render_dashboard(report, language, mask):
         priority = {"high": "高", "medium": "中", "low": "低"}.get(item["priority"], item["priority"]) if zh else item["priority"].title()
         action = ZH_RECOMMENDATIONS.get(item["id"], item["action"]) if zh else item["action"]
         lines.append("%d. **[%s]** %s — %s" % (index, priority, _escape(_localized_evidence(item, language)), _escape(action)))
-    if report.warnings: lines.extend(["", ("运行提示：" if zh else "Runtime notes:") + " " + "; ".join(_escape(_localized_warning(item, language)) for item in report.warnings)])
-    return lines
-
-
-def _render_details(report, language, mask):
-    zh = language == "zh"; labels = SECTION_LABELS[language]; field_labels = FIELD_LABELS_ZH if zh else FIELD_LABELS_EN
-    lines = ["", "## 📋 " + ("完整参数详情" if zh else "Complete Parameter Details")]
-    headers = ("参数", "当前值", "单位", "状态", "来源") if zh else ("Parameter", "Value", "Unit", "Status", "Source")
-    for section, fields in report.sections.items():
-        lines.extend(["", "### " + labels[section], "", "| %s | %s | %s | %s | %s |" % headers, "| --- | --- | --- | :---: | --- |"])
-        for name, item in fields.items():
-            shown = _display_field(report, section, name, language, mask, include_unit=False)
-            status = ("可用" if item.available else "不可用") if zh else ("Available" if item.available else "Unavailable")
-            lines.append("| %s | %s | %s | %s | %s |" % (field_labels.get(name, name), shown, _escape(item.unit), status, _escape(item.source)))
     return lines
 
 
 def render_text(report, language="zh", mask=False, view="summary"):
-    language = language if language in SECTION_LABELS else "zh"; view = view if view in ("full", "summary") else "full"
+    language = language if language in SECTION_LABELS else "zh"
     lines = _render_dashboard(report, language, mask)
-    if view == "full": lines.extend(_render_details(report, language, mask))
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    _validate_standard_text(text, language)
+    return text
+
+
+def _validate_standard_text(text, language):
+    zh = language == "zh"
+    expected_title = "# 📶 Wi-Fi 健康报告" if zh else "# 📶 Wi-Fi Health Report"
+    expected_sections = [
+        "## ⭐ " + ("核心参数" if zh else "Core Metrics"),
+        "## 🏠 " + ("本地网络质量" if zh else "Local Network Quality"),
+        "## 🌐 " + ("公网质量" if zh else "Public Network Quality"),
+        "## 🧭 " + ("诊断与建议" if zh else "Diagnostics & Recommendations"),
+    ]
+    expected_subsections = [
+        "### " + ("主要问题" if zh else "Main Issues"),
+        "### " + ("优化建议" if zh else "Recommendations"),
+    ]
+    lines = text.splitlines()
+    if [line for line in lines if line.startswith("# ")] != [expected_title]:
+        raise RuntimeError("standard report title contract violated")
+    if [line for line in lines if line.startswith("## ")] != expected_sections:
+        raise RuntimeError("standard report section contract violated")
+    if [line for line in lines if line.startswith("### ")] != expected_subsections:
+        raise RuntimeError("standard report subsection contract violated")
+    expected_row_counts = (18, 5, 7)
+    for start, end, expected_count in zip(expected_sections[:3], expected_sections[1:], expected_row_counts):
+        block = lines[lines.index(start) + 1:lines.index(end)]
+        data_rows = [line for line in block if line.startswith("|")][2:]
+        if len(data_rows) != expected_count:
+            raise RuntimeError("standard report table row contract violated")

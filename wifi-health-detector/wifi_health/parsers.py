@@ -60,6 +60,7 @@ WINDOWS_KEYS = {
     "authentication": "authentication", "身份验证": "authentication",
     "cipher": "cipher", "密码": "cipher",
     "channel": "channel", "频道": "channel",
+    "channel width": "channel_width", "信道宽度": "channel_width", "频道宽度": "channel_width",
     "receive rate (mbps)": "rx_rate", "接收速率(mbps)": "rx_rate",
     "transmit rate (mbps)": "tx_rate", "传输速率(mbps)": "tx_rate",
     "signal": "signal_percent", "信号": "signal_percent",
@@ -80,7 +81,7 @@ def parse_windows_netsh(text):
         value = value.strip()
         if target == "ssid" and normalized == "bssid":
             continue
-        if target == "channel":
+        if target in ("channel", "channel_width"):
             match = re.search(r"\d+", value)
             if match:
                 values[target] = int(match.group(0))

@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -12,7 +13,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from wifi_health.diagnose import diagnose
-from wifi_health.cli import build_parser
+from wifi_health.cli import apply_quality, build_parser
+from wifi_health.collectors import MacCollector
+from wifi_health.command import CommandResult
 from wifi_health.models import Field, Report, unavailable
 from wifi_health.output import flatten_report, render_csv, render_json, render_text
 from wifi_health.parsers import (
@@ -64,6 +67,7 @@ class ParserTests(unittest.TestCase):
     Transmit rate (Mbps)   : 961
     Signal                 : 82%
     Band                   : 6 GHz
+    Channel width          : 160 MHz
         """
         chinese = """
     名称                   : WLAN
@@ -79,16 +83,29 @@ class ParserTests(unittest.TestCase):
     接收速率(Mbps)         : 866
     传输速率(Mbps)         : 780
     信号                   : 76%
+    信道宽度               : 80 MHz
         """
         en = parse_windows_netsh(english)
         zh = parse_windows_netsh(chinese)
         self.assertEqual(en["ssid"], "Lab:Guest")
         self.assertEqual(en["band"], "6 GHz")
         self.assertEqual(en["rx_rate"], 1201.0)
+        self.assertEqual(en["channel_width"], 160)
         self.assertEqual(zh["interface"], "WLAN")
         self.assertEqual(zh["channel"], 44)
         self.assertEqual(zh["tx_rate"], 780.0)
         self.assertEqual(zh["signal_percent"], 76)
+        self.assertEqual(zh["channel_width"], 80)
+
+    def test_windows_bss_information_elements_yield_current_channel_width(self):
+        from wifi_health.windows_wlan import channel_width_from_ies
+
+        ht_40 = bytes([61, 22, 36, 0x05] + [0] * 20)
+        vht_80 = bytes([192, 5, 1, 42, 0, 0, 0])
+        vht_160 = bytes([192, 5, 2, 50, 114, 0, 0])
+        self.assertEqual(channel_width_from_ies(ht_40), 40)
+        self.assertEqual(channel_width_from_ies(ht_40 + vht_80), 80)
+        self.assertEqual(channel_width_from_ies(ht_40 + vht_160), 160)
 
     def test_ping_parser_handles_macos_windows_and_total_timeout(self):
         mac = "3 packets transmitted, 3 packets received, 0.0% packet loss\nround-trip min/avg/max/stddev = 1.0/2.0/4.0/1.2 ms"
@@ -107,6 +124,38 @@ default            172.18.17.254      UGScg             en0
 default            fe80::%utun3       UGcIg           utun3
         """
         self.assertEqual(parse_macos_default_route(sample, "en0"), "172.18.17.254")
+
+
+class CollectorTests(unittest.TestCase):
+    def test_macos_uses_full_profiler_for_width_and_explains_missing_rx_rate(self):
+        profiler = """
+          Current Network Information:
+            Office:
+              PHY Mode: 802.11ac
+              Channel: 153 (5GHz, 20MHz)
+              Security: WPA2 Personal
+              Transmit Rate: 174
+        """
+
+        class Runner(object):
+            def __init__(self):
+                self.calls = []
+
+            def run(self, args, timeout=None):
+                self.calls.append(list(args))
+                stdout = profiler if args[:2] == ["/usr/sbin/system_profiler", "SPAirPortDataType"] else ""
+                return CommandResult(args, 0, stdout=stdout)
+
+        runner = Runner()
+        report = Report.empty()
+        with patch("wifi_health.collectors.os.path.exists", return_value=False):
+            MacCollector(runner)._collect_wireless(report)
+
+        profiler_call = next(call for call in runner.calls if call[0] == "/usr/sbin/system_profiler")
+        self.assertEqual(profiler_call, ["/usr/sbin/system_profiler", "SPAirPortDataType"])
+        self.assertEqual(report.get("connection", "channel_width").value, 20)
+        self.assertEqual(report.get("connection", "ssid").value, "Office")
+        self.assertEqual(report.get("link", "rx_rate").reason, "macOS does not expose the current receive PHY rate")
 
 
 class DiagnosisTests(unittest.TestCase):
@@ -141,6 +190,36 @@ class DiagnosisTests(unittest.TestCase):
         self.assertIn("slow_dns", ids)
 
 
+class PublicQualityTests(unittest.TestCase):
+    def test_domestic_multi_target_results_are_aggregated_without_single_point_failure(self):
+        report = Report.empty()
+        ping_results = {
+            "223.5.5.5": {"reachable": True, "latency_ms": 20.0, "jitter_ms": 2.0, "packet_loss_percent": 0.0},
+            "223.6.6.6": {"reachable": False, "latency_ms": None, "jitter_ms": None, "packet_loss_percent": 100.0},
+            "119.29.29.29": {"reachable": True, "latency_ms": 40.0, "jitter_ms": 4.0, "packet_loss_percent": 0.0},
+        }
+        dns_results = {
+            "www.baidu.com": {"reachable": True, "latency_ms": 10.0},
+            "www.taobao.com": {"reachable": True, "latency_ms": 30.0},
+        }
+
+        with patch("wifi_health.cli.ping_target", side_effect=lambda runner, target: ping_results[target]), patch(
+            "wifi_health.cli.dns_test", side_effect=lambda host: dns_results[host]
+        ):
+            apply_quality(report, object())
+
+        public = report.sections["public_quality"]
+        self.assertEqual(
+            public["target"].value,
+            "223.5.5.5 / 223.6.6.6 / 119.29.29.29 / www.baidu.com / www.taobao.com",
+        )
+        self.assertTrue(public["reachable"].value)
+        self.assertEqual(public["dns_latency"].value, 20.0)
+        self.assertEqual(public["latency"].value, 30.0)
+        self.assertEqual(public["jitter"].value, 3.0)
+        self.assertEqual(public["packet_loss"].value, 0.0)
+
+
 class OutputContractTests(unittest.TestCase):
     def _sample_report(self):
         report = Report.empty()
@@ -156,12 +235,20 @@ class OutputContractTests(unittest.TestCase):
         report.diagnosis = diagnose(report)
         return report
 
-    def test_explicit_full_report_has_dashboard_before_fixed_details(self):
-        text = render_text(self._sample_report(), language="zh", view="full")
-        headings = ["# 📶 Wi-Fi 健康报告", "## ⭐ 核心参数", "## 🧭 诊断与建议", "## 📋 完整参数详情"]
-        positions = [text.index(heading) for heading in headings]
-        self.assertEqual(positions, sorted(positions))
-        self.assertEqual(text.count("### "), 10)  # issues, recommendations, and 8 fixed detail sections
+    def test_every_markdown_view_is_the_same_standard_report(self):
+        report = self._sample_report()
+        summary = render_text(report, language="zh", view="summary")
+        full = render_text(report, language="zh", view="full")
+        self.assertEqual(full, summary)
+        self.assertEqual(
+            [line for line in summary.splitlines() if line.startswith("## ")],
+            [
+                "## ⭐ 核心参数",
+                "## 🏠 本地网络质量",
+                "## 🌐 公网质量",
+                "## 🧭 诊断与建议",
+            ],
+        )
 
     def test_dashboard_keeps_all_core_rows_when_values_are_unavailable(self):
         report = Report.empty()
@@ -211,7 +298,7 @@ class OutputContractTests(unittest.TestCase):
         report.sections["local_quality"]["target"] = Field("192.168.1.1", source="fixture")
         report.sections["local_quality"]["reachable"] = Field(True, source="fixture")
         report.sections["local_quality"]["jitter"] = Field(1.1, "ms", source="fixture")
-        report.sections["public_quality"]["target"] = Field("1.1.1.1", source="fixture")
+        report.sections["public_quality"]["target"] = Field("223.5.5.5", source="fixture")
         report.sections["public_quality"]["reachable"] = Field(True, source="fixture")
         report.sections["public_quality"]["dns_latency"] = Field(25.0, "ms", source="fixture")
         report.sections["public_quality"]["latency"] = Field(40.0, "ms", source="fixture")
@@ -243,11 +330,12 @@ class OutputContractTests(unittest.TestCase):
         self.assertEqual(len(payload["sections"]), 8)
         self.assertEqual(len(rows), sum(len(fields) for fields in report.sections.values()))
 
-    def test_cli_defaults_to_fixed_summary_and_keeps_full_as_opt_in(self):
+    def test_cli_rejects_nonstandard_full_markdown_view(self):
         parser = build_parser()
         self.assertEqual(parser.parse_args([]).view, "summary")
         self.assertEqual(parser.parse_args(["--view", "summary"]).view, "summary")
-        self.assertEqual(parser.parse_args(["--view", "full"]).view, "full")
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--view", "full"])
 
     def test_default_cli_view_renders_only_the_five_fixed_sections(self):
         report = self._sample_report()
@@ -279,18 +367,15 @@ class OutputContractTests(unittest.TestCase):
             self.assertIn(labels[0], render_text(report, language="zh", view="summary"))
             self.assertIn(labels[1], render_text(report, language="en", view="summary"))
 
-    def test_all_sections_and_unavailable_reasons_are_preserved(self):
+    def test_machine_exports_preserve_all_sections_and_unavailable_reasons(self):
         report = Report.empty()
         report.sections["connection"]["ssid"] = Field("Office", source="fixture")
         report.sections["radio"]["noise"] = unavailable("not exposed by OS")
         report.diagnosis = diagnose(report)
-        text = render_text(report, language="en", view="full")
         payload = json.loads(render_json(report))
-        self.assertIn("System", text)
-        self.assertIn("Diagnostics", text)
-        self.assertIn("not exposed by OS", text)
         self.assertEqual(payload["schema_version"], "2.0")
         self.assertIn("public_quality", payload["sections"])
+        self.assertEqual(payload["sections"]["radio"]["noise"]["reason"], "not exposed by OS")
 
     def test_chinese_report_localizes_diagnosis_and_recommendations(self):
         report = Report.empty()
@@ -302,16 +387,23 @@ class OutputContractTests(unittest.TestCase):
         self.assertIn("靠近接入点", text)
         self.assertNotIn("Recommendations:", text)
 
-    def test_chinese_dashboard_localizes_evidence_and_runtime_notes(self):
+    def test_standard_report_does_not_append_runtime_notes(self):
         report = Report.empty()
         report.sections["radio"]["rssi"] = Field(-80, "dBm", source="fixture")
         report.warnings.append("Unable to identify the Wi-Fi interface; using en0 fallback.")
         report.diagnosis = diagnose(report)
         text = render_text(report, language="zh", view="summary")
         self.assertIn("RSSI 为 -80 dBm", text)
-        self.assertIn("无法自动识别 Wi-Fi 接口，已使用 en0", text)
-        self.assertNotIn("Move closer", text)
+        self.assertNotIn("运行提示", text)
         self.assertNotIn("Unable to identify", text)
+
+    def test_macos_missing_receive_rate_has_a_specific_chinese_reason(self):
+        report = self._sample_report()
+        report.mark_unavailable(
+            "link", "rx_rate", "macOS does not expose the current receive PHY rate", "macOS wireless tools"
+        )
+        text = render_text(report, language="zh")
+        self.assertIn("macOS 未提供当前接收 PHY 速率", text)
 
     def test_masking_applies_to_text_json_and_csv(self):
         report = Report.empty()

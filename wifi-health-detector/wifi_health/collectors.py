@@ -9,6 +9,7 @@ import sys
 
 from .models import Report
 from .parsers import band_for_channel, parse_macos_airport, parse_macos_default_route, parse_windows_ipconfig, parse_windows_netsh
+from .windows_wlan import current_channel_width
 
 
 AIRPORT = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
@@ -91,7 +92,7 @@ class MacCollector(object):
     def _collect_wireless(self, report):
         values = {}
         sources = []
-        profiler = self.runner.run(["/usr/sbin/system_profiler", "SPAirPortDataType", "-detailLevel", "mini"], timeout=20)
+        profiler = self.runner.run(["/usr/sbin/system_profiler", "SPAirPortDataType"], timeout=20)
         if profiler.stdout:
             parsed = _parse_macos_profiler(profiler.stdout)
             if parsed: values.update(parsed); sources.append("system_profiler")
@@ -123,6 +124,8 @@ class MacCollector(object):
             "supported_phy": ("adapter", "supported_phy", ""), "description": ("adapter", "description", ""),
         }
         _set_values(report, mapping, values, "+".join(sources) or "macOS wireless tools")
+        if not report.get("link", "rx_rate").available:
+            report.mark_unavailable("link", "rx_rate", "macOS does not expose the current receive PHY rate", "macOS wireless tools")
         if values.get("rssi") is not None:
             report.set("radio", "signal_level", _signal_level(values["rssi"]), source="derived from RSSI")
 
@@ -142,6 +145,10 @@ class WindowsCollector(object):
     def collect(self, report):
         netsh = self.runner.run(["netsh", "wlan", "show", "interfaces"])
         values = parse_windows_netsh(netsh.stdout)
+        if values and values.get("channel_width") is None:
+            width = current_channel_width(values.get("ssid"), values.get("bssid"))
+            if width is not None:
+                values["channel_width"] = width
         if not values:
             report.warnings.append("netsh did not return an active Wi-Fi connection.")
         if self.requested_interface and values.get("interface") != self.requested_interface:
@@ -153,6 +160,7 @@ class WindowsCollector(object):
             "bssid": ("connection", "bssid", ""), "authentication": ("connection", "authentication", ""),
             "cipher": ("connection", "cipher", ""), "band": ("connection", "band", ""),
             "channel": ("connection", "channel", ""), "signal_percent": ("radio", "signal_percent", "%"),
+            "channel_width": ("connection", "channel_width", "MHz"),
             "rssi": ("radio", "rssi", "dBm estimated"), "tx_rate": ("link", "tx_rate", "Mbps"),
             "rx_rate": ("link", "rx_rate", "Mbps"),
         }
