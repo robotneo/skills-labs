@@ -2,21 +2,427 @@
   "schema_version": "2.0",
   "sections": {
     "system": {
+      "os": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "os_version": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "build": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "architecture": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
       "checked_at": {
         "value": "2026-08-21T14:00:00+08:00",
         "unit": "",
         "availability": "available",
         "source": "fixture",
         "reason": ""
+      },
+      "privilege": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "python_version": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
       }
     },
-    "adapter": {},
-    "connection": {},
-    "radio": {},
-    "link": {},
-    "ip": {},
-    "local_quality": {},
-    "public_quality": {}
+    "adapter": {
+      "interface": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "description": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "status": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "mac": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "driver": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "firmware": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "country_code": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "supported_phy": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "current_phy": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    },
+    "connection": {
+      "ssid": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "bssid": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "state": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "security": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "authentication": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "cipher": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "band": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "channel": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "center_channel": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "channel_width": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    },
+    "radio": {
+      "rssi": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "noise": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "snr": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "signal_percent": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "signal_level": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "same_channel_networks": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "adjacent_channel_networks": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    },
+    "link": {
+      "tx_rate": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "rx_rate": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "max_rate": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "mcs": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "nss": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "guard_interval": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    },
+    "ip": {
+      "ipv4": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "ipv6": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "subnet": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "gateway": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "dns_servers": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "dhcp_enabled": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "dhcp_lease": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    },
+    "local_quality": {
+      "target": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "reachable": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "latency": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "jitter": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "packet_loss": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    },
+    "public_quality": {
+      "target": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "reachable": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "dns_latency": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "latency": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "jitter": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "packet_loss": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      },
+      "download_speed": {
+        "value": null,
+        "unit": "",
+        "availability": "unavailable",
+        "source": "",
+        "reason": "not provided by operating system"
+      }
+    }
   },
   "diagnosis": {
     "score": 95,

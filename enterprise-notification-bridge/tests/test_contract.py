@@ -10,8 +10,14 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+DETECTOR_ROOT = os.path.join(os.path.dirname(ROOT), "wifi-health-detector")
+if DETECTOR_ROOT not in sys.path:
+    sys.path.insert(0, DETECTOR_ROOT)
 
 from notification_bridge.contract import ContractError, build_envelope, compute_report_id, validate_envelope
+from wifi_health.diagnose import diagnose
+from wifi_health.models import Field, Report
+from wifi_health.output import render_text
 
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -64,6 +70,22 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "sections"):
             build_envelope(MARKDOWN, invalid, "摘要", "host_agent", "2.4.0")
         self.assertEqual(invalid, original)
+
+    def test_validator_rejects_incomplete_detector_section_payload(self):
+        invalid = copy.deepcopy(REPORT)
+        invalid["sections"]["adapter"] = {}
+        with self.assertRaisesRegex(ContractError, "fields"):
+            build_envelope(MARKDOWN, invalid, "摘要", "host_agent", "2.4.0")
+
+    def test_build_envelope_accepts_detector_english_standard_report(self):
+        report = Report.empty()
+        report.sections["system"]["checked_at"] = Field(
+            "2026-08-21T14:00:00+08:00", source="fixture"
+        )
+        report.diagnosis = diagnose(report)
+        markdown = render_text(report, language="en")
+        envelope = build_envelope(markdown, report.to_dict(), "summary", "host_agent", "2.4.0")
+        self.assertEqual(envelope.report["markdown"], markdown)
 
     def test_to_dict_uses_the_versioned_envelope_order(self):
         payload = valid_envelope().to_dict()
