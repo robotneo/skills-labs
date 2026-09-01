@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from notification_bridge.config import BridgeConfig, ConfigError, load_config, save_config
+from notification_bridge.config import ChannelConfig, BridgeConfig, ConfigError, load_config, save_config
 
 
 class ConfigTests(unittest.TestCase):
@@ -24,6 +24,26 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "secret"):
                 BridgeConfig(ai_summary={"nested": {"token": "secret"}})
             self.assertFalse(os.path.exists(path))
+
+    def test_tuple_nested_secret_is_rejected_without_overwriting_a_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "config.json")
+            save_config(BridgeConfig(), path)
+            with open(path, "r") as handle:
+                original = handle.read()
+
+            config = BridgeConfig()
+            config.ai_summary = ({"refresh_token": "secret"},)
+            with self.assertRaisesRegex(ConfigError, "secret"):
+                save_config(config, path)
+
+            with open(path, "r") as handle:
+                self.assertEqual(handle.read(), original)
+
+    def test_one_shot_recipients_iterable_is_retained(self):
+        recipients = (recipient for recipient in ("ops", "network"))
+        channel = ChannelConfig("dingtalk", recipients=recipients)
+        self.assertEqual(channel.recipients, ["ops", "network"])
 
     def test_config_rejects_nested_refresh_field(self):
         with self.assertRaisesRegex(ConfigError, "secret"):

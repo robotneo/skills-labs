@@ -18,16 +18,17 @@ _CHANNEL_KEYS = set(("platform", "provider", "profile", "recipients"))
 
 class ChannelConfig(object):
     def __init__(self, platform, provider="auto", profile=None, recipients=None):
+        recipients = list(recipients or [])
         _validate_channel_data({
             "platform": platform,
             "provider": provider,
             "profile": profile,
-            "recipients": list(recipients or []),
+            "recipients": recipients,
         })
         self.platform = platform
         self.provider = provider
         self.profile = profile
-        self.recipients = list(recipients or [])
+        self.recipients = recipients
 
     @classmethod
     def from_dict(cls, value):
@@ -140,7 +141,7 @@ def _reject_secrets(value):
             if any(marker in str(key).lower() for marker in _SECRET_MARKERS):
                 raise ConfigError("secret fields are not allowed")
             _reject_secrets(item)
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):
         for item in value:
             _reject_secrets(item)
 
