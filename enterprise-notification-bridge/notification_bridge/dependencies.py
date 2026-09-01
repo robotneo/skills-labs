@@ -152,19 +152,36 @@ def _is_executable_reference(executable):
 def _help_advertises_json_format(help_text):
     for line in _text(help_text).splitlines():
         normalized = line.lower()
-        if re.search(r"(?:^|\s)--format(?:\s|=|,|$)", normalized) is None:
+        option = re.search(r"(?:^|\s)(--format(?:\s|=|,|$).*)", normalized)
+        if option is None:
             continue
-        if re.search(
-                r"\b(?:unsupported|not\s+supported|disabled|unavailable)\b",
-                normalized):
-            continue
-        if re.search(
-                r"\b(?:allowed\s+values?|choices?|one\s+of)\b[^\n]*\bjson\b",
-                normalized):
-            return True
-        if re.search(r"--format\s+(?:<|\[)[^>\]]*\bjson\b[^>\]]*(?:>|\])", normalized):
-            return True
+        for value_region in _format_value_regions(option.group(1)):
+            if re.search(r"(?<![0-9a-z_-])json(?![0-9a-z_-])", value_region):
+                return True
     return False
+
+
+def _format_value_regions(option_text):
+    argument = re.match(
+        r"--format(?:\s+|=)(?:<([^>]+)>|\[([^\]]+)\])", option_text
+    )
+    if argument is not None:
+        value_set = argument.group(1) or argument.group(2)
+        if value_set.strip() not in ("format", "value", "string"):
+            yield value_set
+
+    field_pattern = re.compile(
+        r"\b(?:allowed\s+values?|choices?|one\s+of|values?|default)\s*[:=]\s*"
+    )
+    for field in field_pattern.finditer(option_text):
+        remainder = option_text[field.end():]
+        boundaries = [
+            position for position in (
+                remainder.find(";"), remainder.find("."), remainder.find("]")
+            ) if position >= 0
+        ]
+        end = min(boundaries) if boundaries else len(remainder)
+        yield remainder[:end]
 
 
 def _status_for(executable, version, status, reason):

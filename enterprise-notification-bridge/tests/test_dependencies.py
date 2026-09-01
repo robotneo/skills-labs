@@ -285,6 +285,53 @@ class DwsVerificationTests(unittest.TestCase):
         self.assertEqual(status.reason, "dependency_verification_failed")
         self.assertEqual(runner.calls[-1], [executable, "auth", "status", "--help"])
 
+    def test_leaf_help_does_not_cross_semicolon_into_json_explanation(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format> allowed values: text; "
+            "this command does not support json"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
+    def test_leaf_help_does_not_cross_sentence_into_unrelated_json_text(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format> allowed values: text. "
+            "JSON output is documented by another command."
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
+    def test_leaf_help_accepts_common_structured_json_value_sets(self):
+        executable = sys.executable
+        help_forms = (
+            '  --format <format> [choices: "text", "json"]',
+            "  --format <text|json>  Select output encoding",
+            "  --format <format>  Output encoding [default: json]",
+        )
+
+        for help_text in help_forms:
+            runner = verified_runner(executable)
+            runner.responses[
+                (executable, "auth", "status", "--help")
+            ] = CommandResult(help_text)
+
+            status = verify_dws(executable, runner)
+
+            self.assertEqual(status.status, "ready", help_text)
+            self.assertEqual(status.reason, "dependency_ready", help_text)
+
     def test_success_revalidates_all_required_json_leaf_capabilities(self):
         executable = sys.executable
         runner = verified_runner(executable)
