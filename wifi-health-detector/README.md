@@ -16,7 +16,7 @@
 - 默认显示 Wi-Fi 名称；只有用户明确要求脱敏或公开分享时才使用 `--mask`
 - Windows 显示系统提供的发送/接收 PHY 速率；macOS 未提供接收速率时保留固定行并标明原因，不做推算
 - macOS 通过完整 `system_profiler` 获取当前信道宽度；Windows 优先读取 `netsh`，缺失时解析 Native Wi-Fi BSS 信息元素
-- Markdown 只有 `--view summary` 标准视图；程序会在输出前校验区段和行数，禁止追加详细区段
+- Markdown 只有 `--view summary` 标准视图；程序会在输出前校验区段和行数，禁止追加详细区段。交给企业通知 Bridge 时，JSON 是唯一数据源，Bridge 会确定性重建整份 Markdown 并全文比对；任何 Agent 新增、删减、重复、重排、翻译或改写格式都会被拒绝
 
 ## 安装
 

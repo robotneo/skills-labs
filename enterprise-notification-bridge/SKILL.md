@@ -12,8 +12,11 @@ truth; an AI-generated summary is a separate envelope field.
 ## Operational recipe
 
 1. Validate both report representations against the detector's fixed output
-   contract before preparing an envelope. If validation fails, stop and do not
-   call a Provider.
+   contract before preparing an envelope. Treat JSON as the only data source,
+   deterministically rebuild the localized Markdown, normalize only CRLF to LF,
+   and require full-text equality. Any added, omitted, duplicated, reordered,
+   translated, or reformatted content is invalid. If validation fails, stop and
+   do not call a Provider.
 2. Read the Bridge configuration and operate only on enabled channels. Honor
    each channel's configured platform and `provider`; do not use a hard-coded
    platform order. Use one Provider per platform/report combination. In `auto`
@@ -41,6 +44,8 @@ truth; an AI-generated summary is a separate envelope field.
 7. Send the validated envelope through the selected Provider. Keep the original
    Markdown and JSON byte/content contract unchanged: never add, remove,
    rename, reorder, translate, or summarize inside the standardized report.
+   Repeat the canonical full-text validation immediately before every initial
+   send, continuation, and durable retry.
 8. Keep delivery diagnostics outside the report. Notification failures,
    unavailable Providers, login/profile actions, and recipient configuration are
    non-blocking: preserve the detector report and exit status, while returning a

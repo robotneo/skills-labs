@@ -45,6 +45,59 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "standard report"):
             valid_envelope(markdown=markdown)
 
+    def test_report_validator_rejects_arbitrary_inserted_prose(self):
+        mutations = (
+            MARKDOWN.replace(
+                "# 📶 Wi-Fi 健康报告\n",
+                "# 📶 Wi-Fi 健康报告\n\n任意新增内容\n",
+                1,
+            ),
+            MARKDOWN.replace(
+                "## 🧭 诊断与建议\n",
+                "任意新增内容\n\n## 🧭 诊断与建议\n",
+                1,
+            ),
+            MARKDOWN + "\n任意新增内容\n",
+        )
+        for markdown in mutations:
+            with self.subTest(markdown=markdown):
+                with self.assertRaisesRegex(ContractError, "standard report"):
+                    valid_envelope(markdown=markdown)
+
+    def test_report_validator_rejects_omitted_diagnosis_content(self):
+        mutations = (
+            MARKDOWN.replace("- 未发现明确问题\n", "", 1),
+            MARKDOWN.replace("- 暂无建议\n", "", 1),
+        )
+        for markdown in mutations:
+            with self.subTest(markdown=markdown):
+                with self.assertRaisesRegex(ContractError, "standard report"):
+                    valid_envelope(markdown=markdown)
+
+    def test_report_validator_rejects_markdown_that_disagrees_with_json(self):
+        markdown = MARKDOWN.replace("| Wi-Fi 名称 | Office |", "| Wi-Fi 名称 | Guest |", 1)
+        with self.assertRaisesRegex(ContractError, "standard report"):
+            valid_envelope(markdown=markdown)
+
+    def test_report_validator_rejects_every_single_line_insertion_or_omission(self):
+        lines = MARKDOWN.splitlines()
+        for index in range(len(lines)):
+            omitted = "\n".join(lines[:index] + lines[index + 1:]) + "\n"
+            with self.subTest(operation="omit", line=index + 1):
+                with self.assertRaisesRegex(ContractError, "standard report"):
+                    valid_envelope(markdown=omitted)
+        for index in range(len(lines) + 1):
+            inserted = "\n".join(lines[:index] + ["任意新增内容"] + lines[index:]) + "\n"
+            with self.subTest(operation="insert", line=index + 1):
+                with self.assertRaisesRegex(ContractError, "standard report"):
+                    valid_envelope(markdown=inserted)
+
+    def test_build_envelope_canonicalizes_windows_line_endings(self):
+        windows_markdown = MARKDOWN.replace("\n", "\r\n")
+        envelope = valid_envelope(markdown=windows_markdown)
+        self.assertEqual(envelope.report["markdown"], MARKDOWN)
+        self.assertEqual(envelope.report_id, compute_report_id(MARKDOWN, REPORT))
+
     def test_bridge_validates_every_fixed_markdown_table(self):
         mutations = (
             ("| 健康状态 | 健康评分 | 数据置信度 |", "| 状态 | 健康评分 | 数据置信度 |"),
@@ -150,6 +203,22 @@ class ContractTests(unittest.TestCase):
         markdown = render_text(report, language="en")
         envelope = build_envelope(markdown, report.to_dict(), "summary", "host_agent", "2.4.0")
         self.assertEqual(envelope.report["markdown"], markdown)
+
+    def test_build_envelope_accepts_detector_chinese_report_with_diagnosis(self):
+        report = Report.empty()
+        report.sections["system"]["checked_at"] = Field(
+            "2026-09-01T12:00:00+08:00", source="fixture"
+        )
+        report.sections["radio"]["rssi"] = Field(-80, "dBm", source="fixture")
+        report.diagnosis = diagnose(report)
+        markdown = render_text(report, language="zh")
+
+        envelope = build_envelope(
+            markdown, report.to_dict(), "摘要", "host_agent", "2.5.0"
+        )
+
+        self.assertEqual(envelope.report["markdown"], markdown)
+        self.assertEqual(envelope.report["json"]["diagnosis"]["issues"], ["weak_signal"])
 
     def test_to_dict_uses_the_versioned_envelope_order(self):
         payload = valid_envelope().to_dict()

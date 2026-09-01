@@ -3,18 +3,18 @@
   "sections": {
     "system": {
       "os": {
-        "value": null,
+        "value": "Darwin",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "os_version": {
-        "value": null,
+        "value": "13.7",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "build": {
         "value": null,
@@ -24,11 +24,11 @@
         "reason": "not provided by operating system"
       },
       "architecture": {
-        "value": null,
+        "value": "arm64",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "checked_at": {
         "value": "2026-08-21T14:00:00+08:00",
@@ -54,11 +54,11 @@
     },
     "adapter": {
       "interface": {
-        "value": null,
+        "value": "en0",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "description": {
         "value": null,
@@ -75,11 +75,11 @@
         "reason": "not provided by operating system"
       },
       "mac": {
-        "value": null,
+        "value": "aa:bb:cc:dd:ee:ff",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "driver": {
         "value": null,
@@ -119,11 +119,11 @@
     },
     "connection": {
       "ssid": {
-        "value": null,
+        "value": "Office",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "bssid": {
         "value": null,
@@ -140,11 +140,11 @@
         "reason": "not provided by operating system"
       },
       "security": {
-        "value": null,
+        "value": "none",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "authentication": {
         "value": null,
@@ -161,18 +161,18 @@
         "reason": "not provided by operating system"
       },
       "band": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 5,
+        "unit": "GHz",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "channel": {
-        "value": null,
+        "value": 149,
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "center_channel": {
         "value": null,
@@ -182,20 +182,20 @@
         "reason": "not provided by operating system"
       },
       "channel_width": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 80,
+        "unit": "MHz",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       }
     },
     "radio": {
       "rssi": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": -55,
+        "unit": "dBm",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "noise": {
         "value": null,
@@ -205,11 +205,11 @@
         "reason": "not provided by operating system"
       },
       "snr": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 35,
+        "unit": "dB",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "signal_percent": {
         "value": null,
@@ -242,18 +242,18 @@
     },
     "link": {
       "tx_rate": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 866,
+        "unit": "Mbps",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "rx_rate": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 866,
+        "unit": "Mbps",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "max_rate": {
         "value": null,
@@ -337,90 +337,90 @@
     },
     "local_quality": {
       "target": {
-        "value": null,
+        "value": "192.168.1.1",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "reachable": {
-        "value": null,
+        "value": true,
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "latency": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 3,
+        "unit": "ms",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "jitter": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 1,
+        "unit": "ms",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "packet_loss": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 0,
+        "unit": "%",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       }
     },
     "public_quality": {
       "target": {
-        "value": null,
+        "value": "www.baidu.com",
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "reachable": {
-        "value": null,
+        "value": true,
         "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "dns_latency": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 20,
+        "unit": "ms",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "latency": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 30,
+        "unit": "ms",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "jitter": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 2,
+        "unit": "ms",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "packet_loss": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 0,
+        "unit": "%",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       },
       "download_speed": {
-        "value": null,
-        "unit": "",
-        "availability": "unavailable",
-        "source": "",
-        "reason": "not provided by operating system"
+        "value": 100,
+        "unit": "Mbps",
+        "availability": "available",
+        "source": "fixture",
+        "reason": ""
       }
     }
   },

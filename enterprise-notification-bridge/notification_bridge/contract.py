@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 
 from .models import Envelope
+from .standard_report import detect_language, normalize_markdown, render_standard_markdown
 
 
 ZH_MARKDOWN_TITLE = "# 📶 Wi-Fi 健康报告"
@@ -87,6 +88,8 @@ def compute_report_id(markdown, report_json):
 
 
 def build_envelope(markdown, report_json, summary_text, summary_mode, detector_version):
+    if isinstance(markdown, str):
+        markdown = normalize_markdown(markdown)
     envelope = Envelope(
         compute_report_id(markdown, report_json),
         report_json["sections"]["system"]["checked_at"]["value"],
@@ -114,6 +117,10 @@ def validate_envelope(envelope):
         raise ContractError("report_id does not match report")
     validate_markdown_contract(report["markdown"])
     validate_json_contract(report["json"])
+    language = detect_language(report["markdown"])
+    if (language is None
+            or render_standard_markdown(report["json"], language) != report["markdown"]):
+        raise ContractError("standard report canonical Markdown contract violated")
     checked_at = report["json"]["sections"]["system"]["checked_at"]["value"]
     if checked_at != envelope.generated_at:
         raise ContractError("generated_at does not match report")

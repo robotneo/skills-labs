@@ -8,6 +8,13 @@ The Bridge preserves the detector's standard Markdown and JSON report. The
 optional AI summary lives separately in the envelope and delivery diagnostics
 never alter the report or block the detector's successful output.
 
+JSON is the canonical report data. Before delivery, the Bridge rebuilds the
+entire localized Markdown report deterministically from that JSON and requires
+full-text equality, normalizing only Windows CRLF line endings to LF. Extra or
+missing prose, rows, diagnosis items, recommendations, blank lines, reordered
+content, and Markdown-equivalent rewrites are rejected before any Provider is
+called. The same check runs again for continuation and durable retry sends.
+
 ## Run
 
 macOS and Unix-like systems:
