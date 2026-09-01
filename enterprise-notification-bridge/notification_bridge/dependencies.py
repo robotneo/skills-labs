@@ -150,38 +150,68 @@ def _is_executable_reference(executable):
 
 
 def _help_advertises_json_format(help_text):
-    for line in _text(help_text).splitlines():
-        normalized = line.lower()
-        option = re.search(r"(?:^|\s)(--format(?:\s|=|,|$).*)", normalized)
-        if option is None:
-            continue
-        for value_region in _format_value_regions(option.group(1)):
-            if re.search(r"(?<![0-9a-z_-])json(?![0-9a-z_-])", value_region):
+    for option_block in _format_option_blocks(help_text):
+        for values in _format_value_lists(option_block):
+            if "json" in values:
                 return True
     return False
 
 
-def _format_value_regions(option_text):
+def _format_option_blocks(help_text):
+    lines = _text(help_text).lower().splitlines()
+    for index, line in enumerate(lines):
+        option = re.search(r"(?:^|\s)(--format(?:\s|=|,|$).*)", line)
+        if option is None:
+            continue
+        indentation = len(line) - len(line.lstrip())
+        block = [option.group(1)]
+        for continuation in lines[index + 1:]:
+            stripped = continuation.strip()
+            if not stripped:
+                break
+            continuation_indentation = len(continuation) - len(continuation.lstrip())
+            if continuation_indentation <= indentation or stripped.startswith("-"):
+                break
+            block.append(stripped)
+        yield block
+
+
+def _format_value_lists(option_block):
+    option_text = option_block[0]
     argument = re.match(
         r"--format(?:\s+|=)(?:<([^>]+)>|\[([^\]]+)\])", option_text
     )
     if argument is not None:
         value_set = argument.group(1) or argument.group(2)
         if value_set.strip() not in ("format", "value", "string"):
-            yield value_set
+            yield _value_tokens(value_set)
 
     field_pattern = re.compile(
         r"\b(?:allowed\s+values?|choices?|one\s+of|values?|default)\s*[:=]\s*"
     )
-    for field in field_pattern.finditer(option_text):
-        remainder = option_text[field.end():]
-        boundaries = [
-            position for position in (
-                remainder.find(";"), remainder.find("."), remainder.find("]")
-            ) if position >= 0
-        ]
-        end = min(boundaries) if boundaries else len(remainder)
-        yield remainder[:end]
+    for block_line in option_block:
+        without_notes = _without_parenthetical_notes(block_line)
+        for field in field_pattern.finditer(without_notes):
+            remainder = without_notes[field.end():]
+            boundaries = [
+                position for position in (
+                    remainder.find(";"), remainder.find("."), remainder.find("]")
+                ) if position >= 0
+            ]
+            end = min(boundaries) if boundaries else len(remainder)
+            yield _value_tokens(remainder[:end])
+
+
+def _without_parenthetical_notes(value):
+    previous = None
+    while value != previous:
+        previous = value
+        value = re.sub(r"\([^()]*\)", "", value)
+    return value
+
+
+def _value_tokens(value):
+    return set(re.findall(r"[0-9a-z][0-9a-z_-]*", value.lower()))
 
 
 def _status_for(executable, version, status, reason):
