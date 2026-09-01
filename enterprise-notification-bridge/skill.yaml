@@ -1,0 +1,10 @@
+skill_id: enterprise-notification-bridge
+name: 企业通知桥接
+version: 1.0.0
+author: hua
+description: Use when a validated Wi-Fi health report must be routed to configured enterprise notification channels.
+support_os: [macos-10.12+, windows-10, windows-11, linux]
+entry: run.sh (macOS/Unix) / run.bat (Windows)
+output_format: [json, mcp-json-rpc]
+optional: true
+repo: https://github.com/robotneo/skills-labs/tree/main/enterprise-notification-bridge

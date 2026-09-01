@@ -1,6 +1,6 @@
 # Wi-Fi Health Detector Skill
 
-无线网络健康检测 Skill 2.4，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。采用原生启动器和统一 Python 核心，能够区分 Python/权限/系统命令问题与真实 Wi-Fi 故障。
+无线网络健康检测 Skill 2.5，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。采用原生启动器和统一 Python 核心，能够区分 Python/权限/系统命令问题与真实 Wi-Fi 故障。
 
 ## 特性
 
@@ -60,6 +60,8 @@ run.bat --view summary
 通用参数：`--view summary` 为唯一 Markdown 视图，`--speedtest` 开启吞吐测试，`--no-public-test` 仅检测本地链路，`--timeout` 设置超时，`--verbose` 保留机器数据中的诊断警告。`main.py` 仅作为已知 Python 可用时的兼容入口。JSON/CSV 是显式机器数据导出，始终包含全部字段，但不会扩展 Markdown 报告。
 
 在 Codex、Claude Code、WorkBuddy、OpenClaw 或其他兼容 Agent 中，启动器成功后必须把 stdout 原样作为完整最终答复，不得添加前言、代码围栏、摘要、解释或结论，也不得删除、合并、翻译或重排报告内容。
+
+企业通知是可选的 `enterprise-notification-bridge` 集成。只有在 Bridge 已安装且存在启用的渠道配置时才触发通知；通知诊断不会改变标准 stdout 或退出状态。Bridge 按配置选择平台和 Provider，空收件人不会发送，也不会推断当前用户或默认收件人。
 
 在 Codex 或其他 AI 助手中，用户可以说：
 
