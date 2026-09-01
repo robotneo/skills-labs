@@ -4,6 +4,7 @@
 **Implementation commit:** `daefe84` (`feat: declare and verify conditional dws dependency`)
 **Review fix commit:** `45a2aa9` (`fix: harden dws dependency verification`)
 **Review fix round 2:** `2352b67` (`fix: bound dws json help parsing`)
+**Review fix round 3:** `4fc1cab` (`fix: parse multiline dws format help`)
 
 ## Scope completed
 
@@ -75,6 +76,13 @@ added.
    the round 2 fix, both adversarial help strings incorrectly produced
    `dependency_ready` because the regular expression consumed arbitrary text
    through the end of the line.
+8. Multiline option-block tests:
+   `test_leaf_help_accepts_choices_on_indented_continuation_line` and
+   `test_leaf_help_accepts_multiline_allowed_values_and_default_fields` failed
+   before the round 3 fix because continuation fields were ignored.
+   `test_leaf_help_rejects_json_only_inside_parenthetical_note` also failed
+   because JSON mentioned only in `(no json support)` was incorrectly counted
+   as a choice value.
 
 ## GREEN and verification evidence
 
@@ -85,7 +93,7 @@ default `python3` currently fails through a missing Xcode Command Line Tools
 Commands/results:
 
 - `python3 -m unittest enterprise-notification-bridge/tests/test_dependencies.py enterprise-notification-bridge/tests/test_dws_provider.py`
-  — 37 tests passed.
+  — 40 tests passed.
 - Parsed both changed Python files with `ast.parse(..., feature_version=(3, 7))`
   — Python 3.7 syntax accepted.
 - Parsed `manifest.json` with the standard-library `json` module — accepted.
@@ -104,6 +112,11 @@ Commands/results:
   semicolons, sentence boundaries, or bracket boundaries, so unrelated later
   mentions of JSON cannot satisfy the gate. Common choices, inline value-set,
   and default-value help forms are covered by positive tests.
+- Multiline help is parsed as a small option block. Continuation lines must be
+  more deeply indented than the `--format` start line; collection stops at a
+  blank line, the next option, or a same/lower-indented section. Parenthetical
+  notes are removed before labeled fields are tokenized by punctuation,
+  whitespace, and quoting, so only an independent `json` value is accepted.
 - Windows candidates use `ntpath` and are tested in the documented order:
   current `PATH`, user-local paths, roaming npm, then the declared npm prefix.
 - Both metadata files have direct tests proving Python stays unconditional and
