@@ -45,7 +45,7 @@ class DwsProvider(Provider):
             return result
         if not isinstance(result.data, dict) or not isinstance(result.data.get("profiles"), list):
             return ProviderResult("unavailable", "dws_profiles_invalid")
-        return ProviderResult("ok", data=result.data["profiles"])
+        return choose_profile(result.data["profiles"])
 
     def resolve_recipient(self, profile, selector):
         return ProviderResult(

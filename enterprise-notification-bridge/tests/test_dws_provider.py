@@ -48,7 +48,24 @@ class DwsProviderTests(unittest.TestCase):
 
         self.assertEqual(runner.calls, [help_command, business_command])
         self.assertEqual(result.status, "ok")
-        self.assertEqual(result.data[0]["profile"], "corp:user")
+        self.assertEqual(result.data["profile"], "corp:user")
+
+    def test_dws_profile_list_requires_selection_for_multiple_profiles(self):
+        help_command = ["dws", "profile", "list", "--help"]
+        business_command = ["dws", "profile", "list", "--format", "json"]
+        profiles = [{"profile": "corp:one"}, {"profile": "corp:two"}]
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("--format json"),
+            tuple(business_command): CommandResult('{"profiles":['
+                '{"profile":"corp:one"},{"profile":"corp:two"}]}'),
+        })
+
+        result = DwsProvider(runner).list_profiles()
+
+        self.assertEqual(runner.calls, [help_command, business_command])
+        self.assertEqual(result.status, "action_required")
+        self.assertEqual(result.reason, "profile_selection_required")
+        self.assertEqual(result.data["profiles"], profiles)
 
     def test_auth_status_uses_the_documented_json_command(self):
         help_command = ["dws", "auth", "status", "--help"]
