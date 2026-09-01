@@ -3,6 +3,7 @@
 **Audit date:** 2026-09-01
 **Implementation commit:** `daefe84` (`feat: declare and verify conditional dws dependency`)
 **Review fix commit:** `45a2aa9` (`fix: harden dws dependency verification`)
+**Review fix round 2:** `2352b67` (`fix: bound dws json help parsing`)
 
 ## Scope completed
 
@@ -68,6 +69,12 @@ added.
    contract tests, the conditional requirement sections were temporarily
    removed. Both tests failed because `dingtalk:dws-cli` was absent. The
    original metadata was then restored and both tests passed.
+7. Structured help-boundary tests:
+   `test_leaf_help_does_not_cross_semicolon_into_json_explanation` and
+   `test_leaf_help_does_not_cross_sentence_into_unrelated_json_text`. Before
+   the round 2 fix, both adversarial help strings incorrectly produced
+   `dependency_ready` because the regular expression consumed arbitrary text
+   through the end of the line.
 
 ## GREEN and verification evidence
 
@@ -78,7 +85,7 @@ default `python3` currently fails through a missing Xcode Command Line Tools
 Commands/results:
 
 - `python3 -m unittest enterprise-notification-bridge/tests/test_dependencies.py enterprise-notification-bridge/tests/test_dws_provider.py`
-  — 34 tests passed.
+  — 37 tests passed.
 - Parsed both changed Python files with `ast.parse(..., feature_version=(3, 7))`
   — Python 3.7 syntax accepted.
 - Parsed `manifest.json` with the standard-library `json` module — accepted.
@@ -91,9 +98,12 @@ Commands/results:
 - Version output must be a JSON object containing a valid semantic-version
   string. Free-form version output and numeric prerelease identifiers with
   leading zeroes are rejected.
-- Leaf help is accepted only when the `--format` option declaration explicitly
-  lists `json` as an allowed value or includes it in the option's value set.
-  Incidental or negative mentions such as `json is unsupported` are rejected.
+- Leaf help is parsed into bounded regions belonging to the `--format` option:
+  its immediate `<...>` or `[...]` value set, or labeled `allowed values`,
+  `choices`, `one of`, `values`, or `default` fields. Field parsing stops at
+  semicolons, sentence boundaries, or bracket boundaries, so unrelated later
+  mentions of JSON cannot satisfy the gate. Common choices, inline value-set,
+  and default-value help forms are covered by positive tests.
 - Windows candidates use `ntpath` and are tested in the documented order:
   current `PATH`, user-local paths, roaming npm, then the declared npm prefix.
 - Both metadata files have direct tests proving Python stays unconditional and
