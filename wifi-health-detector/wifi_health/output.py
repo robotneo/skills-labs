@@ -4,6 +4,9 @@ import csv
 import io
 import json
 import re
+from collections.abc import Mapping
+
+from .models import SECTION_FIELDS
 
 
 SECTION_LABELS = {
@@ -34,6 +37,29 @@ BADGES = {
     "en": {"healthy": "✅ Healthy", "warning": "⚠️ Warning", "poor": "❌ Poor", "insufficient_data": "❔ Insufficient data"},
 }
 REASON_ZH = {"not provided by operating system": "操作系统未提供", "not found": "未找到", "permission denied": "权限不足", "unsupported": "当前系统不支持", "default gateway not available": "默认网关不可用", "disabled by --no-public-test": "已通过 --no-public-test 禁用", "enable with --speedtest": "使用 --speedtest 开启", "download test failed": "下载测速失败", "macOS does not expose the current receive PHY rate": "macOS 未提供当前接收 PHY 速率"}
+JSON_TOP_LEVEL_KEYS = ("schema_version", "sections", "diagnosis", "warnings")
+FIELD_KEYS = ("value", "unit", "availability", "source", "reason")
+DIAGNOSIS_KEYS = (
+    "score", "confidence_percent", "verdict", "category_scores", "issues",
+    "recommendations",
+)
+ZH_CORE_ROW_LABELS = (
+    "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
+    "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
+    "发送速率", "接收速率", "网关延迟", "网关抖动", "网关丢包",
+    "公网延迟", "公网丢包", "安全类型",
+)
+EN_CORE_ROW_LABELS = (
+    "Operating System Version", "Chip Architecture", "MAC Address", "Wi-Fi Name",
+    "Wireless Interface", "Wi-Fi Band", "Wireless Channel", "Channel Width",
+    "Signal Strength (RSSI)", "Signal-to-Noise Ratio (SNR)", "Transmit Rate",
+    "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
+    "Public Latency", "Public Packet Loss", "Security Type",
+)
+
+
+class ReportContractError(RuntimeError):
+    pass
 
 
 def _masked(name, value):
@@ -71,6 +97,51 @@ def _masked_dict(report, mask):
 
 def render_json(report, mask=False):
     return json.dumps(_masked_dict(report, mask), ensure_ascii=False, indent=2)
+
+
+def validate_standard_json(report_json):
+    if not isinstance(report_json, Mapping):
+        raise ReportContractError("standard report JSON must be an object")
+    if tuple(report_json.keys()) != JSON_TOP_LEVEL_KEYS:
+        raise ReportContractError("standard report JSON top-level contract violated")
+    if report_json["schema_version"] != "2.0":
+        raise ReportContractError("unsupported standard report JSON schema")
+
+    sections = report_json["sections"]
+    if not isinstance(sections, Mapping) or tuple(sections.keys()) != tuple(SECTION_FIELDS.keys()):
+        raise ReportContractError("standard report JSON sections contract violated")
+    for section_name, field_names in SECTION_FIELDS.items():
+        fields = sections[section_name]
+        if not isinstance(fields, Mapping) or tuple(fields.keys()) != field_names:
+            raise ReportContractError("standard report JSON section fields contract violated")
+        for field in fields.values():
+            _validate_standard_field(field)
+
+    diagnosis = report_json["diagnosis"]
+    if not isinstance(diagnosis, Mapping) or tuple(diagnosis.keys()) != DIAGNOSIS_KEYS:
+        raise ReportContractError("standard report JSON diagnosis contract violated")
+    if not isinstance(diagnosis["category_scores"], Mapping):
+        raise ReportContractError("standard report JSON category scores must be an object")
+    if not isinstance(diagnosis["issues"], list) or not isinstance(diagnosis["recommendations"], list):
+        raise ReportContractError("standard report JSON diagnosis lists are invalid")
+    if not isinstance(report_json["warnings"], list):
+        raise ReportContractError("standard report JSON warnings must be a list")
+
+
+def _validate_standard_field(field):
+    if not isinstance(field, Mapping) or tuple(field.keys()) != FIELD_KEYS:
+        raise ReportContractError("standard report JSON field contract violated")
+    if not isinstance(field["unit"], str) or not isinstance(field["source"], str):
+        raise ReportContractError("standard report JSON field text is invalid")
+    if field["availability"] not in ("available", "unavailable"):
+        raise ReportContractError("standard report JSON field availability is invalid")
+    if not isinstance(field["reason"], str):
+        raise ReportContractError("standard report JSON field reason is invalid")
+    if field["availability"] == "available" and field["value"] is None:
+        raise ReportContractError("standard report JSON available field is invalid")
+    if field["availability"] == "unavailable" and (
+            field["value"] is not None or not field["reason"]):
+        raise ReportContractError("standard report JSON unavailable field is invalid")
 
 
 def render_csv(report, mask=False):
@@ -116,17 +187,7 @@ def _localized_evidence(item, language):
 
 
 def _core_rows(report, language, mask):
-    labels = ((
-        "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
-        "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
-        "发送速率", "接收速率", "网关延迟", "网关抖动", "网关丢包",
-        "公网延迟", "公网丢包", "安全类型",
-    ) if language == "zh" else (
-        "Operating System Version", "Chip Architecture", "MAC Address", "Wi-Fi Name", "Wireless Interface",
-        "Wi-Fi Band", "Wireless Channel", "Channel Width", "Signal Strength (RSSI)", "Signal-to-Noise Ratio (SNR)",
-        "Transmit Rate", "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
-        "Public Latency", "Public Packet Loss", "Security Type",
-    ))
+    labels = ZH_CORE_ROW_LABELS if language == "zh" else EN_CORE_ROW_LABELS
     operating_system = "%s %s" % (
         _display_field(report, "system", "os", language, mask),
         _display_field(report, "system", "os_version", language, mask),
@@ -197,11 +258,15 @@ def render_text(report, language="zh", mask=False, view="summary"):
     language = language if language in SECTION_LABELS else "zh"
     lines = _render_dashboard(report, language, mask)
     text = "\n".join(lines) + "\n"
-    _validate_standard_text(text, language)
+    validate_standard_report(text, language)
     return text
 
 
-def _validate_standard_text(text, language):
+def validate_standard_report(text, language):
+    if not isinstance(text, str):
+        raise ReportContractError("standard report must be Markdown text")
+    if language not in SECTION_LABELS:
+        raise ReportContractError("standard report language is invalid")
     zh = language == "zh"
     expected_title = "# 📶 Wi-Fi 健康报告" if zh else "# 📶 Wi-Fi Health Report"
     expected_sections = [
@@ -216,14 +281,25 @@ def _validate_standard_text(text, language):
     ]
     lines = text.splitlines()
     if [line for line in lines if line.startswith("# ")] != [expected_title]:
-        raise RuntimeError("standard report title contract violated")
+        raise ReportContractError("standard report title contract violated")
     if [line for line in lines if line.startswith("## ")] != expected_sections:
-        raise RuntimeError("standard report section contract violated")
+        raise ReportContractError("standard report section contract violated")
     if [line for line in lines if line.startswith("### ")] != expected_subsections:
-        raise RuntimeError("standard report subsection contract violated")
+        raise ReportContractError("standard report subsection contract violated")
     expected_row_counts = (18, 5, 7)
-    for start, end, expected_count in zip(expected_sections[:3], expected_sections[1:], expected_row_counts):
+    for index, (start, end, expected_count) in enumerate(zip(
+            expected_sections[:3], expected_sections[1:], expected_row_counts)):
         block = lines[lines.index(start) + 1:lines.index(end)]
         data_rows = [line for line in block if line.startswith("|")][2:]
         if len(data_rows) != expected_count:
-            raise RuntimeError("standard report table row contract violated")
+            raise ReportContractError("standard report table row contract violated")
+        if index == 0:
+            expected_labels = ZH_CORE_ROW_LABELS if zh else EN_CORE_ROW_LABELS
+            labels = tuple(_markdown_row_label(row) for row in data_rows)
+            if labels != expected_labels:
+                raise ReportContractError("standard report core row contract violated")
+
+
+def _markdown_row_label(row):
+    cells = row.split("|")
+    return cells[1].strip() if len(cells) >= 3 else ""

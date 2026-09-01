@@ -1,6 +1,7 @@
 from __future__ import absolute_import, print_function
 
 import argparse
+import json
 import statistics
 import sys
 
@@ -8,7 +9,14 @@ from .collectors import collect_report
 from .command import CommandRunner
 from .diagnose import diagnose
 from .network import dns_test, ping_target, speed_test
-from .output import render_csv, render_json, render_text
+from .notification import trigger_notification
+from .output import (
+    render_csv,
+    render_json,
+    render_text,
+    validate_standard_json,
+    validate_standard_report,
+)
 
 
 PUBLIC_PING_TARGETS = ("223.5.5.5", "223.6.6.6", "119.29.29.29")
@@ -28,6 +36,7 @@ def build_parser():
     parser.add_argument("--mask", action="store_true", help="mask network identifiers and addresses")
     parser.add_argument("--json", metavar="PATH", help="write the complete JSON report")
     parser.add_argument("--csv", metavar="PATH", help="write the complete CSV report")
+    parser.add_argument("--no-notify", action="store_true", help="skip enterprise notification delivery")
     return parser
 
 
@@ -79,9 +88,18 @@ def main(argv=None):
         report = collect_report(runner, args.interface)
         apply_quality(report, runner, not args.no_public_test, args.speedtest, args.timeout)
         report.diagnosis = diagnose(report)
-        print(render_text(report, args.language, args.mask, args.view), end="")
-        if args.json: _write(args.json, render_json(report, args.mask))
+        markdown = render_text(report, args.language, args.mask, args.view)
+        validate_standard_report(markdown, args.language)
+        json_text = render_json(report, args.mask)
+        report_json = json.loads(json_text)
+        validate_standard_json(report_json)
+        print(markdown, end="")
+        if args.json: _write(args.json, json_text)
         if args.csv: _write(args.csv, render_csv(report, args.mask))
+        if not args.no_notify:
+            notification_result = trigger_notification(markdown, report_json)
+            if notification_result.requires_attention:
+                print(notification_result.message, file=sys.stderr)
         return 0
     except RuntimeError as exc:
         print("Wi-Fi detector error: %s" % exc, file=sys.stderr)
