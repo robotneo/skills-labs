@@ -19,6 +19,7 @@ class DwsProvider(Provider):
 
     def __init__(self, runner):
         self._runner = runner
+        self._json_help_confirmed = set()
 
     def capabilities(self):
         result = self._run(["dws", "--help"])
@@ -62,6 +63,9 @@ class DwsProvider(Provider):
         )
 
     def _json_command(self, command):
+        confirmation = self._confirm_json_format(command)
+        if confirmation is not None:
+            return confirmation
         error, returncode, stdout, stderr = self._run(command)
         if error is not None:
             return ProviderResult("unavailable", "dws_unavailable", retryable=True)
@@ -77,6 +81,24 @@ class DwsProvider(Provider):
         if not isinstance(payload, dict):
             return ProviderResult("unavailable", "dws_invalid_json")
         return ProviderResult("ok", data=payload)
+
+    def _confirm_json_format(self, command):
+        leaf_command = tuple(command[:-2])
+        if leaf_command in self._json_help_confirmed:
+            return None
+
+        error, returncode, stdout, stderr = self._run(list(leaf_command) + ["--help"])
+        if error is not None:
+            return ProviderResult("unavailable", "dws_json_format_unconfirmed", retryable=True)
+        if returncode != 0:
+            return ProviderResult(
+                "unavailable", "dws_json_format_unconfirmed", retryable=True,
+                data={"stderr": stderr},
+            )
+        if "--format" not in stdout or "json" not in stdout.lower():
+            return ProviderResult("unavailable", "dws_json_format_unsupported")
+        self._json_help_confirmed.add(leaf_command)
+        return None
 
     def _run(self, command):
         try:
