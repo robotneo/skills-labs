@@ -47,11 +47,11 @@ class BridgeService(object):
                 results.append(ProviderResult("skipped", provider.reason))
                 continue
             auth = provider.auth_status(channel.profile)
-            if auth.status != "authorized":
+            if not _is_authorized(auth):
                 results.append(auth)
                 continue
             if not channel.profile:
-                results.append(self.bind(channel.platform))
+                results.append(self._bind_selected(provider))
                 continue
             if not channel.recipients:
                 results.append(ProviderResult("skipped", "recipient_not_configured"))
@@ -75,6 +75,10 @@ class BridgeService(object):
         )
         if getattr(provider, "availability", "available") == "unavailable":
             return ProviderResult("skipped", provider.reason)
+        return self._bind_selected(provider)
+
+    @staticmethod
+    def _bind_selected(provider):
         return provider.list_profiles()
 
     def _deliver_one(self, provider, profile, selector, envelope):
@@ -93,9 +97,14 @@ class BridgeService(object):
         if not claim.acquired:
             return ProviderResult("skipped", "delivery_already_claimed")
 
-        result = provider.send_report(
-            profile, recipient, _with_summary(envelope)
-        )
+        try:
+            result = provider.send_report(
+                profile, recipient, _with_summary(envelope)
+            )
+        except Exception:
+            result = ProviderResult(
+                "failed", "provider_send_failed", retryable=True
+            )
         if result.status in (
                 "ok", "sent", "delivered", "succeeded", "success"):
             self.ledger.mark_success(
@@ -137,6 +146,12 @@ def deterministic_summary(report_json):
         ))
 
     return " ".join(parts)
+
+
+def _is_authorized(result):
+    return (result.status == "authorized"
+            or (result.status == "ok"
+                and result.data.get("authenticated") is True))
 
 
 def _with_summary(envelope):

@@ -36,16 +36,21 @@ class FakeProvider(Provider):
     name = "fake"
     priority = 100
 
-    def __init__(self):
+    def __init__(self, name=None):
+        if name is not None:
+            self.name = name
         self.auth_result = ProviderResult("authorized")
         self.resolve_result = None
         self.next_result = ProviderResult("sent", data={"external_id": "message-1"})
+        self.send_error = None
+        self.capabilities_calls = 0
         self.auth_calls = []
         self.profile_calls = 0
         self.resolve_calls = []
         self.send_calls = []
 
     def capabilities(self):
+        self.capabilities_calls += 1
         return {"available": True}
 
     def auth_status(self, profile=None):
@@ -64,6 +69,8 @@ class FakeProvider(Provider):
 
     def send_report(self, profile, recipient, envelope):
         self.send_calls.append(SendCall(profile, recipient, envelope))
+        if self.send_error is not None:
+            raise self.send_error
         return self.next_result
 
 
@@ -197,6 +204,60 @@ class BridgeServiceTests(unittest.TestCase):
         self.assertEqual(self.provider.profile_calls, 0)
         self.assertEqual(self.provider.resolve_calls, [])
         self.assertEqual(self.provider.send_calls, [])
+
+    def test_authenticated_dws_result_reaches_recipient_and_send_path(self):
+        self.provider.auth_result = ProviderResult(
+            "ok", data={"authenticated": True}
+        )
+
+        result = self.service().deliver(make_envelope())
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(self.provider.resolve_calls, [("corp:user", "ops")])
+        self.assertEqual(len(self.provider.send_calls), 1)
+
+    def test_raising_send_is_retryable_and_same_key_can_be_reclaimed(self):
+        envelope = make_envelope()
+        self.provider.send_error = RuntimeError("provider unavailable")
+
+        failed = self.service().deliver(envelope)
+
+        key = DeliveryKey(
+            envelope.report_id, "dingtalk", "fake", "corp:user", "ops"
+        )
+        failed_row = self.ledger.get(key)
+        self.assertEqual(failed.status, "notification_failed")
+        self.assertEqual(failed.results[0].reason, "provider_send_failed")
+        self.assertTrue(failed.results[0].retryable)
+        self.assertEqual(failed_row["state"], "retryable_failure")
+
+        self.provider.send_error = None
+        retried = self.service().deliver(envelope)
+
+        succeeded_row = self.ledger.get(key)
+        self.assertEqual(retried.status, "delivered")
+        self.assertEqual(succeeded_row["state"], "succeeded")
+        self.assertNotEqual(failed_row["claim_id"], succeeded_row["claim_id"])
+        self.assertEqual(len(self.provider.send_calls), 2)
+
+    def test_missing_profile_binds_with_the_already_selected_provider(self):
+        selected = FakeProvider("selected")
+        alternative = FakeProvider("alternative")
+        config = BridgeConfig(
+            enabled=True,
+            channels=[ChannelConfig(
+                "dingtalk", provider="selected", profile=None, recipients=[]
+            )],
+        )
+        service = BridgeService(config, [selected, alternative], self.ledger)
+
+        result = service.deliver(make_envelope())
+
+        self.assertEqual(result.results[0].data["profile"], "corp:user")
+        self.assertEqual(selected.profile_calls, 1)
+        self.assertEqual(alternative.profile_calls, 0)
+        self.assertEqual(selected.capabilities_calls, 1)
+        self.assertEqual(alternative.capabilities_calls, 1)
 
 
 if __name__ == "__main__":
