@@ -7,6 +7,9 @@
   "platforms": ["codex", "claude", "workbuddy", "openclaw", "generic"],
   "support_os": ["macos>=10.12", "windows-10", "windows-11", "linux"],
   "requirements": ["python>=3.7"],
+  "conditional_requirements": {
+    "dingtalk:dws-cli": ["dws>=1.0.15"]
+  },
   "entry": {"macos": "run.sh", "windows": "run.bat", "powershell": "run.ps1", "compatibility": "main.py"},
   "output_type": ["json", "mcp-json-rpc"],
   "optional": true,
