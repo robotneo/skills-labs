@@ -56,6 +56,15 @@ EN_CORE_ROW_LABELS = (
     "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
     "Public Latency", "Public Packet Loss", "Security Type",
 )
+ZH_LOCAL_ROW_LABELS = ("测试目标", "可达状态", "平均延迟", "网络抖动", "丢包率")
+EN_LOCAL_ROW_LABELS = ("Target", "Reachable", "Latency", "Jitter", "Packet Loss")
+ZH_PUBLIC_ROW_LABELS = (
+    "测试目标", "可达状态", "DNS 解析延迟", "平均延迟", "网络抖动", "丢包率", "下载速度",
+)
+EN_PUBLIC_ROW_LABELS = (
+    "Target", "Reachable", "DNS Latency", "Latency", "Jitter", "Packet Loss",
+    "Download Speed",
+)
 
 
 class ReportContractError(RuntimeError):
@@ -286,20 +295,78 @@ def validate_standard_report(text, language):
         raise ReportContractError("standard report section contract violated")
     if [line for line in lines if line.startswith("### ")] != expected_subsections:
         raise ReportContractError("standard report subsection contract violated")
-    expected_row_counts = (18, 5, 7)
-    for index, (start, end, expected_count) in enumerate(zip(
-            expected_sections[:3], expected_sections[1:], expected_row_counts)):
-        block = lines[lines.index(start) + 1:lines.index(end)]
-        data_rows = [line for line in block if line.startswith("|")][2:]
-        if len(data_rows) != expected_count:
-            raise ReportContractError("standard report table row contract violated")
-        if index == 0:
-            expected_labels = ZH_CORE_ROW_LABELS if zh else EN_CORE_ROW_LABELS
-            labels = tuple(_markdown_row_label(row) for row in data_rows)
-            if labels != expected_labels:
-                raise ReportContractError("standard report core row contract violated")
+    summary_headers = (
+        ("健康状态", "健康评分", "数据置信度") if zh
+        else ("Health", "Score", "Data Confidence")
+    )
+    metric_headers = ("核心参数", "当前值") if zh else ("Metric", "Current Value")
+    quality_headers = ("参数", "当前值", "状态") if zh else (
+        "Parameter", "Current Value", "Status"
+    )
+    table_specs = (
+        (
+            lines[:lines.index(expected_sections[0])], summary_headers,
+            (":---:", ":---:", ":---:"), None, 1, "summary",
+        ),
+        (
+            _section_block(lines, expected_sections[0], expected_sections[1]),
+            metric_headers, ("---", "---"),
+            ZH_CORE_ROW_LABELS if zh else EN_CORE_ROW_LABELS, 18, "core",
+        ),
+        (
+            _section_block(lines, expected_sections[1], expected_sections[2]),
+            quality_headers, ("---", "---", ":---:"),
+            ZH_LOCAL_ROW_LABELS if zh else EN_LOCAL_ROW_LABELS, 5, "local quality",
+        ),
+        (
+            _section_block(lines, expected_sections[2], expected_sections[3]),
+            quality_headers, ("---", "---", ":---:"),
+            ZH_PUBLIC_ROW_LABELS if zh else EN_PUBLIC_ROW_LABELS, 7, "public quality",
+        ),
+    )
+    for block, headers, separators, row_labels, row_count, table_name in table_specs:
+        _validate_fixed_table(
+            block, headers, separators, row_labels, row_count, table_name
+        )
+
+
+def _section_block(lines, start, end):
+    return lines[lines.index(start) + 1:lines.index(end)]
+
+
+def _validate_fixed_table(block, headers, separators, row_labels, row_count, name):
+    table_lines = [line for line in block if line.startswith("|")]
+    if len(table_lines) != row_count + 2:
+        raise ReportContractError(
+            "standard report {0} table row contract violated".format(name)
+        )
+    if _markdown_cells(table_lines[0]) != headers:
+        raise ReportContractError(
+            "standard report {0} table header contract violated".format(name)
+        )
+    if _markdown_cells(table_lines[1]) != separators:
+        raise ReportContractError(
+            "standard report {0} table separator contract violated".format(name)
+        )
+    data_rows = table_lines[2:]
+    if row_labels is not None:
+        labels = tuple(_markdown_row_label(row) for row in data_rows)
+        if labels != row_labels:
+            raise ReportContractError(
+                "standard report {0} row contract violated".format(name)
+            )
+    elif len(_markdown_cells(data_rows[0])) != len(headers):
+        raise ReportContractError(
+            "standard report {0} value contract violated".format(name)
+        )
 
 
 def _markdown_row_label(row):
-    cells = row.split("|")
-    return cells[1].strip() if len(cells) >= 3 else ""
+    cells = _markdown_cells(row)
+    return cells[0] if cells else ""
+
+
+def _markdown_cells(row):
+    if not row.startswith("|") or not row.endswith("|"):
+        return ()
+    return tuple(cell.strip() for cell in row[1:-1].split("|"))

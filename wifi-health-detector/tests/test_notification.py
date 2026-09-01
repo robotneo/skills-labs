@@ -152,6 +152,66 @@ class NotificationIntegrationTests(unittest.TestCase):
 
         self.assertFalse(os.path.exists(record_path))
 
+    def test_changed_fixed_table_headers_and_rows_never_invoke_bridge(self):
+        english_markdown = render_text(self._sample_report(), language="en")
+        mutations = (
+            (
+                "zh summary header", self.markdown,
+                "| 健康状态 | 健康评分 | 数据置信度 |",
+                "| 状态 | 健康评分 | 数据置信度 |",
+            ),
+            ("zh core header", self.markdown, "| 核心参数 | 当前值 |", "| 参数 | 当前值 |"),
+            (
+                "zh local header", self.markdown,
+                "| 参数 | 当前值 | 状态 |", "| 指标 | 当前值 | 状态 |",
+            ),
+            (
+                "zh public header", self.markdown,
+                "## 🌐 公网质量\n\n| 参数 | 当前值 | 状态 |",
+                "## 🌐 公网质量\n\n| 指标 | 当前值 | 状态 |",
+            ),
+            ("zh local row", self.markdown, "| 测试目标 |", "| 目标 |"),
+            ("zh public row", self.markdown, "| DNS 解析延迟 |", "| DNS 延迟 |"),
+            (
+                "en summary header", english_markdown,
+                "| Health | Score | Data Confidence |",
+                "| Status | Score | Data Confidence |",
+            ),
+            (
+                "en core header", english_markdown,
+                "| Metric | Current Value |", "| Parameter | Current Value |",
+            ),
+            (
+                "en local header", english_markdown,
+                "| Parameter | Current Value | Status |",
+                "| Metric | Current Value | Status |",
+            ),
+            (
+                "en public header", english_markdown,
+                "## 🌐 Public Network Quality\n\n| Parameter | Current Value | Status |",
+                "## 🌐 Public Network Quality\n\n| Metric | Current Value | Status |",
+            ),
+            ("en local row", english_markdown, "| Target |", "| Test Target |"),
+            ("en public row", english_markdown, "| DNS Latency |", "| DNS Resolution |"),
+        )
+
+        for name, markdown, old, new in mutations:
+            with self.subTest(name=name):
+                record_path = os.path.join(self.directory.name, name + ".json")
+                invalid_markdown = markdown.replace(old, new, 1)
+                self.assertNotEqual(invalid_markdown, markdown)
+
+                with self.assertRaises(ReportContractError):
+                    trigger_notification(
+                        invalid_markdown,
+                        self.report_json,
+                        bridge_command=self._bridge_command(
+                            {"status": "delivered"}, record_path=record_path
+                        ),
+                    )
+
+                self.assertFalse(os.path.exists(record_path))
+
     def test_invalid_json_never_invokes_bridge(self):
         record_path = os.path.join(self.directory.name, "called.json")
         invalid_json = dict(self.report_json)
@@ -193,6 +253,26 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(result.status, "bridge_failed")
         self.assertEqual(result.reason, "bridge_failed")
 
+    def test_malformed_bridge_override_returns_structured_failure(self):
+        with patch.dict(
+            os.environ, {"ENTERPRISE_NOTIFICATION_BRIDGE": "'"}, clear=False
+        ):
+            result = trigger_notification(self.markdown, self.report_json)
+
+        self.assertEqual(result.status, "bridge_failed")
+        self.assertEqual(result.reason, "invalid_bridge_command")
+        self.assertTrue(result.requires_attention)
+
+    def test_malformed_bridge_override_preserves_cli_success_and_stdout(self):
+        report = self._sample_report()
+        expected = render_text(report, language="en")
+
+        code, stdout, stderr = self._run_detector(report, bridge_override="'")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, expected)
+        self.assertIn("invalid_bridge_command", stderr)
+
     def _bridge_command(self, response, record_path=None, return_code=0):
         script = [
             "import json,sys",
@@ -208,14 +288,15 @@ class NotificationIntegrationTests(unittest.TestCase):
         script.append("raise SystemExit({0})".format(return_code))
         return [sys.executable, "-c", ";".join(script)]
 
-    def _run_detector(self, report, bridge_command, extra_args=None):
+    def _run_detector(
+            self, report, bridge_command=None, extra_args=None, bridge_override=None):
         stdout = io.StringIO()
         stderr = io.StringIO()
-        environment = {
-            "ENTERPRISE_NOTIFICATION_BRIDGE": " ".join(
+        if bridge_override is None:
+            bridge_override = " ".join(
                 shlex.quote(part) for part in bridge_command
             )
-        }
+        environment = {"ENTERPRISE_NOTIFICATION_BRIDGE": bridge_override}
         arguments = ["--language", "en", "--no-public-test"]
         arguments.extend(extra_args or [])
         with patch("wifi_health.cli.collect_report", return_value=report), patch(

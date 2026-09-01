@@ -46,12 +46,14 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
     validate_standard_report(markdown, language)
     validate_standard_json(report_json)
     envelope = _build_envelope(markdown, report_json, summary)
-    command = _normalize_bridge_command(bridge_command)
-    if command is None:
-        return NotificationResult("skipped", "bridge_unavailable")
-
     envelope_path = None
     try:
+        try:
+            command = _normalize_bridge_command(bridge_command)
+        except ValueError:
+            return NotificationResult("bridge_failed", "invalid_bridge_command")
+        if command is None:
+            return NotificationResult("skipped", "bridge_unavailable")
         with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", suffix=".json", delete=False) as handle:
             envelope_path = handle.name
