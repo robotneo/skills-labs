@@ -340,33 +340,45 @@ def _validate_fixed_table(block, headers, separators, row_labels, row_count, nam
         raise ReportContractError(
             "standard report {0} table row contract violated".format(name)
         )
-    if _markdown_cells(table_lines[0]) != headers:
+    expected_headers = tuple(" " + value + " " for value in headers)
+    expected_separators = tuple(" " + value + " " for value in separators)
+    if _markdown_cells(table_lines[0]) != expected_headers:
         raise ReportContractError(
             "standard report {0} table header contract violated".format(name)
         )
-    if _markdown_cells(table_lines[1]) != separators:
+    if _markdown_cells(table_lines[1]) != expected_separators:
         raise ReportContractError(
             "standard report {0} table separator contract violated".format(name)
         )
-    data_rows = table_lines[2:]
+    data_rows = [_markdown_cells(row) for row in table_lines[2:]]
+    if any(len(row) != len(headers) for row in data_rows):
+        raise ReportContractError(
+            "standard report {0} column contract violated".format(name)
+        )
     if row_labels is not None:
-        labels = tuple(_markdown_row_label(row) for row in data_rows)
-        if labels != row_labels:
+        labels = tuple(row[0] for row in data_rows)
+        expected_labels = tuple(" " + value + " " for value in row_labels)
+        if labels != expected_labels:
             raise ReportContractError(
                 "standard report {0} row contract violated".format(name)
             )
-    elif len(_markdown_cells(data_rows[0])) != len(headers):
-        raise ReportContractError(
-            "standard report {0} value contract violated".format(name)
-        )
-
-
-def _markdown_row_label(row):
-    cells = _markdown_cells(row)
-    return cells[0] if cells else ""
 
 
 def _markdown_cells(row):
     if not row.startswith("|") or not row.endswith("|"):
         return ()
-    return tuple(cell.strip() for cell in row[1:-1].split("|"))
+    cells = [""]
+    index = 1
+    end = len(row) - 1
+    while index < end:
+        character = row[index]
+        if character == "\\" and index + 1 < end and row[index + 1] == "|":
+            cells[-1] += "|"
+            index += 2
+            continue
+        if character == "|":
+            cells.append("")
+        else:
+            cells[-1] += character
+        index += 1
+    return tuple(cells)

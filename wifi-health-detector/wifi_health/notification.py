@@ -129,21 +129,25 @@ def _validate_generated_at(value):
 
 
 def _normalize_bridge_command(bridge_command):
+    explicit = bridge_command is not None
     if bridge_command is None:
-        bridge_command = _discover_bridge_command()
+        bridge_command, explicit = _discover_bridge_command()
     if isinstance(bridge_command, str):
         bridge_command = shlex.split(bridge_command, posix=True)
     if not isinstance(bridge_command, (list, tuple)) or not bridge_command:
+        if explicit:
+            raise ValueError("explicit Bridge command is empty")
         return None
     if not all(isinstance(part, str) and part for part in bridge_command):
+        if explicit:
+            raise ValueError("explicit Bridge command is invalid")
         return None
     return list(bridge_command)
 
 
 def _discover_bridge_command():
-    override = os.environ.get("ENTERPRISE_NOTIFICATION_BRIDGE")
-    if override:
-        return override
+    if "ENTERPRISE_NOTIFICATION_BRIDGE" in os.environ:
+        return os.environ["ENTERPRISE_NOTIFICATION_BRIDGE"], True
     skill_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     bridge_directory = os.path.join(
         os.path.dirname(skill_directory), "enterprise-notification-bridge"
@@ -151,8 +155,8 @@ def _discover_bridge_command():
     launcher_name = "run.bat" if os.name == "nt" else "run.sh"
     launcher = os.path.join(bridge_directory, launcher_name)
     if os.path.isfile(launcher):
-        return [launcher]
-    return None
+        return [launcher], False
+    return None, False
 
 
 def _result_from_process(completed):

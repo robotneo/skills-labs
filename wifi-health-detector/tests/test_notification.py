@@ -212,6 +212,61 @@ class NotificationIntegrationTests(unittest.TestCase):
 
                 self.assertFalse(os.path.exists(record_path))
 
+    def test_local_and_public_tables_reject_shape_and_whitespace_mutations(self):
+        english_markdown = render_text(self._sample_report(), language="en")
+        languages = (
+            (
+                "zh", self.markdown,
+                (("## 🏠 本地网络质量", "## 🌐 公网质量"),
+                 ("## 🌐 公网质量", "## 🧭 诊断与建议")),
+                "参数", "测试目标", "额外",
+            ),
+            (
+                "en", english_markdown,
+                (("## 🏠 Local Network Quality", "## 🌐 Public Network Quality"),
+                 ("## 🌐 Public Network Quality", "## 🧭 Diagnostics & Recommendations")),
+                "Parameter", "Target", "Extra",
+            ),
+        )
+        mutations = ("extra column", "fixed label whitespace", "header whitespace")
+
+        for language, markdown, sections, header, label, extra in languages:
+            for table_name, (start, end) in zip(("local", "public"), sections):
+                for mutation in mutations:
+                    name = "{0} {1} {2}".format(language, table_name, mutation)
+                    with self.subTest(name=name):
+                        invalid_markdown = self._mutate_table(
+                            markdown, start, end, header, label, extra, mutation
+                        )
+                        record_path = os.path.join(self.directory.name, name + ".json")
+
+                        with self.assertRaises(ReportContractError):
+                            trigger_notification(
+                                invalid_markdown,
+                                self.report_json,
+                                bridge_command=self._bridge_command(
+                                    {"status": "delivered"}, record_path=record_path
+                                ),
+                            )
+
+                        self.assertFalse(os.path.exists(record_path))
+
+    def test_renderer_escaped_dynamic_pipe_remains_a_single_table_cell(self):
+        report = self._sample_report()
+        report.sections["connection"]["ssid"] = Field(
+            "Office | Lab", source="fixture"
+        )
+        markdown = render_text(report, language="en")
+        self.assertIn(r"Office \| Lab", markdown)
+
+        result = trigger_notification(
+            markdown,
+            json.loads(render_json(report)),
+            bridge_command=self._bridge_command({"status": "delivered"}),
+        )
+
+        self.assertEqual(result.status, "delivered")
+
     def test_invalid_json_never_invokes_bridge(self):
         record_path = os.path.join(self.directory.name, "called.json")
         invalid_json = dict(self.report_json)
@@ -273,6 +328,41 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(stdout, expected)
         self.assertIn("invalid_bridge_command", stderr)
 
+    def test_blank_explicit_bridge_overrides_return_structured_failure(self):
+        for override in ("   ", "''"):
+            with self.subTest(override=override), patch.dict(
+                os.environ, {"ENTERPRISE_NOTIFICATION_BRIDGE": override}, clear=False
+            ):
+                result = trigger_notification(self.markdown, self.report_json)
+
+            self.assertEqual(result.status, "bridge_failed")
+            self.assertEqual(result.reason, "invalid_bridge_command")
+            self.assertTrue(result.requires_attention)
+
+    def test_blank_explicit_bridge_overrides_preserve_cli_output_and_success(self):
+        report = self._sample_report()
+        expected = render_text(report, language="en")
+
+        for override in ("   ", "''"):
+            with self.subTest(override=override):
+                code, stdout, stderr = self._run_detector(
+                    report, bridge_override=override
+                )
+
+                self.assertEqual(code, 0)
+                self.assertEqual(stdout, expected)
+                self.assertIn("invalid_bridge_command", stderr)
+
+    def test_absent_override_and_adjacent_bridge_remains_unavailable_skip(self):
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "wifi_health.notification.os.path.isfile", return_value=False
+        ):
+            result = trigger_notification(self.markdown, self.report_json)
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "bridge_unavailable")
+        self.assertFalse(result.requires_attention)
+
     def _bridge_command(self, response, record_path=None, return_code=0):
         script = [
             "import json,sys",
@@ -287,6 +377,26 @@ class NotificationIntegrationTests(unittest.TestCase):
         script.append("print({0!r})".format(json.dumps(response)))
         script.append("raise SystemExit({0})".format(return_code))
         return [sys.executable, "-c", ";".join(script)]
+
+    @staticmethod
+    def _mutate_table(markdown, start, end, header, label, extra, mutation):
+        prefix, remainder = markdown.split(start, 1)
+        table, suffix = remainder.split(end, 1)
+        lines = table.splitlines()
+        if mutation == "header whitespace":
+            index = next(
+                i for i, line in enumerate(lines) if line.startswith("| " + header + " |")
+            )
+            lines[index] = lines[index].replace("| " + header + " |", "|  " + header + " |", 1)
+        else:
+            index = next(
+                i for i, line in enumerate(lines) if line.startswith("| " + label + " |")
+            )
+            if mutation == "fixed label whitespace":
+                lines[index] = lines[index].replace("| " + label + " |", "|  " + label + " |", 1)
+            else:
+                lines[index] = lines[index][:-1] + "| " + extra + " |"
+        return prefix + start + "\n".join(lines) + end + suffix
 
     def _run_detector(
             self, report, bridge_command=None, extra_args=None, bridge_override=None):
