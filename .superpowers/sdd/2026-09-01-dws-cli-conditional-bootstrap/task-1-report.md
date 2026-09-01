@@ -1,7 +1,8 @@
 # Task 1 Report: DWS Dependency Discovery and Version Contract
 
-**Audit date:** 2026-09-02
+**Audit date:** 2026-09-01
 **Implementation commit:** `daefe84` (`feat: declare and verify conditional dws dependency`)
+**Review fix commit:** `45a2aa9` (`fix: harden dws dependency verification`)
 
 ## Scope completed
 
@@ -51,6 +52,22 @@ added.
    Before implementation it failed because the result reason was
    `dependency_verification_failed` instead of `dws_executable_invalid`; the
    fake runner had been invoked when it should not have been.
+3. Leaf-help contract test:
+   `test_leaf_help_rejects_json_mentioned_as_unsupported`. Before the fix,
+   help text containing `--format` plus `json is unsupported` incorrectly
+   produced `dependency_ready`.
+4. Strict SemVer test:
+   `test_numeric_prerelease_identifier_rejects_leading_zero`. Before the fix,
+   `1.0.16-01` incorrectly passed verification instead of returning
+   `dependency_version_unsupported`.
+5. Windows discovery-order test:
+   `test_windows_candidates_use_windows_paths_in_documented_order`. Before
+   the fix, candidate paths were built with the test host's POSIX path module,
+   so no expected Windows candidate was discovered.
+6. Metadata mutation check: after adding direct manifest and `skill.yaml`
+   contract tests, the conditional requirement sections were temporarily
+   removed. Both tests failed because `dingtalk:dws-cli` was absent. The
+   original metadata was then restored and both tests passed.
 
 ## GREEN and verification evidence
 
@@ -61,7 +78,7 @@ default `python3` currently fails through a missing Xcode Command Line Tools
 Commands/results:
 
 - `python3 -m unittest enterprise-notification-bridge/tests/test_dependencies.py enterprise-notification-bridge/tests/test_dws_provider.py`
-  — 29 tests passed.
+  — 34 tests passed.
 - Parsed both changed Python files with `ast.parse(..., feature_version=(3, 7))`
   — Python 3.7 syntax accepted.
 - Parsed `manifest.json` with the standard-library `json` module — accepted.
@@ -72,7 +89,15 @@ Commands/results:
 - The minimum version is exactly `1.0.15`; `1.0.14` and `1.0.15-rc.1` require
   upgrade, while later stable versions pass.
 - Version output must be a JSON object containing a valid semantic-version
-  string. Free-form version output is rejected.
+  string. Free-form version output and numeric prerelease identifiers with
+  leading zeroes are rejected.
+- Leaf help is accepted only when the `--format` option declaration explicitly
+  lists `json` as an allowed value or includes it in the option's value set.
+  Incidental or negative mentions such as `json is unsupported` are rejected.
+- Windows candidates use `ntpath` and are tested in the documented order:
+  current `PATH`, user-local paths, roaming npm, then the declared npm prefix.
+- Both metadata files have direct tests proving Python stays unconditional and
+  DWS `>=1.0.15` stays conditional on `dingtalk:dws-cli`.
 - Absolute executable references must be executable regular files. A bare
   command name remains accepted as the platform-resolved-command form allowed
   by the design.
