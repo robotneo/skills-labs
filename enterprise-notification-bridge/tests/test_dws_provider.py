@@ -105,6 +105,33 @@ class DwsProviderTests(unittest.TestCase):
         self.assertEqual(result.status, "unavailable")
         self.assertEqual(result.reason, "dws_json_format_unsupported")
 
+    def test_failed_dws_command_never_exposes_opaque_stderr(self):
+        help_command = ["dws", "auth", "status", "--help"]
+        business_command = ["dws", "auth", "status", "--format", "json"]
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("--format json"),
+            tuple(business_command): CommandResult(
+                "", returncode=9, stderr="token=opaque-secret traceback"
+            ),
+        })
+
+        result = DwsProvider(runner).auth_status()
+
+        self.assertEqual(result.reason, "dws_command_failed")
+        self.assertNotIn("stderr", result.data)
+        self.assertNotIn("opaque-secret", repr(result.data))
+
+    def test_undocumented_dws_send_requests_correlated_host_continuation(self):
+        result = DwsProvider(FakeRunner("{}")).send_report(
+            "corp:user", "ops", {"report_id": "report"}
+        )
+
+        self.assertEqual(result.status, "action_required")
+        self.assertEqual(result.reason, "host_send_required")
+        self.assertEqual(result.data["operation"], "send_report")
+        self.assertEqual(result.data["profile"], "corp:user")
+        self.assertEqual(result.data["recipient"], "ops")
+
     def test_successful_leaf_help_confirmation_is_cached(self):
         help_command = ["dws", "auth", "status", "--help"]
         business_command = ["dws", "auth", "status", "--format", "json"]
@@ -147,6 +174,7 @@ class DwsProviderTests(unittest.TestCase):
 
         self.assertEqual(result.status, "action_required")
         self.assertEqual(result.reason, "recipient_selection_required")
+        self.assertEqual(result.data["operation"], "resolve_recipient")
         self.assertEqual(result.data["profile"], "corp:user")
         self.assertEqual(result.data["selector"], "ops")
 

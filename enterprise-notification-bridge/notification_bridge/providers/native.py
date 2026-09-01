@@ -6,6 +6,9 @@ except ImportError:  # pragma: no cover - Python 3.7 compatibility
     from collections import Mapping
 
 from .base import Provider, ProviderResult
+from ..continuation import (
+    ContinuationError, validate_capability_list, validate_operation_result,
+)
 
 
 class NativeProvider(Provider):
@@ -22,7 +25,11 @@ class NativeProvider(Provider):
     def __init__(self, platform, descriptor):
         self.platform = platform
         self._descriptor = descriptor
-        self._operations = _operations_for(platform, descriptor)
+        try:
+            validated = validate_capability_list([descriptor])[0]
+        except ContinuationError:
+            validated = None
+        self._operations = _operations_for(platform, validated)
 
     def capabilities(self):
         if self._operations is None:
@@ -48,33 +55,41 @@ class NativeProvider(Provider):
         })
 
     def send_report(self, profile, recipient, envelope):
+        envelope_value = envelope.to_dict() if hasattr(envelope, "to_dict") else envelope
         return self._request("send_report", {
             "profile": profile,
             "recipient": recipient,
-            "envelope": envelope,
+            "envelope": envelope_value,
         })
 
-    def resume(self, operation_result):
-        """Accept a result only when it matches this host-advertised provider."""
-        if not isinstance(operation_result, Mapping):
-            return ProviderResult("unavailable", "native_operation_result_invalid")
-        if (operation_result.get("platform") != self.platform
-                or operation_result.get("provider") != self.name):
-            return ProviderResult("unavailable", "native_operation_result_invalid")
-        operation = operation_result.get("operation")
+    def delivery_status(self, profile, recipient, claim_id):
+        return self._request("delivery_status", {
+            "profile": profile, "recipient": recipient, "claim_id": claim_id,
+        })
+
+    def resume(self, expected_action, operation_result):
+        """Validate exact action correlation before accepting a host result."""
+        operation = (expected_action.get("operation")
+                     if isinstance(expected_action, Mapping) else None)
         if self._operations is None or operation not in self._operations:
             return ProviderResult("unavailable", "native_operation_unavailable")
-        status = operation_result.get("status")
-        if not isinstance(status, str):
+        if (expected_action.get("platform") != self.platform
+                or expected_action.get("provider") != self.name):
             return ProviderResult("unavailable", "native_operation_result_invalid")
-        data = operation_result.get("data", {})
-        if not isinstance(data, Mapping):
+        try:
+            result = validate_operation_result(
+                dict(operation_result), dict(expected_action)
+            )
+        except (ContinuationError, TypeError, ValueError):
             return ProviderResult("unavailable", "native_operation_result_invalid")
-        reason = operation_result.get("reason", "")
-        if not isinstance(reason, str):
-            return ProviderResult("unavailable", "native_operation_result_invalid")
+        if result["status"] == "succeeded":
+            return ProviderResult("ok", data=result["data"])
+        status = "failed" if result["status"] == "failed" else "unavailable"
+        reason = result["reason"] or "native_operation_{0}".format(
+            result["status"]
+        )
         return ProviderResult(
-            status, reason, operation_result.get("retryable", False), data=dict(data)
+            status, reason, result["retryable"], data=result["data"]
         )
 
     def _request(self, operation, data):
@@ -92,7 +107,9 @@ class NativeProvider(Provider):
 def _operations_for(platform, descriptor):
     if not isinstance(descriptor, Mapping):
         return None
-    if descriptor.get("platform") != platform or descriptor.get("provider") != "native":
+    if (descriptor.get("schema_version") != "1"
+            or descriptor.get("platform") != platform
+            or descriptor.get("provider") != "native"):
         return None
     operations = descriptor.get("operations")
     if not isinstance(operations, list) or not all(isinstance(item, str) for item in operations):

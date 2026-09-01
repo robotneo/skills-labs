@@ -1,10 +1,12 @@
 import csv
+import copy
 import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from collections import OrderedDict
 from unittest.mock import patch
 
 
@@ -17,7 +19,14 @@ from wifi_health.cli import apply_quality, build_parser
 from wifi_health.collectors import MacCollector
 from wifi_health.command import CommandResult
 from wifi_health.models import Field, Report, unavailable
-from wifi_health.output import flatten_report, render_csv, render_json, render_text
+from wifi_health.output import (
+    ReportContractError,
+    flatten_report,
+    render_csv,
+    render_json,
+    render_text,
+    validate_standard_json,
+)
 from wifi_health.parsers import (
     parse_macos_airport,
     parse_macos_default_route,
@@ -376,6 +385,39 @@ class OutputContractTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "2.0")
         self.assertIn("public_quality", payload["sections"])
         self.assertEqual(payload["sections"]["radio"]["noise"]["reason"], "not exposed by OS")
+
+    def test_json_validator_accepts_mapping_reordering(self):
+        payload = json.loads(render_json(self._sample_report()))
+        reordered = OrderedDict(reversed(list(payload.items())))
+        reordered["sections"] = OrderedDict(
+            reversed(list(reordered["sections"].items()))
+        )
+        reordered["diagnosis"] = OrderedDict(
+            reversed(list(reordered["diagnosis"].items()))
+        )
+
+        validate_standard_json(reordered)
+
+    def test_json_validator_rejects_malformed_diagnosis_and_warning_items(self):
+        payload = json.loads(render_json(self._sample_report()))
+        invalid_values = []
+        issue = copy.deepcopy(payload)
+        issue["diagnosis"]["issues"] = [7]
+        invalid_values.append(issue)
+        recommendation = copy.deepcopy(payload)
+        recommendation["diagnosis"]["recommendations"] = [{
+            "id": "weak_signal", "priority": "urgent", "reason": "weak",
+            "action": "move", "unexpected": True,
+        }]
+        invalid_values.append(recommendation)
+        warning = copy.deepcopy(payload)
+        warning["warnings"] = [{"message": "opaque"}]
+        invalid_values.append(warning)
+
+        for invalid in invalid_values:
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ReportContractError):
+                    validate_standard_json(invalid)
 
     def test_chinese_report_localizes_diagnosis_and_recommendations(self):
         report = Report.empty()

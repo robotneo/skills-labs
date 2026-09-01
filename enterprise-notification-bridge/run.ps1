@@ -31,5 +31,6 @@ if (-not $PythonCommand) {
     exit 3
 }
 
+$env:PYTHONUTF8 = "1"
 & $PythonCommand @PythonPrefix (Join-Path $ScriptDir "main.py") @args
 exit $LASTEXITCODE

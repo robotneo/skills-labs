@@ -14,6 +14,9 @@ _SECRET_MARKERS = ("token", "secret", "password", "credential", "refresh")
 _CONFIG_KEYS = set(("version", "notification"))
 _NOTIFICATION_KEYS = set(("enabled", "failure_policy", "ai_summary", "channels"))
 _CHANNEL_KEYS = set(("platform", "provider", "profile", "recipients"))
+_AI_SUMMARY_KEYS = set(("provider", "fallback"))
+_PLATFORMS = frozenset(("dingtalk", "feishu", "wecom"))
+_PROVIDERS = frozenset(("auto", "native", "dws-cli"))
 
 
 class ChannelConfig(object):
@@ -50,7 +53,7 @@ class BridgeConfig(object):
     def __init__(self, version=1, enabled=False, failure_policy="non_blocking",
                  ai_summary=None, channels=None):
         self.version = version
-        self.enabled = bool(enabled)
+        self.enabled = enabled
         self.failure_policy = failure_policy
         self.ai_summary = ai_summary if ai_summary is not None else {
             "provider": "host_agent", "fallback": "deterministic"
@@ -92,7 +95,7 @@ def load_config(path=None):
     path = path or _default_config_path()
     if not os.path.exists(path):
         return BridgeConfig()
-    with open(path, "r") as handle:
+    with open(path, "r", encoding="utf-8") as handle:
         return BridgeConfig.from_dict(json.load(handle))
 
 
@@ -103,14 +106,20 @@ def save_config(config, path=None):
     _validate_config_data(payload)
     path = path or _default_config_path()
     directory = os.path.dirname(path)
-    if directory and not os.path.exists(directory):
-        os.makedirs(directory)
-    descriptor, temporary_path = tempfile.mkstemp(prefix=".config-", dir=directory or None)
+    if directory:
+        _ensure_private_directory(directory)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=".config-", dir=directory or "."
+    )
     try:
-        with os.fdopen(descriptor, "w") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
+        _chmod(descriptor, 0o600, descriptor=True)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(
+                payload, handle, ensure_ascii=False, indent=2, sort_keys=True
+            )
             handle.write("\n")
         _replace(temporary_path, path)
+        _chmod(path, 0o600)
     except Exception:
         if os.path.exists(temporary_path):
             os.unlink(temporary_path)
@@ -157,15 +166,39 @@ def _validate_config_data(value):
         raise ConfigError("configuration must be an object")
     _reject_secrets(value)
     _reject_unknown(value, _CONFIG_KEYS)
+    version = value.get("version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+        raise ConfigError("configuration version must be 1")
     notification = value.get("notification", {})
     if not isinstance(notification, dict):
         raise ConfigError("notification must be an object")
     _reject_unknown(notification, _NOTIFICATION_KEYS)
+    enabled = notification.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ConfigError("notification enabled must be a boolean")
+    if notification.get("failure_policy", "non_blocking") != "non_blocking":
+        raise ConfigError("notification failure_policy must be non_blocking")
+    ai_summary = notification.get("ai_summary", {
+        "provider": "host_agent", "fallback": "deterministic",
+    })
+    if not isinstance(ai_summary, dict):
+        raise ConfigError("notification ai_summary must be an object")
+    _reject_secrets(ai_summary)
+    _reject_unknown(ai_summary, _AI_SUMMARY_KEYS)
+    if set(ai_summary) != _AI_SUMMARY_KEYS:
+        raise ConfigError("notification ai_summary fields are required")
+    if (ai_summary["provider"] != "host_agent"
+            or ai_summary["fallback"] != "deterministic"):
+        raise ConfigError("notification ai_summary values are unsupported")
     channels = notification.get("channels", [])
     if not isinstance(channels, list):
         raise ConfigError("notification channels must be a list")
+    platforms = []
     for channel in channels:
         _validate_channel_data(channel)
+        platforms.append(channel["platform"])
+    if len(platforms) != len(set(platforms)):
+        raise ConfigError("duplicate channel platform is not allowed")
 
 
 def _validate_channel_data(value):
@@ -173,8 +206,47 @@ def _validate_channel_data(value):
         raise ConfigError("channel must be an object")
     _reject_secrets(value)
     _reject_unknown(value, _CHANNEL_KEYS)
-    if not value.get("platform"):
-        raise ConfigError("channel platform is required")
+    platform = value.get("platform")
+    if platform not in _PLATFORMS:
+        raise ConfigError("channel platform is unsupported")
+    provider = value.get("provider", "auto")
+    if provider not in _PROVIDERS:
+        raise ConfigError("channel provider is unsupported")
+    if provider == "dws-cli" and platform != "dingtalk":
+        raise ConfigError("dws-cli is supported only for dingtalk")
+    profile = value.get("profile")
+    if profile is not None:
+        _validate_identifier(profile, "channel profile")
     recipients = value.get("recipients", [])
     if not isinstance(recipients, list):
         raise ConfigError("channel recipients must be a list")
+    for recipient in recipients:
+        _validate_identifier(recipient, "channel recipient")
+    if len(recipients) != len(set(recipients)):
+        raise ConfigError("duplicate channel recipient is not allowed")
+    if recipients and (profile is None or provider == "auto"):
+        raise ConfigError(
+            "channel recipients require a bound profile and provider"
+        )
+
+
+def _validate_identifier(value, label):
+    if (not isinstance(value, str) or not value.strip()
+            or any(ord(character) < 32 for character in value)):
+        raise ConfigError("{0} must be a non-empty string".format(label))
+
+
+def _ensure_private_directory(path):
+    if not os.path.exists(path):
+        os.makedirs(path, mode=0o700)
+    _chmod(path, 0o700)
+
+
+def _chmod(target, mode, descriptor=False):
+    try:
+        if descriptor and hasattr(os, "fchmod"):
+            os.fchmod(target, mode)
+        elif not descriptor:
+            os.chmod(target, mode)
+    except (AttributeError, OSError):
+        pass

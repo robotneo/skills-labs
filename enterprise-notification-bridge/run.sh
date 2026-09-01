@@ -44,4 +44,6 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 3
 fi
 
+PYTHONUTF8=1
+export PYTHONUTF8
 exec "$PYTHON_BIN" "$SCRIPT_DIR/main.py" "$@"

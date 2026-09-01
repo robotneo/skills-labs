@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
 import json
+import re
 import sys
 
 from .cli import CommandError, _json_value, build_commands
@@ -13,7 +14,73 @@ EXPECTED_TOOLS = (
     "configure_notification_recipient",
     "deliver_enterprise_report",
     "retry_enterprise_report",
+    "continue_enterprise_notification",
 )
+
+CAPABILITY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string", "const": "1"},
+        "platform": {
+            "type": "string", "enum": ["dingtalk", "feishu", "wecom"],
+        },
+        "provider": {"type": "string", "const": "native"},
+        "operations": {
+            "type": "array", "minItems": 1, "uniqueItems": True,
+            "items": {
+                "type": "string", "enum": [
+                    "auth_status", "login", "list_profiles",
+                    "resolve_recipient", "send_report", "delivery_status",
+                ],
+            },
+        },
+    },
+    "required": ["schema_version", "platform", "provider", "operations"],
+    "additionalProperties": False,
+}
+CAPABILITY_BUNDLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string", "const": "1"},
+        "capabilities": {
+            "type": "array", "items": CAPABILITY_SCHEMA,
+        },
+    },
+    "required": ["schema_version", "capabilities"],
+    "additionalProperties": False,
+}
+OPERATION_RESULT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string", "const": "1"},
+        "action_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "report_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "platform": {
+            "type": "string",
+            "enum": ["host", "dingtalk", "feishu", "wecom"],
+        },
+        "provider": {"type": "string", "minLength": 1},
+        "operation": {
+            "type": "string", "enum": [
+                "auth_status", "login", "list_profiles", "select_profile",
+                "resolve_recipient", "confirm_delivery", "send_report",
+                "delivery_status", "summarize_report",
+            ],
+        },
+        "status": {
+            "type": "string",
+            "enum": ["succeeded", "failed", "cancelled", "unavailable"],
+        },
+        "reason": {"type": "string"},
+        "retryable": {"type": "boolean"},
+        "data": {"type": "object"},
+    },
+    "required": [
+        "schema_version", "action_id", "report_id", "platform", "provider",
+        "operation", "status", "reason", "retryable", "data",
+    ],
+    "additionalProperties": False,
+}
 
 TOOLS = (
     {
@@ -26,7 +93,10 @@ TOOLS = (
         "description": "Discover and bind a stable platform profile.",
         "inputSchema": {
             "type": "object",
-            "properties": {"platform": {"type": "string", "minLength": 1}},
+            "properties": {
+                "platform": {"type": "string", "minLength": 1},
+                "capabilities": CAPABILITY_BUNDLE_SCHEMA,
+            },
             "required": ["platform"],
             "additionalProperties": False,
         },
@@ -50,7 +120,11 @@ TOOLS = (
         "description": "Deliver a validated enterprise report envelope.",
         "inputSchema": {
             "type": "object",
-            "properties": {"envelope": {"type": "object"}},
+            "properties": {
+                "envelope": {"type": "object"},
+                "capabilities": CAPABILITY_BUNDLE_SCHEMA,
+                "requestHostSummary": {"type": "boolean"},
+            },
             "required": ["envelope"],
             "additionalProperties": False,
         },
@@ -60,8 +134,25 @@ TOOLS = (
         "description": "Retry the same validated report envelope without redetection.",
         "inputSchema": {
             "type": "object",
-            "properties": {"envelope": {"type": "object"}},
-            "required": ["envelope"],
+            "properties": {
+                "reportId": {
+                    "type": "string", "pattern": "^[0-9a-f]{64}$",
+                },
+                "capabilities": CAPABILITY_BUNDLE_SCHEMA,
+            },
+            "required": ["reportId"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "continue_enterprise_notification",
+        "description": "Resume one exactly correlated pending native or host operation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operationResult": OPERATION_RESULT_SCHEMA,
+            },
+            "required": ["operationResult"],
             "additionalProperties": False,
         },
     },
@@ -104,7 +195,7 @@ def handle_request(request, commands):
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
             "serverInfo": {
-                "name": "enterprise-notification-bridge", "version": "1.0.0",
+                "name": "enterprise-notification-bridge", "version": "1.1.0",
             },
         }
         return None if is_notification else _result(request_id, response)
@@ -137,16 +228,16 @@ def serve(commands=None, input_stream=None, output_stream=None,
             continue
         try:
             request = json.loads(line)
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError):
             response = _error(None, -32700, "Parse error")
-            error_stream.write("invalid JSON-RPC: {0}\n".format(error))
+            error_stream.write("invalid_json\n")
         else:
             try:
                 response = handle_request(request, commands)
-            except Exception as error:
+            except Exception:
                 request_id = request.get("id") if isinstance(request, dict) else None
                 response = _error(request_id, -32603, "Internal error")
-                error_stream.write("internal JSON-RPC error: {0}\n".format(error))
+                error_stream.write("internal_error\n")
         if response is not None:
             output_stream.write(json.dumps(
                 _json_value(response), ensure_ascii=False, sort_keys=True,
@@ -175,16 +266,27 @@ def _call_tool(params, commands):
         if name == "notification_status":
             result = commands.status()
         elif name == "bind_notification_profile":
-            result = commands.bind(arguments.get("platform"))
+            result = commands.bind(
+                arguments.get("platform"), arguments.get("capabilities")
+            )
         elif name == "configure_notification_recipient":
             result = commands.configure_recipients(
                 arguments.get("platform"), [arguments.get("recipient")],
                 arguments.get("profile"),
             )
         elif name == "deliver_enterprise_report":
-            result = commands.deliver(arguments.get("envelope"))
+            result = commands.deliver(
+                arguments.get("envelope"), arguments.get("capabilities"),
+                arguments.get("requestHostSummary", False),
+            )
         elif name == "retry_enterprise_report":
-            result = commands.retry(arguments.get("envelope"))
+            result = commands.retry(
+                arguments.get("reportId"), arguments.get("capabilities")
+            )
+        elif name == "continue_enterprise_notification":
+            result = commands.continue_operation(
+                arguments.get("operationResult")
+            )
     except CommandError as error:
         return _tool_error(error.reason)
     except Exception:
@@ -193,23 +295,54 @@ def _call_tool(params, commands):
 
 
 def _validate_arguments(arguments, schema):
-    properties = schema.get("properties", {})
-    required = schema.get("required", [])
-    if any(name not in arguments for name in required):
+    try:
+        _validate_schema(arguments, schema)
+    except (TypeError, ValueError):
         raise RpcError(-32602, "Invalid tool arguments")
-    if (schema.get("additionalProperties") is False
-            and set(arguments) - set(properties)):
-        raise RpcError(-32602, "Invalid tool arguments")
-    for name, value in arguments.items():
-        property_schema = properties.get(name, {})
-        expected_type = property_schema.get("type")
-        if expected_type == "string":
-            if not isinstance(value, str):
-                raise RpcError(-32602, "Invalid tool arguments")
-            if len(value) < property_schema.get("minLength", 0):
-                raise RpcError(-32602, "Invalid tool arguments")
-        elif expected_type == "object" and not isinstance(value, dict):
-            raise RpcError(-32602, "Invalid tool arguments")
+
+
+def _validate_schema(value, schema):
+    expected_type = schema.get("type")
+    if expected_type == "object":
+        if not isinstance(value, dict):
+            raise ValueError("object required")
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if any(name not in value for name in required):
+            raise ValueError("required property missing")
+        if (schema.get("additionalProperties") is False
+                and set(value) - set(properties)):
+            raise ValueError("additional property")
+        for name, item in value.items():
+            _validate_schema(item, properties.get(name, {}))
+    elif expected_type == "array":
+        if not isinstance(value, list):
+            raise ValueError("array required")
+        if len(value) < schema.get("minItems", 0):
+            raise ValueError("array too short")
+        if schema.get("uniqueItems"):
+            serialized = [json.dumps(
+                item, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"),
+            ) for item in value]
+            if len(serialized) != len(set(serialized)):
+                raise ValueError("array items must be unique")
+        for item in value:
+            _validate_schema(item, schema.get("items", {}))
+    elif expected_type == "string":
+        if not isinstance(value, str):
+            raise ValueError("string required")
+        if len(value) < schema.get("minLength", 0):
+            raise ValueError("string too short")
+        if "pattern" in schema and not re.match(schema["pattern"], value):
+            raise ValueError("string pattern mismatch")
+    elif expected_type == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError("boolean required")
+    if "const" in schema and value != schema["const"]:
+        raise ValueError("constant mismatch")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError("enumeration mismatch")
 
 
 def _tool_result(value):

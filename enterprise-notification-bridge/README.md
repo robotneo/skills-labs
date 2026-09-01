@@ -24,6 +24,10 @@ run.bat status
 run.bat deliver --envelope C:\path\to\validated-envelope.json
 ```
 
+To suppress the detector-to-Bridge trigger for one detector run, use
+`wifi-health-detector --no-notify`. This flag does not alter the standardized
+report.
+
 Fresh installations start disabled. Activate delivery explicitly in this
 order; no report generation enables notifications implicitly:
 
@@ -36,14 +40,44 @@ run.sh deliver --envelope /path/to/validated-envelope.json
 ```
 
 `enable` only persists the enabled channel and has no authentication side
-effect. For MCP clients, call the existing
-`configure_notification_recipient` tool to explicitly enable and configure the
-channel, then call `bind_notification_profile` and
-`deliver_enterprise_report`; the MCP surface remains exactly five tools.
+effect. Binding must finish before recipients can be configured. For MCP
+clients, use `bind_notification_profile`,
+`configure_notification_recipient`, and `deliver_enterprise_report`.
 
 The CLI writes one JSON result to stdout. Configure state and the metadata-only
 delivery ledger with `ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG` and
-`ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER` when a non-default location is needed.
+`ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER`; durable pending actions, retry
+envelopes, and first-send confirmations use
+`ENTERPRISE_NOTIFICATION_BRIDGE_STATE`. Files are UTF-8 and created with
+user-only permissions where the operating system supports them.
+
+## Native and host continuation
+
+Native DingTalk, Feishu, and WeCom integrations are supplied by the host as a
+versioned capability bundle. Pass its JSON file with `--capabilities` to
+`bind`, `deliver`, or `retry`. When the result is `action_required`, execute
+only the returned semantic `action` through the host integration, then resume
+the exact action with a correlated operation-result file:
+
+```text
+run.sh continue --operation-result /path/to/operation-result.json
+```
+
+The same continuation carries first-use/expired-login results, profile lists,
+explicit multi-profile choices, resolved recipients, first-send confirmation,
+host-generated summaries, send results, and stale-delivery reconciliation.
+Do not edit correlation fields or invent tool names. `status` lists pending
+actions after a process restart. A failed send can be retried without rerunning
+Wi-Fi detection:
+
+```text
+run.sh retry --report-id <64-character-report-id> --capabilities /path/to/capabilities.json
+```
+
+Start the line-oriented MCP server with `python3 -m
+notification_bridge.mcp_server`. It exposes six tools, including
+`continue_enterprise_notification`; every tool delegates to the same durable
+service used by the CLI.
 
 ## Configuration and safety
 
@@ -58,10 +92,17 @@ Bridge never reuses a current organization or guesses an ID. Empty recipients
 mean no send and return `recipient_not_configured`; the Bridge never infers
 `self` or a default recipient.
 
-Native Feishu and WeCom delivery is a host-advertised capability handshake, so
+Native DingTalk, Feishu, and WeCom delivery is a host-advertised capability handshake, so
 this package does not invent vendor-specific tool names. The DWS fallback uses
 documented commands with `--format json` and never uses a direct HTTP/browser
-fallback.
+fallback. DWS recipient resolution and message sending remain host-mediated
+until DWS documents those leaf operations; the Bridge returns a resumable
+action instead of guessing a command.
+
+Local verification covers Python 3.7-compatible source and launcher behavior.
+Release CI should also run the suite with Python 3.7 and on Windows with
+PowerShell available; the local PowerShell launcher test is skipped when that
+runtime is absent.
 
 See [SKILL.md](SKILL.md) for the complete cross-agent handoff recipe for Codex,
 Claude Code, WorkBuddy, OpenClaw, and generic compatible Agents.

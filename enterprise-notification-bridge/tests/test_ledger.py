@@ -3,8 +3,12 @@ from __future__ import absolute_import
 import os
 import sys
 import tempfile
+import threading
 import unittest
 import warnings
+import os.path
+import stat
+from datetime import datetime, timedelta, timezone
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,11 +52,46 @@ class DeliveryLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.get(KEY)["state"], "claimed")
 
     def test_two_connections_cannot_claim_concurrently(self):
-        first = DeliveryLedger(self.path)
-        second = DeliveryLedger(self.path)
+        barrier = threading.Barrier(3)
+        acquired = []
+        failures = []
 
-        self.assertTrue(first.claim(KEY).acquired)
-        self.assertFalse(second.claim(KEY).acquired)
+        def contender():
+            try:
+                ledger = DeliveryLedger(self.path)
+                barrier.wait()
+                acquired.append(ledger.claim(KEY).acquired)
+            except Exception as error:
+                failures.append(error)
+
+        threads = [threading.Thread(target=contender) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join(10)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(sorted(acquired), [False, True])
+
+    def test_expired_claim_requires_reconciliation_instead_of_blind_resend(self):
+        current = [datetime(2026, 8, 31, tzinfo=timezone.utc)]
+        ledger = DeliveryLedger(
+            self.path, lease_seconds=30, clock=lambda: current[0]
+        )
+        first = ledger.claim(KEY)
+        current[0] += timedelta(seconds=31)
+
+        stale = ledger.claim(KEY)
+
+        self.assertFalse(stale.acquired)
+        self.assertEqual(stale.claim_id, first.claim_id)
+        self.assertEqual(stale.reason, "delivery_reconciliation_required")
+        self.assertEqual(ledger.get(KEY)["state"], "claimed")
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are unavailable")
+    def test_ledger_file_is_user_only(self):
+        self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o600)
 
     def test_permanent_failure_cannot_be_reclaimed(self):
         claim = self.ledger.claim(KEY)

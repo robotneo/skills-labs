@@ -428,7 +428,14 @@
     "score": 95,
     "confidence_percent": 90,
     "verdict": "healthy",
-    "category_scores": {},
+    "category_scores": {
+      "signal": 100,
+      "interference": 100,
+      "link": 100,
+      "local": 100,
+      "public": 100,
+      "security": 100
+    },
     "issues": [],
     "recommendations": []
   },

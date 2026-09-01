@@ -4,7 +4,6 @@ import contextlib
 import io
 import json
 import os
-import shlex
 import sys
 import tempfile
 import unittest
@@ -319,6 +318,18 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(result.reason, "invalid_bridge_command")
         self.assertTrue(result.requires_attention)
 
+    def test_explicit_bridge_override_is_a_cross_platform_json_vector(self):
+        command = [
+            r"C:\Program Files\Enterprise Bridge\run.bat",
+            "--config", r"C:\配置\bridge.json",
+        ]
+
+        normalized = notification_module._normalize_bridge_command(
+            json.dumps(command, ensure_ascii=False)
+        )
+
+        self.assertEqual(normalized, command)
+
     def test_malformed_bridge_override_preserves_cli_success_and_stdout(self):
         report = self._sample_report()
         expected = render_text(report, language="en")
@@ -367,6 +378,7 @@ class NotificationIntegrationTests(unittest.TestCase):
     def test_adjacent_bridge_discovery_passes_validated_envelope_and_is_non_blocking(self):
         config_path = os.path.join(self.directory.name, "adjacent-config.json")
         ledger_path = os.path.join(self.directory.name, "adjacent-ledger.sqlite3")
+        state_path = os.path.join(self.directory.name, "adjacent-state")
         with open(config_path, "w") as handle:
             json.dump({
                 "version": 1,
@@ -389,9 +401,12 @@ class NotificationIntegrationTests(unittest.TestCase):
             handle.write("case \"$*\" in\n")
             handle.write("  '--help') echo 'DWS help' ;;\n")
             handle.write("  *'auth status --help'*) echo '--format json' ;;\n")
+            handle.write("  *'profile list --help'*) echo '--format json' ;;\n")
             handle.write("  *'auth status --format json'*)\n")
             handle.write("    if [ \"${DWS_MODE:-ok}\" = failure ]; then exit 9; fi\n")
             handle.write("    echo '{\"authenticated\":true}' ;;\n")
+            handle.write("  *'profile list --format json'*)\n")
+            handle.write("    echo '{\"profiles\":[{\"profile\":\"corp:user\"}]}' ;;\n")
             handle.write("  *) exit 1 ;;\n")
             handle.write("esac\n")
         os.chmod(dws_path, 0o755)
@@ -418,6 +433,7 @@ class NotificationIntegrationTests(unittest.TestCase):
         environment = {
             "ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG": config_path,
             "ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER": ledger_path,
+            "ENTERPRISE_NOTIFICATION_BRIDGE_STATE": state_path,
             "WIFI_HEALTH_PYTHON": sys.executable,
             "DWS_LOG": dws_log,
             "PATH": self.directory.name + os.pathsep + os.environ.get("PATH", ""),
@@ -502,9 +518,7 @@ class NotificationIntegrationTests(unittest.TestCase):
         stdout = io.StringIO()
         stderr = io.StringIO()
         if bridge_override is None:
-            bridge_override = " ".join(
-                shlex.quote(part) for part in bridge_command
-            )
+            bridge_override = json.dumps(bridge_command, ensure_ascii=False)
         environment = {"ENTERPRISE_NOTIFICATION_BRIDGE": bridge_override}
         arguments = ["--language", "en", "--no-public-test"]
         arguments.extend(extra_args or [])

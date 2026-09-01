@@ -43,6 +43,13 @@ DIAGNOSIS_KEYS = (
     "score", "confidence_percent", "verdict", "category_scores", "issues",
     "recommendations",
 )
+CATEGORY_KEYS = ("signal", "interference", "link", "local", "public", "security")
+RECOMMENDATION_KEYS = ("id", "priority", "reason", "action")
+ISSUE_IDS = frozenset((
+    "weak_signal", "moderate_signal", "channel_congestion", "gateway_loss",
+    "upstream_loss", "slow_dns", "weak_security",
+))
+RECOMMENDATION_IDS = ISSUE_IDS | frozenset(("prefer_higher_band", "no_action"))
 ZH_CORE_ROW_LABELS = (
     "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
     "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
@@ -111,34 +118,50 @@ def render_json(report, mask=False):
 def validate_standard_json(report_json):
     if not isinstance(report_json, Mapping):
         raise ReportContractError("standard report JSON must be an object")
-    if tuple(report_json.keys()) != JSON_TOP_LEVEL_KEYS:
+    if set(report_json) != set(JSON_TOP_LEVEL_KEYS):
         raise ReportContractError("standard report JSON top-level contract violated")
     if report_json["schema_version"] != "2.0":
         raise ReportContractError("unsupported standard report JSON schema")
 
     sections = report_json["sections"]
-    if not isinstance(sections, Mapping) or tuple(sections.keys()) != tuple(SECTION_FIELDS.keys()):
+    if not isinstance(sections, Mapping) or set(sections) != set(SECTION_FIELDS):
         raise ReportContractError("standard report JSON sections contract violated")
     for section_name, field_names in SECTION_FIELDS.items():
         fields = sections[section_name]
-        if not isinstance(fields, Mapping) or tuple(fields.keys()) != field_names:
+        if not isinstance(fields, Mapping) or set(fields) != set(field_names):
             raise ReportContractError("standard report JSON section fields contract violated")
         for field in fields.values():
             _validate_standard_field(field)
 
     diagnosis = report_json["diagnosis"]
-    if not isinstance(diagnosis, Mapping) or tuple(diagnosis.keys()) != DIAGNOSIS_KEYS:
+    if not isinstance(diagnosis, Mapping) or set(diagnosis) != set(DIAGNOSIS_KEYS):
         raise ReportContractError("standard report JSON diagnosis contract violated")
-    if not isinstance(diagnosis["category_scores"], Mapping):
-        raise ReportContractError("standard report JSON category scores must be an object")
+    _validate_score(diagnosis["score"], "score")
+    _validate_score(diagnosis["confidence_percent"], "confidence")
+    if diagnosis["verdict"] not in ("healthy", "warning", "poor", "insufficient_data"):
+        raise ReportContractError("standard report JSON verdict is invalid")
+    category_scores = diagnosis["category_scores"]
+    if (not isinstance(category_scores, Mapping)
+            or set(category_scores) != set(CATEGORY_KEYS)):
+        raise ReportContractError("standard report JSON category scores are invalid")
+    for score in category_scores.values():
+        _validate_score(score, "category score")
     if not isinstance(diagnosis["issues"], list) or not isinstance(diagnosis["recommendations"], list):
         raise ReportContractError("standard report JSON diagnosis lists are invalid")
+    if any(not isinstance(item, str) or item not in ISSUE_IDS
+           for item in diagnosis["issues"]):
+        raise ReportContractError("standard report JSON diagnosis issue is invalid")
+    for item in diagnosis["recommendations"]:
+        _validate_recommendation(item)
     if not isinstance(report_json["warnings"], list):
         raise ReportContractError("standard report JSON warnings must be a list")
+    if any(not isinstance(item, str) or not item.strip()
+           for item in report_json["warnings"]):
+        raise ReportContractError("standard report JSON warning is invalid")
 
 
 def _validate_standard_field(field):
-    if not isinstance(field, Mapping) or tuple(field.keys()) != FIELD_KEYS:
+    if not isinstance(field, Mapping) or set(field) != set(FIELD_KEYS):
         raise ReportContractError("standard report JSON field contract violated")
     if not isinstance(field["unit"], str) or not isinstance(field["source"], str):
         raise ReportContractError("standard report JSON field text is invalid")
@@ -151,6 +174,26 @@ def _validate_standard_field(field):
     if field["availability"] == "unavailable" and (
             field["value"] is not None or not field["reason"]):
         raise ReportContractError("standard report JSON unavailable field is invalid")
+
+
+def _validate_score(value, label):
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or value < 0 or value > 100):
+        raise ReportContractError(
+            "standard report JSON {0} is invalid".format(label)
+        )
+
+
+def _validate_recommendation(value):
+    if not isinstance(value, Mapping) or set(value) != set(RECOMMENDATION_KEYS):
+        raise ReportContractError("standard report JSON recommendation is invalid")
+    if value["id"] not in RECOMMENDATION_IDS:
+        raise ReportContractError("standard report JSON recommendation is invalid")
+    if value["priority"] not in ("high", "medium", "low"):
+        raise ReportContractError("standard report JSON recommendation is invalid")
+    if (not isinstance(value["reason"], str) or not value["reason"].strip()
+            or not isinstance(value["action"], str) or not value["action"].strip()):
+        raise ReportContractError("standard report JSON recommendation is invalid")
 
 
 def render_csv(report, mask=False):

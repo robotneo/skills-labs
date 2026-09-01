@@ -18,6 +18,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from notification_bridge.config import BridgeConfig, ChannelConfig
+from notification_bridge.continuation import MemoryStateStore
 from notification_bridge.contract import build_envelope
 from notification_bridge.ledger import DeliveryLedger
 from notification_bridge.providers.base import Provider, ProviderResult
@@ -26,7 +27,7 @@ from notification_bridge.service import BridgeService
 
 class FixtureProvider(Provider):
     platform = "dingtalk"
-    name = "fixture"
+    name = "native"
     priority = 50
 
     def __init__(self):
@@ -126,7 +127,8 @@ class AgentInstructionContractTests(unittest.TestCase):
         positions = [setup.index(item) for item in recipe]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("no login or delivery", setup)
-        self.assertIn("exactly five tools", setup)
+        self.assertIn("six tools", setup)
+        self.assertIn("continue_enterprise_notification", setup)
 
     def test_behavioral_fixture_preserves_envelope_and_never_sends_empty_recipients(self):
         with open(os.path.join(FIXTURES, "standard-report.md"), encoding="utf-8") as handle:
@@ -140,19 +142,26 @@ class AgentInstructionContractTests(unittest.TestCase):
             config = BridgeConfig(
                 enabled=True,
                 channels=[ChannelConfig(
-                    "dingtalk", provider="fixture", profile="corp:user", recipients=[]
+                    "dingtalk", provider="native", profile="corp:user", recipients=[]
                 )],
             )
-            service = BridgeService(config, [provider], ledger)
+            state_store = MemoryStateStore()
+            service = BridgeService(
+                config, [provider], ledger, state_store=state_store
+            )
             skipped = service.deliver(envelope)
             self.assertEqual(skipped.results[0].reason, "recipient_not_configured")
             self.assertEqual(provider.sent, [])
 
             config.channels[0].recipients = ["ops"]
+            state_store.confirm({
+                "platform": "dingtalk", "provider": "native",
+                "profile": "corp:user", "recipients": ["ops"],
+            })
             delivered = service.deliver(envelope)
             repeated = service.deliver(envelope)
             self.assertEqual(delivered.status, "delivered")
-            self.assertEqual(repeated.results[0].reason, "delivery_already_claimed")
+            self.assertEqual(repeated.results[0].reason, "delivery_already_succeeded")
             self.assertEqual(len(provider.sent), 1)
             self.assertEqual(provider.sent[0].report["markdown"], markdown)
             self.assertEqual(provider.sent[0].report["json"], report_json)

@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 
@@ -63,7 +62,8 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             shell=False,
             timeout=30,
@@ -133,7 +133,10 @@ def _normalize_bridge_command(bridge_command):
     if bridge_command is None:
         bridge_command, explicit = _discover_bridge_command()
     if isinstance(bridge_command, str):
-        bridge_command = shlex.split(bridge_command, posix=True)
+        try:
+            bridge_command = json.loads(bridge_command)
+        except (TypeError, ValueError):
+            raise ValueError("explicit Bridge command must be a JSON vector")
     if not isinstance(bridge_command, (list, tuple)) or not bridge_command:
         if explicit:
             raise ValueError("explicit Bridge command is empty")

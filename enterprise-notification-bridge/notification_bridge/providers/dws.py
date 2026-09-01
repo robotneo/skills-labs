@@ -51,15 +51,22 @@ class DwsProvider(Provider):
         return ProviderResult(
             "action_required",
             "recipient_selection_required",
-            data={"profile": profile, "selector": selector},
+            data={
+                "operation": "resolve_recipient",
+                "profile": profile,
+                "selector": selector,
+            },
         )
 
     def send_report(self, profile, recipient, envelope):
-        # DWS has no documented send command in this bridge.  Do not guess one.
+        # DWS has no documented send command in this bridge.  Do not guess one;
+        # request a correlated host-mediated continuation instead.
         return ProviderResult(
-            "action_required",
-            "dws_send_command_required",
-            data={"profile": profile, "recipient": recipient, "envelope": envelope},
+            "action_required", "host_send_required", data={
+                "operation": "send_report",
+                "profile": profile,
+                "recipient": recipient,
+            },
         )
 
     def _json_command(self, command):
@@ -72,7 +79,6 @@ class DwsProvider(Provider):
         if returncode != 0:
             return ProviderResult(
                 "unavailable", "dws_command_failed", retryable=True,
-                data={"stderr": stderr},
             )
         try:
             payload = json.loads(stdout)
@@ -93,7 +99,6 @@ class DwsProvider(Provider):
         if returncode != 0:
             return ProviderResult(
                 "unavailable", "dws_json_format_unconfirmed", retryable=True,
-                data={"stderr": stderr},
             )
         if "--format" not in stdout or "json" not in stdout.lower():
             return ProviderResult("unavailable", "dws_json_format_unsupported")

@@ -14,6 +14,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from notification_bridge.config import BridgeConfig, ChannelConfig
+from notification_bridge.continuation import MemoryStateStore
 from notification_bridge.contract import build_envelope
 from notification_bridge.ledger import DeliveryKey, DeliveryLedger
 from notification_bridge.providers.base import Provider, ProviderResult
@@ -33,7 +34,7 @@ SendCall = namedtuple("SendCall", "profile recipient envelope")
 class FakeProvider(Provider):
     availability = "available"
     platform = "dingtalk"
-    name = "fake"
+    name = "dws-cli"
     priority = 100
 
     def __init__(self, name=None):
@@ -81,11 +82,13 @@ def make_envelope(summary_text="AI summary"):
 
 
 def make_config(recipients=None, profile="corp:user"):
+    if recipients is None:
+        recipients = [] if profile is None else ["ops"]
     return BridgeConfig(
         enabled=True,
         channels=[ChannelConfig(
-            "dingtalk", provider="fake", profile=profile,
-            recipients=["ops"] if recipients is None else recipients,
+            "dingtalk", provider="dws-cli", profile=profile,
+            recipients=recipients,
         )],
     )
 
@@ -95,13 +98,24 @@ class BridgeServiceTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.ledger = DeliveryLedger(os.path.join(self.directory.name, "ledger.sqlite3"))
         self.provider = FakeProvider()
+        self.state_store = MemoryStateStore()
 
     def tearDown(self):
         self.directory.cleanup()
 
     def service(self, config=None):
+        config = config or make_config()
+        for channel in config.channels:
+            if channel.profile is not None and channel.recipients:
+                self.state_store.confirm({
+                    "platform": channel.platform,
+                    "provider": channel.provider,
+                    "profile": channel.profile,
+                    "recipients": list(channel.recipients),
+                })
         return BridgeService(
-            config or make_config(), [self.provider], self.ledger
+            config, [self.provider], self.ledger,
+            state_store=self.state_store,
         )
 
     def test_no_recipient_skips_without_calling_send(self):
@@ -117,7 +131,7 @@ class BridgeServiceTests(unittest.TestCase):
         self.service().deliver(envelope)
 
         sent = self.provider.send_calls[0].envelope
-        self.assertIs(sent, envelope)
+        self.assertIsNot(sent, envelope)
         self.assertEqual(sent.ai_summary["text"], "AI summary")
         self.assertEqual(sent.report["markdown"], STANDARD_MARKDOWN)
         self.assertEqual(sent.report["json"], STANDARD_REPORT)
@@ -131,20 +145,15 @@ class BridgeServiceTests(unittest.TestCase):
         self.assertEqual(result.status, "notification_failed")
         self.assertTrue(result.results[0].retryable)
         key = DeliveryKey(
-            envelope.report_id, "dingtalk", "fake", "corp:user", "ops"
+            envelope.report_id, "dingtalk", "dws-cli", "corp:user", "ops"
         )
         self.assertEqual(self.ledger.get(key)["state"], "retryable_failure")
 
-    def test_empty_ai_summary_text_uses_deterministic_fallback(self):
+    def test_envelope_summary_cannot_be_replaced_after_construction(self):
         envelope = make_envelope()
-        envelope.ai_summary = {"mode": "deterministic", "text": ""}
 
-        self.service().deliver(envelope)
-
-        sent = self.provider.send_calls[0].envelope
-        self.assertIn("Wi-Fi", sent.ai_summary["text"])
-        self.assertEqual(sent.ai_summary["mode"], "deterministic")
-        self.assertEqual(envelope.ai_summary, {"mode": "deterministic", "text": ""})
+        with self.assertRaises(AttributeError):
+            envelope.ai_summary = {"mode": "deterministic", "text": ""}
 
     def test_deterministic_summary_uses_only_report_diagnosis_content(self):
         report = copy.deepcopy(STANDARD_REPORT)
@@ -184,13 +193,13 @@ class BridgeServiceTests(unittest.TestCase):
         ])
         self.assertEqual(
             [item.reason for item in second.results],
-            ["delivery_already_claimed", "delivery_already_claimed"],
+            ["delivery_already_succeeded", "delivery_already_succeeded"],
         )
 
     def test_missing_profile_binds_without_resolving_or_sending(self):
         result = self.service(make_config(profile=None)).deliver(make_envelope())
 
-        self.assertEqual(result.results[0].status, "ok")
+        self.assertEqual(result.results[0].reason, "recipient_not_configured")
         self.assertEqual(self.provider.profile_calls, 1)
         self.assertEqual(self.provider.resolve_calls, [])
         self.assertEqual(self.provider.send_calls, [])
@@ -200,7 +209,10 @@ class BridgeServiceTests(unittest.TestCase):
 
         result = self.service().deliver(make_envelope())
 
-        self.assertEqual(result.results[0].reason, "login_required")
+        self.assertEqual(result.results[0].reason, "auth_status_required")
+        self.assertEqual(
+            result.results[0].data["action"]["operation"], "auth_status"
+        )
         self.assertEqual(self.provider.profile_calls, 0)
         self.assertEqual(self.provider.resolve_calls, [])
         self.assertEqual(self.provider.send_calls, [])
@@ -223,7 +235,7 @@ class BridgeServiceTests(unittest.TestCase):
         failed = self.service().deliver(envelope)
 
         key = DeliveryKey(
-            envelope.report_id, "dingtalk", "fake", "corp:user", "ops"
+            envelope.report_id, "dingtalk", "dws-cli", "corp:user", "ops"
         )
         failed_row = self.ledger.get(key)
         self.assertEqual(failed.status, "notification_failed")
@@ -241,19 +253,22 @@ class BridgeServiceTests(unittest.TestCase):
         self.assertEqual(len(self.provider.send_calls), 2)
 
     def test_missing_profile_binds_with_the_already_selected_provider(self):
-        selected = FakeProvider("selected")
-        alternative = FakeProvider("alternative")
+        selected = FakeProvider("native")
+        alternative = FakeProvider("dws-cli")
+        alternative.priority = 10
         config = BridgeConfig(
             enabled=True,
             channels=[ChannelConfig(
-                "dingtalk", provider="selected", profile=None, recipients=[]
+                "dingtalk", provider="native", profile=None, recipients=[]
             )],
         )
         service = BridgeService(config, [selected, alternative], self.ledger)
 
         result = service.deliver(make_envelope())
 
-        self.assertEqual(result.results[0].data["profile"], "corp:user")
+        self.assertEqual(result.results[0].reason, "recipient_not_configured")
+        self.assertEqual(config.channels[0].profile, "corp:user")
+        self.assertEqual(config.channels[0].provider, "native")
         self.assertEqual(selected.profile_calls, 1)
         self.assertEqual(alternative.profile_calls, 0)
         self.assertEqual(selected.capabilities_calls, 1)

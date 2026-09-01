@@ -24,6 +24,9 @@ class Provider(object):
     def send_report(self, profile, recipient, envelope):
         raise NotImplementedError
 
+    def delivery_status(self, profile, recipient, claim_id):
+        return ProviderResult("unavailable", "delivery_status_unavailable")
+
 
 class ProviderResult(object):
     def __init__(self, status, reason="", retryable=False, data=None):

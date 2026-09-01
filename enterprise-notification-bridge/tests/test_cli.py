@@ -35,6 +35,20 @@ def envelope_payload():
     ).to_dict()
 
 
+def capability_bundle():
+    return {
+        "schema_version": "1",
+        "capabilities": [{
+            "schema_version": "1", "platform": "dingtalk",
+            "provider": "native",
+            "operations": [
+                "auth_status", "login", "list_profiles",
+                "resolve_recipient", "send_report", "delivery_status",
+            ],
+        }],
+    }
+
+
 class FakeService(object):
     def __init__(self):
         self.deliver_result = DeliveryBatchResult([
@@ -42,19 +56,31 @@ class FakeService(object):
         ])
         self.deliver_calls = []
         self.bind_calls = []
+        self.retry_calls = []
+        self.continue_calls = []
 
-    def deliver(self, envelope):
-        self.deliver_calls.append(envelope)
+    def deliver(self, envelope, capabilities=None, request_host_summary=False):
+        self.deliver_calls.append(
+            (envelope, capabilities, request_host_summary)
+        )
         return self.deliver_result
 
-    def bind(self, platform):
-        self.bind_calls.append(platform)
+    def bind(self, platform, capabilities=None):
+        self.bind_calls.append((platform, capabilities))
         return ProviderResult("ok", data={"profile": "corp:user"})
+
+    def retry(self, report_id, capabilities=None):
+        self.retry_calls.append((report_id, capabilities))
+        return self.deliver_result
+
+    def continue_operation(self, result):
+        self.continue_calls.append(result)
+        return self.deliver_result
 
 
 class ActivationProvider(Provider):
     platform = "dingtalk"
-    name = "activation-fake"
+    name = "native"
     priority = 100
 
     def capabilities(self):
@@ -88,8 +114,13 @@ class CliTests(unittest.TestCase):
             )],
         ), self.config_path)
         self.envelope_path = os.path.join(self.directory.name, "envelope.json")
-        with open(self.envelope_path, "w") as handle:
+        with open(self.envelope_path, "w", encoding="utf-8") as handle:
             json.dump(envelope_payload(), handle)
+        self.capabilities_path = os.path.join(
+            self.directory.name, "capabilities.json"
+        )
+        with open(self.capabilities_path, "w", encoding="utf-8") as handle:
+            json.dump(capability_bundle(), handle)
         self.service = FakeService()
 
     def tearDown(self):
@@ -113,7 +144,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(json.loads(stdout)["status"], "delivered")
         self.assertEqual(len(stdout.strip().splitlines()), 1)
         self.assertEqual(stderr, "")
-        self.assertEqual(self.service.deliver_calls[0].report_id,
+        self.assertEqual(self.service.deliver_calls[0][0].report_id,
                          envelope_payload()["report_id"])
 
     def test_notification_failure_keeps_cli_success(self):
@@ -184,16 +215,69 @@ class CliTests(unittest.TestCase):
 
         self.assertNotEqual(code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["reason"], "internal_error")
-        self.assertIn("database unavailable", stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "internal_error\n")
 
-    def test_retry_uses_the_same_delivery_core(self):
-        code, stdout, _ = self.run_cli([
-            "retry", "--envelope", self.envelope_path,
+    def test_utf8_envelope_path_preserves_non_ascii_report(self):
+        unicode_path = os.path.join(self.directory.name, "企业报告.json")
+        with open(unicode_path, "w", encoding="utf-8") as handle:
+            json.dump(envelope_payload(), handle, ensure_ascii=False)
+
+        code, stdout, stderr = self.run_cli([
+            "deliver", "--envelope", unicode_path,
         ])
 
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout)["status"], "delivered")
-        self.assertEqual(len(self.service.deliver_calls), 1)
+        self.assertEqual(stderr, "")
+
+    def test_retry_uses_durable_report_id_without_an_envelope(self):
+        report_id = envelope_payload()["report_id"]
+        code, stdout, _ = self.run_cli([
+            "retry", "--report-id", report_id,
+            "--capabilities", self.capabilities_path,
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["status"], "delivered")
+        self.assertEqual(
+            self.service.retry_calls, [(report_id, capability_bundle())]
+        )
+        self.assertEqual(self.service.deliver_calls, [])
+
+    def test_deliver_passes_versioned_capabilities_and_summary_request(self):
+        code, stdout, stderr = self.run_cli([
+            "deliver", "--envelope", self.envelope_path,
+            "--capabilities", self.capabilities_path,
+            "--request-host-summary",
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["status"], "delivered")
+        self.assertEqual(stderr, "")
+        self.assertEqual(self.service.deliver_calls[0][1], capability_bundle())
+        self.assertTrue(self.service.deliver_calls[0][2])
+
+    def test_continue_accepts_a_correlated_operation_result_file(self):
+        operation_result = {
+            "schema_version": "1", "action_id": "a" * 32,
+            "report_id": envelope_payload()["report_id"],
+            "platform": "dingtalk", "provider": "native",
+            "operation": "auth_status", "status": "succeeded",
+            "reason": "", "retryable": False,
+            "data": {"authorization": "authorized"},
+        }
+        path = os.path.join(self.directory.name, "operation-result.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(operation_result, handle)
+
+        code, stdout, stderr = self.run_cli([
+            "continue", "--operation-result", path,
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["status"], "delivered")
+        self.assertEqual(stderr, "")
+        self.assertEqual(self.service.continue_calls, [operation_result])
 
     def test_bind_uses_service_bind(self):
         code, stdout, stderr = self.run_cli([
@@ -203,7 +287,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout)["data"]["profile"], "corp:user")
         self.assertEqual(stderr, "")
-        self.assertEqual(self.service.bind_calls, ["dingtalk"])
+        self.assertEqual(self.service.bind_calls, [("dingtalk", None)])
+
+    def test_bind_passes_versioned_native_capabilities(self):
+        code, stdout, stderr = self.run_cli([
+            "bind", "--platform", "dingtalk",
+            "--capabilities", self.capabilities_path,
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["status"], "ok")
+        self.assertEqual(stderr, "")
+        self.assertEqual(
+            self.service.bind_calls, [("dingtalk", capability_bundle())]
+        )
 
     def test_recipients_persists_non_secret_configuration(self):
         code, stdout, stderr = self.run_cli([
@@ -270,6 +367,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(configured["status"], "configured")
         self.assertEqual(load_config(config_path).channels[0].recipients, ["ops"])
 
+        service.state_store.confirm({
+            "platform": "dingtalk", "provider": "native",
+            "profile": "corp:user", "recipients": ["ops"],
+        })
+
         code, delivered, _ = invoke([
             "deliver", "--envelope", self.envelope_path,
         ])
@@ -304,6 +406,9 @@ class CliTests(unittest.TestCase):
             calls.append(list(command))
             outputs = {
                 ("dws", "--help"): "DWS command line",
+                ("dws", "auth", "status", "--help"): "--format json",
+                ("dws", "auth", "status", "--format", "json"):
+                    '{"authenticated":true}',
                 ("dws", "profile", "list", "--help"): "--format json",
                 ("dws", "profile", "list", "--format", "json"):
                     '{"profiles":[{"profile":"corp:user"}]}',
@@ -311,13 +416,54 @@ class CliTests(unittest.TestCase):
             return ProcessResult(outputs[tuple(command)])
 
         commands = build_commands(
-            self.config_path, ledger_path, run_process=run_process
+            self.config_path, ledger_path,
+            os.path.join(self.directory.name, "production-state"),
+            run_process=run_process,
         )
         result = commands.bind("dingtalk")
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["data"]["profile"], "corp:user")
         self.assertFalse(any("login" in command for command in calls))
+
+    def test_recipients_reject_an_unbound_or_mismatched_profile(self):
+        config = BridgeConfig(
+            enabled=True,
+            channels=[ChannelConfig("feishu", provider="auto")],
+        )
+        path = os.path.join(self.directory.name, "unbound.json")
+        save_config(config, path)
+        commands = BridgeCommands(self.service, config, path)
+
+        for arguments in (
+                ["recipients", "--platform", "feishu", "--recipient", "ops"],
+                ["recipients", "--platform", "feishu",
+                 "--profile", "tenant:other", "--recipient", "ops"]):
+            with self.subTest(arguments=arguments):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                code = main(
+                    arguments, commands=commands, stdout=stdout, stderr=stderr
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(
+                    json.loads(stdout.getvalue())["reason"],
+                    "profile_not_validated",
+                )
+
+    def test_malformed_capabilities_are_a_fixed_input_error(self):
+        with open(self.capabilities_path, "w", encoding="utf-8") as handle:
+            json.dump({"schema_version": "1", "capabilities": "bad"}, handle)
+
+        code, stdout, stderr = self.run_cli([
+            "deliver", "--envelope", self.envelope_path,
+            "--capabilities", self.capabilities_path,
+        ])
+
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(stdout)["reason"], "malformed_capabilities")
+        self.assertEqual(stderr, "malformed_capabilities\n")
+        self.assertEqual(self.service.deliver_calls, [])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import os
 import sys
 import unittest
+import copy
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +18,7 @@ ENVELOPE = {"report_id": "report-1", "report": {"markdown": "# report"}}
 
 def capability_descriptor():
     return {
+        "schema_version": "1",
         "platform": "feishu",
         "provider": "native",
         "operations": [
@@ -55,30 +57,53 @@ class NativeProviderTests(unittest.TestCase):
         self.assertEqual(result.status, "unavailable")
         self.assertEqual(result.reason, "native_operation_unavailable")
 
-    def test_native_resume_accepts_only_matching_host_operation_result(self):
+    def test_native_resume_accepts_only_exactly_correlated_operation_result(self):
         provider = NativeProvider("feishu", capability_descriptor())
-
-        result = provider.resume({
+        action = {
+            "schema_version": "1", "action_id": "a" * 32,
+            "report_id": "b" * 64,
             "platform": "feishu",
             "provider": "native",
             "operation": "send_report",
-            "status": "ok",
-            "data": {"message_id": "host-returned-id"},
+            "data": {
+                "profile": "tenant:user", "recipient": "recipient",
+                "envelope": {}, "claim_id": "claim-1",
+            },
+        }
+        operation_result = dict(action)
+        operation_result.update({
+            "status": "succeeded", "reason": "", "retryable": False,
+            "data": {"external_id": "host-returned-id"},
         })
 
+        result = provider.resume(action, operation_result)
+
         self.assertEqual(result.status, "ok")
-        self.assertEqual(result.data["message_id"], "host-returned-id")
+        self.assertEqual(result.data["external_id"], "host-returned-id")
+
+        mismatched = copy.deepcopy(operation_result)
+        mismatched["action_id"] = "c" * 32
+        rejected = provider.resume(action, mismatched)
+        self.assertEqual(rejected.status, "unavailable")
+        self.assertEqual(rejected.reason, "native_operation_result_invalid")
 
     def test_native_resume_rejects_an_operation_not_advertised_by_host(self):
         provider = NativeProvider("feishu", capability_descriptor())
 
-        result = provider.resume({
+        action = {
+            "schema_version": "1", "action_id": "a" * 32,
+            "report_id": "b" * 64,
             "platform": "feishu",
             "provider": "native",
             "operation": "delete_message",
-            "status": "ok",
             "data": {},
+        }
+        operation_result = dict(action)
+        operation_result.update({
+            "status": "succeeded", "reason": "", "retryable": False,
         })
+
+        result = provider.resume(action, operation_result)
 
         self.assertEqual(result.status, "unavailable")
         self.assertEqual(result.reason, "native_operation_unavailable")

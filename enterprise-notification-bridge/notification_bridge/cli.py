@@ -3,10 +3,14 @@ from __future__ import absolute_import
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
 from .config import ChannelConfig, load_config, save_config
+from .continuation import (
+    ContinuationError, PendingStateStore, normalize_capabilities,
+)
 from .contract import ContractError, validate_envelope
 from .ledger import DeliveryLedger
 from .models import Envelope
@@ -14,7 +18,11 @@ from .providers.dws import DwsProvider
 from .service import BridgeService, DeliveryBatchResult
 
 
-COMMAND_NAMES = ("status", "enable", "bind", "recipients", "deliver", "retry")
+COMMAND_NAMES = (
+    "status", "enable", "bind", "recipients", "deliver", "retry",
+    "continue",
+)
+REPORT_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class CommandError(ValueError):
@@ -37,8 +45,8 @@ class SubprocessRunner(object):
     def run(self, command):
         return self._run_process(
             list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, universal_newlines=True, check=False,
-            shell=False, timeout=30,
+            stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+            check=False, shell=False, timeout=30,
         )
 
 
@@ -51,9 +59,14 @@ class BridgeCommands(object):
         self.config_path = config_path
 
     def status(self):
+        state_store = getattr(self.service, "state_store", None)
+        pending = []
+        if state_store is not None and hasattr(state_store, "pending_actions"):
+            pending = state_store.pending_actions()
         return {
             "status": "enabled" if self.config.enabled else "disabled",
             "channels": [channel.to_dict() for channel in self.config.channels],
+            "pending_actions": pending,
         }
 
     def enable(self, platform, provider="auto"):
@@ -75,10 +88,14 @@ class BridgeCommands(object):
             "channel": channel.to_dict(),
         }
 
-    def bind(self, platform):
+    def bind(self, platform, capabilities=None):
         if not isinstance(platform, str) or not platform:
             raise CommandError("invalid_arguments", "platform is required")
-        result = self.service.bind(platform)
+        capability_bundle = load_capabilities(capabilities)
+        try:
+            result = self.service.bind(platform, capability_bundle)
+        except ContinuationError as error:
+            raise CommandError("malformed_capabilities", str(error))
         profile = result.data.get("profile")
         if result.status == "ok" and isinstance(profile, str) and profile:
             self._store_profile(platform, profile)
@@ -95,15 +112,14 @@ class BridgeCommands(object):
             raise CommandError("invalid_arguments", "profile must be a non-empty string")
 
         channel = self._channel(platform)
-        if channel is None:
-            channel = ChannelConfig(
-                platform, profile=profile, recipients=list(recipients)
+        if (channel is None or channel.profile is None
+                or channel.provider == "auto"
+                or (profile is not None and profile != channel.profile)):
+            raise CommandError(
+                "profile_not_validated",
+                "recipients require the exact bound provider profile",
             )
-            self.config.channels.append(channel)
-        else:
-            if profile is not None:
-                channel.profile = profile
-            channel.recipients = list(recipients)
+        channel.recipients = list(recipients)
         # Explicit recipient configuration is also an explicit activation
         # action for a fresh, default-disabled Bridge configuration.
         self.config.enabled = True
@@ -115,12 +131,38 @@ class BridgeCommands(object):
             "recipients": list(channel.recipients),
         }
 
-    def deliver(self, envelope_value):
+    def deliver(self, envelope_value, capabilities=None,
+                request_host_summary=False):
         envelope = load_envelope(envelope_value)
-        return result_to_dict(self.service.deliver(envelope))
+        capability_bundle = load_capabilities(capabilities)
+        try:
+            result = self.service.deliver(
+                envelope, capability_bundle, request_host_summary
+            )
+        except ContinuationError as error:
+            raise CommandError("malformed_capabilities", str(error))
+        return result_to_dict(result)
 
-    def retry(self, envelope_value):
-        return self.deliver(envelope_value)
+    def retry(self, report_id, capabilities=None):
+        if (not isinstance(report_id, str)
+                or not REPORT_ID_PATTERN.match(report_id)):
+            raise CommandError(
+                "invalid_report_id", "report id must be 64 lowercase hex digits"
+            )
+        capability_bundle = load_capabilities(capabilities)
+        try:
+            result = self.service.retry(report_id, capability_bundle)
+        except ContinuationError as error:
+            raise CommandError("retry_not_available", str(error))
+        return result_to_dict(result)
+
+    def continue_operation(self, operation_result):
+        value = load_operation_result(operation_result)
+        try:
+            result = self.service.continue_operation(value)
+        except ContinuationError as error:
+            raise CommandError("invalid_operation_result", str(error))
+        return result_to_dict(result)
 
     def _channel(self, platform):
         for channel in self.config.channels:
@@ -141,7 +183,7 @@ class BridgeCommands(object):
 def load_envelope(value):
     if isinstance(value, str):
         try:
-            with open(value, "r") as handle:
+            with open(value, "r", encoding="utf-8") as handle:
                 value = json.load(handle)
         except (IOError, OSError, TypeError, ValueError) as error:
             raise CommandError("malformed_envelope", str(error))
@@ -157,13 +199,43 @@ def load_envelope(value):
     try:
         envelope = Envelope(
             value["report_id"], value["generated_at"], value["detector"],
-            value["report"], value["ai_summary"],
+            value["report"], value["ai_summary"], value["schema_version"],
         )
-        envelope.schema_version = value["schema_version"]
         validate_envelope(envelope)
     except (ContractError, KeyError, TypeError, ValueError) as error:
         raise CommandError("malformed_envelope", str(error))
     return envelope
+
+
+def load_capabilities(value):
+    if value is None:
+        return None
+    value = _load_json_object(
+        value, "malformed_capabilities", "capabilities"
+    )
+    try:
+        normalize_capabilities(value)
+    except ContinuationError as error:
+        raise CommandError("malformed_capabilities", str(error))
+    return value
+
+
+def load_operation_result(value):
+    return _load_json_object(
+        value, "malformed_operation_result", "operation result"
+    )
+
+
+def _load_json_object(value, reason, label):
+    if isinstance(value, str):
+        try:
+            with open(value, "r", encoding="utf-8") as handle:
+                value = json.load(handle)
+        except (IOError, OSError, TypeError, ValueError) as error:
+            raise CommandError(reason, str(error))
+    if not isinstance(value, dict):
+        raise CommandError(reason, "{0} must be a JSON object".format(label))
+    return value
 
 
 def result_to_dict(result):
@@ -184,18 +256,25 @@ def production_providers(run_process=None):
     return [DwsProvider(SubprocessRunner(run_process))]
 
 
-def build_commands(config_path=None, ledger_path=None, providers=None,
-                   run_process=None):
+def build_commands(config_path=None, ledger_path=None, state_path=None,
+                   providers=None, run_process=None):
     config_path = config_path or os.environ.get(
         "ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG"
     )
     ledger_path = ledger_path or os.environ.get(
         "ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER"
     ) or _default_state_path("delivery-ledger.sqlite3")
+    state_path = state_path or os.environ.get(
+        "ENTERPRISE_NOTIFICATION_BRIDGE_STATE"
+    ) or _default_state_path("pending-state")
     config = load_config(config_path)
     provider_list = (production_providers(run_process) if providers is None
                      else list(providers))
-    service = BridgeService(config, provider_list, DeliveryLedger(ledger_path))
+    service = BridgeService(
+        config, provider_list, DeliveryLedger(ledger_path),
+        state_store=PendingStateStore(state_path),
+        persist_config=lambda: save_config(config, config_path),
+    )
     return BridgeCommands(service, config, config_path)
 
 
@@ -211,17 +290,19 @@ def main(argv=None, commands=None, stdout=None, stderr=None):
         if arguments.command is None:
             raise CommandError("invalid_arguments", "a command is required")
         if commands is None:
-            commands = build_commands(arguments.config, arguments.ledger)
+            commands = build_commands(
+                arguments.config, arguments.ledger, arguments.state
+            )
         result = _execute(arguments, commands)
         _write_json(stdout, result)
         return 0
     except CommandError as error:
         _write_json(stdout, {"status": "error", "reason": error.reason})
-        stderr.write("{0}: {1}\n".format(error.reason, error))
+        stderr.write("{0}\n".format(error.reason))
         return 2
-    except Exception as error:
+    except Exception:
         _write_json(stdout, {"status": "error", "reason": "internal_error"})
-        stderr.write("internal_error: {0}\n".format(error))
+        stderr.write("internal_error\n")
         return 1
 
 
@@ -231,15 +312,20 @@ def _execute(arguments, commands):
     if arguments.command == "enable":
         return commands.enable(arguments.platform, arguments.provider)
     if arguments.command == "bind":
-        return commands.bind(arguments.platform)
+        return commands.bind(arguments.platform, arguments.capabilities)
     if arguments.command == "recipients":
         return commands.configure_recipients(
             arguments.platform, arguments.recipient, arguments.profile
         )
     if arguments.command == "deliver":
-        return commands.deliver(arguments.envelope)
+        return commands.deliver(
+            arguments.envelope, arguments.capabilities,
+            arguments.request_host_summary,
+        )
     if arguments.command == "retry":
-        return commands.retry(arguments.envelope)
+        return commands.retry(arguments.report_id, arguments.capabilities)
+    if arguments.command == "continue":
+        return commands.continue_operation(arguments.operation_result)
     raise CommandError("invalid_arguments", "unsupported command")
 
 
@@ -247,6 +333,7 @@ def _parser():
     parser = _ArgumentParser(prog="enterprise-notification-bridge")
     parser.add_argument("--config")
     parser.add_argument("--ledger")
+    parser.add_argument("--state")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("status")
 
@@ -256,15 +343,24 @@ def _parser():
 
     bind = subparsers.add_parser("bind")
     bind.add_argument("--platform", required=True)
+    bind.add_argument("--capabilities")
 
     recipients = subparsers.add_parser("recipients")
     recipients.add_argument("--platform", required=True)
     recipients.add_argument("--profile")
     recipients.add_argument("--recipient", action="append", required=True)
 
-    for name in ("deliver", "retry"):
-        delivery = subparsers.add_parser(name)
-        delivery.add_argument("--envelope", required=True)
+    delivery = subparsers.add_parser("deliver")
+    delivery.add_argument("--envelope", required=True)
+    delivery.add_argument("--capabilities")
+    delivery.add_argument("--request-host-summary", action="store_true")
+
+    retry = subparsers.add_parser("retry")
+    retry.add_argument("--report-id", required=True)
+    retry.add_argument("--capabilities")
+
+    continuation = subparsers.add_parser("continue")
+    continuation.add_argument("--operation-result", required=True)
     return parser
 
 

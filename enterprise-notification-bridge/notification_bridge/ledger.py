@@ -3,6 +3,7 @@ from __future__ import absolute_import
 from collections import namedtuple
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import os
 import sqlite3
 import uuid
 
@@ -12,8 +13,11 @@ class DeliveryKey(namedtuple(
     __slots__ = ()
 
 
-class Claim(namedtuple("ClaimBase", "key claim_id acquired")):
+class Claim(namedtuple("ClaimBase", "key claim_id acquired reason")):
     __slots__ = ()
+
+
+Claim.__new__.__defaults__ = ("",)
 
 
 class DeliveryLedger(object):
@@ -23,9 +27,16 @@ class DeliveryLedger(object):
         "claimed", "succeeded", "retryable_failure", "permanent_failure",
     )
 
-    def __init__(self, path):
+    def __init__(self, path, lease_seconds=300, clock=None):
         self.path = path
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float)):
+            raise ValueError("lease_seconds must be numeric")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        self.lease_seconds = float(lease_seconds)
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._create_schema()
+        self._secure_file()
 
     @contextmanager
     def connection(self):
@@ -54,13 +65,22 @@ class DeliveryLedger(object):
     def claim(self, key):
         with self.transaction("IMMEDIATE") as connection:
             row = self._get_row(connection, key)
-            if row and row["state"] in (
-                    "claimed", "succeeded", "permanent_failure"):
-                return Claim(key, row["claim_id"], False)
+            if row and row["state"] == "claimed":
+                reason = ("delivery_reconciliation_required"
+                          if self._claim_expired(row) else "delivery_in_progress")
+                return Claim(key, row["claim_id"], False, reason)
+            if row and row["state"] == "succeeded":
+                return Claim(
+                    key, row["claim_id"], False, "delivery_already_succeeded"
+                )
+            if row and row["state"] == "permanent_failure":
+                return Claim(
+                    key, row["claim_id"], False, "delivery_permanently_failed"
+                )
 
             claim_id = uuid.uuid4().hex
             self._upsert_claim(connection, key, claim_id)
-            return Claim(key, claim_id, True)
+            return Claim(key, claim_id, True, "")
 
     def mark_success(self, claim, external_id=""):
         return self._finish(claim, "succeeded", "", False, external_id)
@@ -95,6 +115,23 @@ class DeliveryLedger(object):
                     PRIMARY KEY (report_id, platform, provider, profile, recipient)
                 )
             """)
+
+    def _claim_expired(self, row):
+        try:
+            updated_at = datetime.strptime(
+                row["updated_at"], "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return True
+        return (self._now() - updated_at).total_seconds() > self.lease_seconds
+
+    def _secure_file(self):
+        if self.path == ":memory:":
+            return
+        try:
+            os.chmod(self.path, 0o600)
+        except (AttributeError, OSError):
+            pass
 
     def _finish(self, claim, state, reason, retryable, external_id):
         if state not in self._STATES:
@@ -153,8 +190,15 @@ class DeliveryLedger(object):
     def _profile_value(profile):
         return "" if profile is None else profile
 
-    @staticmethod
-    def _timestamp():
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+    def _timestamp(self):
+        return self._now().replace(microsecond=0).isoformat().replace(
             "+00:00", "Z"
         )
+
+    def _now(self):
+        value = self._clock()
+        if not isinstance(value, datetime):
+            raise ValueError("ledger clock must return datetime")
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)

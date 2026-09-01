@@ -34,9 +34,14 @@ EN_CORE_ROW_LABELS = (
     "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
     "Public Latency", "Public Packet Loss", "Security Type",
 )
-MARKDOWN_LAYOUTS = (
-    (ZH_MARKDOWN_TITLE, ZH_MARKDOWN_SECTIONS, ZH_MARKDOWN_SUBSECTIONS, ZH_CORE_ROW_LABELS),
-    (EN_MARKDOWN_TITLE, EN_MARKDOWN_SECTIONS, EN_MARKDOWN_SUBSECTIONS, EN_CORE_ROW_LABELS),
+ZH_LOCAL_ROW_LABELS = ("测试目标", "可达状态", "平均延迟", "网络抖动", "丢包率")
+EN_LOCAL_ROW_LABELS = ("Target", "Reachable", "Latency", "Jitter", "Packet Loss")
+ZH_PUBLIC_ROW_LABELS = (
+    "测试目标", "可达状态", "DNS 解析延迟", "平均延迟", "网络抖动", "丢包率", "下载速度",
+)
+EN_PUBLIC_ROW_LABELS = (
+    "Target", "Reachable", "DNS Latency", "Latency", "Jitter", "Packet Loss",
+    "Download Speed",
 )
 JSON_SECTIONS = (
     "system", "adapter", "connection", "radio", "link", "ip",
@@ -57,9 +62,18 @@ SECTION_FIELDS = (
 DIAGNOSIS_KEYS = (
     "score", "confidence_percent", "verdict", "category_scores", "issues", "recommendations",
 )
+CATEGORY_KEYS = ("signal", "interference", "link", "local", "public", "security")
+RECOMMENDATION_KEYS = ("id", "priority", "reason", "action")
+ISSUE_IDS = frozenset((
+    "weak_signal", "moderate_signal", "channel_congestion", "gateway_loss",
+    "upstream_loss", "slow_dns", "weak_security",
+))
+RECOMMENDATION_IDS = ISSUE_IDS | frozenset(("prefer_higher_band", "no_action"))
 RFC3339_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
+DETECTOR_VERSION_PATTERN = re.compile(r"^2\.(?:4|5)\.\d+(?:[+-][0-9A-Za-z.-]+)?$")
+REPORT_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ContractError(ValueError):
@@ -90,62 +104,167 @@ def validate_envelope(envelope):
     _validate_generated_at(envelope.generated_at)
     _validate_detector(envelope.detector)
     _validate_ai_summary(envelope.ai_summary)
-    if compute_report_id(envelope.report["markdown"], envelope.report["json"]) != envelope.report_id:
+    report = envelope.report
+    if not isinstance(report, Mapping) or set(report) != set(("markdown", "json")):
+        raise ContractError("report must contain markdown and json")
+    if (not isinstance(envelope.report_id, str)
+            or not REPORT_ID_PATTERN.match(envelope.report_id)):
+        raise ContractError("report_id must be a SHA-256 identifier")
+    if compute_report_id(report["markdown"], report["json"]) != envelope.report_id:
         raise ContractError("report_id does not match report")
-    validate_markdown_contract(envelope.report["markdown"])
-    validate_json_contract(envelope.report["json"])
+    validate_markdown_contract(report["markdown"])
+    validate_json_contract(report["json"])
+    checked_at = report["json"]["sections"]["system"]["checked_at"]["value"]
+    if checked_at != envelope.generated_at:
+        raise ContractError("generated_at does not match report")
 
 
 def validate_markdown_contract(markdown):
     if not isinstance(markdown, str):
         raise ContractError("standard report must be Markdown text")
     lines = markdown.splitlines()
-    for title, sections, subsections, core_row_labels in MARKDOWN_LAYOUTS:
-        if ( [line for line in lines if line.startswith("# ")] == [title]
-                and [line for line in lines if line.startswith("## ")] == list(sections)
-                and [line for line in lines if line.startswith("### ")] == list(subsections)):
-            start = lines.index(sections[0])
-            end = lines.index(sections[1])
-            data_rows = [line for line in lines[start + 1:end] if line.startswith("|")][2:]
-            labels = tuple(_markdown_row_label(row) for row in data_rows)
-            if labels == core_row_labels:
-                return
-            raise ContractError("standard report core row contract violated")
-    raise ContractError("standard report section contract violated")
+    if markdown.startswith(ZH_MARKDOWN_TITLE + "\n"):
+        title = ZH_MARKDOWN_TITLE
+        sections = ZH_MARKDOWN_SECTIONS
+        subsections = ZH_MARKDOWN_SUBSECTIONS
+        summary_headers = ("健康状态", "健康评分", "数据置信度")
+        core_headers = ("核心参数", "当前值")
+        quality_headers = ("参数", "当前值", "状态")
+        core_rows = ZH_CORE_ROW_LABELS
+        local_rows = ZH_LOCAL_ROW_LABELS
+        public_rows = ZH_PUBLIC_ROW_LABELS
+    elif markdown.startswith(EN_MARKDOWN_TITLE + "\n"):
+        title = EN_MARKDOWN_TITLE
+        sections = EN_MARKDOWN_SECTIONS
+        subsections = EN_MARKDOWN_SUBSECTIONS
+        summary_headers = ("Health", "Score", "Data Confidence")
+        core_headers = ("Metric", "Current Value")
+        quality_headers = ("Parameter", "Current Value", "Status")
+        core_rows = EN_CORE_ROW_LABELS
+        local_rows = EN_LOCAL_ROW_LABELS
+        public_rows = EN_PUBLIC_ROW_LABELS
+    else:
+        raise ContractError("standard report title contract violated")
+
+    if [line for line in lines if line.startswith("# ")] != [title]:
+        raise ContractError("standard report title contract violated")
+    if [line for line in lines if line.startswith("## ")] != list(sections):
+        raise ContractError("standard report section contract violated")
+    if [line for line in lines if line.startswith("### ")] != list(subsections):
+        raise ContractError("standard report subsection contract violated")
+
+    table_specs = (
+        (lines[:lines.index(sections[0])], summary_headers,
+         (":---:", ":---:", ":---:"), None, 1, "summary"),
+        (_section_block(lines, sections[0], sections[1]), core_headers,
+         ("---", "---"), core_rows, 18, "core"),
+        (_section_block(lines, sections[1], sections[2]), quality_headers,
+         ("---", "---", ":---:"), local_rows, 5, "local quality"),
+        (_section_block(lines, sections[2], sections[3]), quality_headers,
+         ("---", "---", ":---:"), public_rows, 7, "public quality"),
+    )
+    for block, headers, separators, row_labels, row_count, table_name in table_specs:
+        _validate_fixed_table(
+            block, headers, separators, row_labels, row_count, table_name
+        )
 
 
 def validate_json_contract(report_json):
     if not isinstance(report_json, Mapping):
         raise ContractError("report JSON must be an object")
-    if tuple(report_json.keys()) != JSON_TOP_LEVEL_KEYS:
+    if set(report_json) != set(JSON_TOP_LEVEL_KEYS):
         raise ContractError("report JSON top-level contract violated")
     if report_json["schema_version"] != "2.0":
         raise ContractError("unsupported report schema")
 
     sections = report_json["sections"]
-    if not isinstance(sections, Mapping) or tuple(sections.keys()) != JSON_SECTIONS:
+    if not isinstance(sections, Mapping) or set(sections) != set(JSON_SECTIONS):
         raise ContractError("report JSON sections contract violated")
     for section_name, field_names in SECTION_FIELDS:
         fields = sections[section_name]
-        if not isinstance(fields, Mapping) or tuple(fields.keys()) != field_names:
+        if not isinstance(fields, Mapping) or set(fields) != set(field_names):
             raise ContractError("report JSON section fields contract violated")
         for field in fields.values():
             _validate_field(field)
 
     diagnosis = report_json["diagnosis"]
-    if not isinstance(diagnosis, Mapping) or tuple(diagnosis.keys()) != DIAGNOSIS_KEYS:
+    if not isinstance(diagnosis, Mapping) or set(diagnosis) != set(DIAGNOSIS_KEYS):
         raise ContractError("report JSON diagnosis contract violated")
-    if not isinstance(diagnosis["category_scores"], Mapping):
-        raise ContractError("report JSON diagnosis category scores must be an object")
+    _validate_score(diagnosis["score"], "score")
+    _validate_score(diagnosis["confidence_percent"], "confidence")
+    if diagnosis["verdict"] not in ("healthy", "warning", "poor", "insufficient_data"):
+        raise ContractError("report JSON diagnosis verdict is invalid")
+    category_scores = diagnosis["category_scores"]
+    if (not isinstance(category_scores, Mapping)
+            or set(category_scores) != set(CATEGORY_KEYS)):
+        raise ContractError("report JSON diagnosis category scores are invalid")
+    for score in category_scores.values():
+        _validate_score(score, "category score")
     if not isinstance(diagnosis["issues"], list) or not isinstance(diagnosis["recommendations"], list):
         raise ContractError("report JSON diagnosis lists are invalid")
+    if any(not isinstance(item, str) or item not in ISSUE_IDS
+           for item in diagnosis["issues"]):
+        raise ContractError("report JSON diagnosis issue is invalid")
+    for item in diagnosis["recommendations"]:
+        _validate_recommendation(item)
     if not isinstance(report_json["warnings"], list):
         raise ContractError("report JSON warnings must be a list")
+    if any(not _non_empty_string(item) for item in report_json["warnings"]):
+        raise ContractError("report JSON warning is invalid")
 
 
-def _markdown_row_label(row):
-    cells = row.split("|")
-    return cells[1].strip() if len(cells) >= 3 else ""
+def _section_block(lines, start, end):
+    return lines[lines.index(start) + 1:lines.index(end)]
+
+
+def _validate_fixed_table(block, headers, separators, row_labels, row_count, name):
+    table_lines = [line for line in block if line.startswith("|")]
+    if len(table_lines) != row_count + 2:
+        raise ContractError(
+            "standard report {0} table row contract violated".format(name)
+        )
+    expected_headers = tuple(" " + value + " " for value in headers)
+    expected_separators = tuple(" " + value + " " for value in separators)
+    if _markdown_cells(table_lines[0]) != expected_headers:
+        raise ContractError(
+            "standard report {0} table header contract violated".format(name)
+        )
+    if _markdown_cells(table_lines[1]) != expected_separators:
+        raise ContractError(
+            "standard report {0} table separator contract violated".format(name)
+        )
+    data_rows = [_markdown_cells(row) for row in table_lines[2:]]
+    if any(len(row) != len(headers) for row in data_rows):
+        raise ContractError(
+            "standard report {0} column contract violated".format(name)
+        )
+    if row_labels is not None:
+        labels = tuple(row[0] for row in data_rows)
+        expected_labels = tuple(" " + value + " " for value in row_labels)
+        if labels != expected_labels:
+            raise ContractError(
+                "standard report {0} row contract violated".format(name)
+            )
+
+
+def _markdown_cells(row):
+    if not row.startswith("|") or not row.endswith("|"):
+        return ()
+    cells = [""]
+    index = 1
+    end = len(row) - 1
+    while index < end:
+        character = row[index]
+        if character == "\\" and index + 1 < end and row[index + 1] == "|":
+            cells[-1] += "|"
+            index += 2
+            continue
+        if character == "|":
+            cells.append("")
+        else:
+            cells[-1] += character
+        index += 1
+    return tuple(cells)
 
 
 def _validate_generated_at(value):
@@ -164,9 +283,10 @@ def _validate_generated_at(value):
 
 def _validate_detector(value):
     if (not isinstance(value, Mapping) or set(value) != set(("name", "version"))
-            or not _non_empty_string(value["name"])
-            or not _non_empty_string(value["version"])):
-        raise ContractError("detector must contain non-empty name and version strings")
+            or value.get("name") != "wifi-health-detector"
+            or not isinstance(value.get("version"), str)
+            or not DETECTOR_VERSION_PATTERN.match(value["version"])):
+        raise ContractError("detector identity or version is unsupported")
 
 
 def _validate_ai_summary(value):
@@ -181,7 +301,7 @@ def _non_empty_string(value):
 
 
 def _validate_field(field):
-    if not isinstance(field, Mapping) or tuple(field.keys()) != FIELD_KEYS:
+    if not isinstance(field, Mapping) or set(field) != set(FIELD_KEYS):
         raise ContractError("report JSON field shape contract violated")
     if not isinstance(field["unit"], str) or not isinstance(field["source"], str):
         raise ContractError("report JSON field text is invalid")
@@ -193,3 +313,21 @@ def _validate_field(field):
         raise ContractError("report JSON available field is invalid")
     if field["availability"] == "unavailable" and (field["value"] is not None or not field["reason"]):
         raise ContractError("report JSON unavailable field is invalid")
+
+
+def _validate_score(value, label):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ContractError("report JSON diagnosis {0} is invalid".format(label))
+    if value < 0 or value > 100:
+        raise ContractError("report JSON diagnosis {0} is invalid".format(label))
+
+
+def _validate_recommendation(value):
+    if not isinstance(value, Mapping) or set(value) != set(RECOMMENDATION_KEYS):
+        raise ContractError("report JSON diagnosis recommendation is invalid")
+    if value["id"] not in RECOMMENDATION_IDS:
+        raise ContractError("report JSON diagnosis recommendation is invalid")
+    if value["priority"] not in ("high", "medium", "low"):
+        raise ContractError("report JSON diagnosis recommendation is invalid")
+    if not _non_empty_string(value["reason"]) or not _non_empty_string(value["action"]):
+        raise ContractError("report JSON diagnosis recommendation is invalid")

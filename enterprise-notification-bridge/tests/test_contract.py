@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from collections import OrderedDict
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,9 +22,9 @@ from wifi_health.output import render_text
 
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
-with open(os.path.join(FIXTURES, "standard-report.md"), "r") as handle:
+with open(os.path.join(FIXTURES, "standard-report.md"), "r", encoding="utf-8") as handle:
     MARKDOWN = handle.read()
-with open(os.path.join(FIXTURES, "standard-report.json"), "r") as handle:
+with open(os.path.join(FIXTURES, "standard-report.json"), "r", encoding="utf-8") as handle:
     REPORT = json.load(handle)
 
 
@@ -38,13 +39,24 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(first.report_id, second.report_id)
 
     def test_report_validator_rejects_added_core_row(self):
-        envelope = valid_envelope()
-        envelope.report["markdown"] = MARKDOWN.replace(
+        markdown = MARKDOWN.replace(
             "| 安全类型 | none |", "| 新增字段 | value |\n| 安全类型 | none |"
         )
-        envelope.report_id = compute_report_id(envelope.report["markdown"], envelope.report["json"])
         with self.assertRaisesRegex(ContractError, "standard report"):
-            validate_envelope(envelope)
+            valid_envelope(markdown=markdown)
+
+    def test_bridge_validates_every_fixed_markdown_table(self):
+        mutations = (
+            ("| 健康状态 | 健康评分 | 数据置信度 |", "| 状态 | 健康评分 | 数据置信度 |"),
+            ("| 测试目标 | 192.168.1.1 | 可用 |", "| 目标 | 192.168.1.1 | 可用 |"),
+            ("| DNS 解析延迟 | 20 ms | 可用 |", "| DNS 延迟 | 20 ms | 可用 |"),
+        )
+        for old, new in mutations:
+            with self.subTest(old=old):
+                changed = MARKDOWN.replace(old, new, 1)
+                self.assertNotEqual(changed, MARKDOWN)
+                with self.assertRaisesRegex(ContractError, "standard report"):
+                    valid_envelope(markdown=changed)
 
     def test_summary_is_not_part_of_report_identity(self):
         envelope = build_envelope(MARKDOWN, REPORT, "摘要", "host_agent", "2.4.0")
@@ -70,6 +82,51 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "sections"):
             build_envelope(MARKDOWN, invalid, "摘要", "host_agent", "2.4.0")
         self.assertEqual(invalid, original)
+
+    def test_json_contract_compares_key_sets_not_mapping_order(self):
+        reordered = copy.deepcopy(REPORT)
+        reordered = OrderedDict(reversed(list(reordered.items())))
+        reordered["sections"] = OrderedDict(
+            reversed(list(reordered["sections"].items()))
+        )
+        for section, fields in list(reordered["sections"].items()):
+            reordered["sections"][section] = OrderedDict(
+                reversed(list(fields.items()))
+            )
+        reordered["diagnosis"] = OrderedDict(
+            reversed(list(reordered["diagnosis"].items()))
+        )
+
+        envelope = build_envelope(
+            MARKDOWN, reordered, "摘要", "host_agent", "2.5.0"
+        )
+
+        self.assertEqual(envelope.report_id, compute_report_id(MARKDOWN, reordered))
+
+    def test_diagnosis_and_warning_items_have_strict_schemas(self):
+        invalid_values = []
+        issue = copy.deepcopy(REPORT)
+        issue["diagnosis"]["issues"] = [42]
+        invalid_values.append(issue)
+        recommendation = copy.deepcopy(REPORT)
+        recommendation["diagnosis"]["recommendations"] = [{
+            "id": "weak_signal", "priority": "urgent", "reason": "weak",
+            "action": "move", "unexpected": True,
+        }]
+        invalid_values.append(recommendation)
+        category = copy.deepcopy(REPORT)
+        category["diagnosis"]["category_scores"] = {"signal": "high"}
+        invalid_values.append(category)
+        warning = copy.deepcopy(REPORT)
+        warning["warnings"] = [{"message": "opaque"}]
+        invalid_values.append(warning)
+
+        for report_json in invalid_values:
+            with self.subTest(report_json=report_json):
+                with self.assertRaisesRegex(ContractError, "report JSON"):
+                    build_envelope(
+                        MARKDOWN, report_json, "摘要", "host_agent", "2.5.0"
+                    )
 
     def test_validator_rejects_incomplete_detector_section_payload(self):
         invalid = copy.deepcopy(REPORT)
@@ -101,11 +158,38 @@ class ContractTests(unittest.TestCase):
         ])
         self.assertEqual(payload["schema_version"], "1")
 
+    def test_envelope_owns_canonical_defensive_copies(self):
+        source = copy.deepcopy(REPORT)
+        detector = {"name": "wifi-health-detector", "version": "2.5.0"}
+        report = {"markdown": MARKDOWN, "json": source}
+        summary = {"mode": "host_agent", "text": "摘要"}
+        from notification_bridge.models import Envelope
+        envelope = Envelope(
+            compute_report_id(MARKDOWN, source),
+            source["sections"]["system"]["checked_at"]["value"],
+            detector, report, summary,
+        )
+
+        detector["name"] = "mutated"
+        report["markdown"] = "mutated"
+        summary["text"] = "mutated"
+        exposed = envelope.to_dict()
+        exposed["report"]["json"]["warnings"].append("mutated")
+
+        self.assertEqual(envelope.detector["name"], "wifi-health-detector")
+        self.assertEqual(envelope.report["markdown"], MARKDOWN)
+        self.assertEqual(envelope.ai_summary["text"], "摘要")
+        self.assertEqual(envelope.report["json"]["warnings"], [])
+
     def test_validator_rejects_invalid_generated_at(self):
         for generated_at in (None, "", "not-a-timestamp", "2026-02-30T12:00:00Z"):
             with self.subTest(generated_at=generated_at):
-                envelope = valid_envelope()
-                envelope.generated_at = generated_at
+                from notification_bridge.models import Envelope
+                payload = valid_envelope().to_dict()
+                envelope = Envelope(
+                    payload["report_id"], generated_at, payload["detector"],
+                    payload["report"], payload["ai_summary"],
+                )
                 with self.assertRaisesRegex(ContractError, "generated_at"):
                     validate_envelope(envelope)
 
@@ -114,13 +198,20 @@ class ContractTests(unittest.TestCase):
             None,
             {},
             {"name": "wifi-health-detector", "version": ""},
+            {"name": "other-detector", "version": "2.5.0"},
+            {"name": "wifi-health-detector", "version": "2.3.9"},
+            {"name": "wifi-health-detector", "version": "3.0.0"},
             {"name": "", "version": "2.4.0"},
             {"name": "wifi-health-detector", "version": "2.4.0", "extra": True},
         )
         for detector in invalid_detectors:
             with self.subTest(detector=detector):
-                envelope = valid_envelope()
-                envelope.detector = detector
+                from notification_bridge.models import Envelope
+                payload = valid_envelope().to_dict()
+                envelope = Envelope(
+                    payload["report_id"], payload["generated_at"], detector,
+                    payload["report"], payload["ai_summary"],
+                )
                 with self.assertRaisesRegex(ContractError, "detector"):
                     validate_envelope(envelope)
 
@@ -134,8 +225,12 @@ class ContractTests(unittest.TestCase):
         )
         for summary in invalid_summaries:
             with self.subTest(summary=summary):
-                envelope = valid_envelope()
-                envelope.ai_summary = summary
+                from notification_bridge.models import Envelope
+                payload = valid_envelope().to_dict()
+                envelope = Envelope(
+                    payload["report_id"], payload["generated_at"],
+                    payload["detector"], payload["report"], summary,
+                )
                 with self.assertRaisesRegex(ContractError, "ai_summary"):
                     validate_envelope(envelope)
 

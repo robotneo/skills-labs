@@ -55,8 +55,9 @@ delegates to `run.ps1`). The launcher forwards the explicit Bridge commands:
 run.sh status
 run.sh bind --platform <configured-platform>
 run.sh recipients --platform <configured-platform> --profile corpId:userId --recipient <configured-selector>
-run.sh deliver --envelope <validated-envelope.json>
-run.sh retry --envelope <validated-envelope.json>
+run.sh deliver --envelope <validated-envelope.json> [--capabilities <capabilities.json>] [--request-host-summary]
+run.sh retry --report-id <64-character-report-id> [--capabilities <capabilities.json>]
+run.sh continue --operation-result <correlated-operation-result.json>
 ```
 
 ### Fresh installation setup
@@ -74,18 +75,40 @@ run.sh deliver --envelope <validated-envelope.json>
 ```
 
 `enable` only persists an enabled channel and performs no login or delivery.
-`bind` then performs the Provider's authorization/Profile handshake. The
-existing MCP tool `configure_notification_recipient` is also an explicit
-activation path: it enables the Bridge, persists the requested platform and
-recipient, and keeps the MCP tool list at exactly five tools. MCP clients can
-then call `bind_notification_profile` followed by
-`deliver_enterprise_report`.
+`bind` then performs the Provider's authorization/Profile handshake. Do not
+configure recipients before an exact Provider/Profile binding has completed.
+MCP clients use `bind_notification_profile`,
+`configure_notification_recipient`, `deliver_enterprise_report`,
+`retry_enterprise_report`, and `continue_enterprise_notification`; the full
+MCP surface contains six tools including `notification_status`.
 
 The CLI emits exactly one JSON document on stdout and diagnostics on stderr.
 `deliver` and `retry` remain process-successful when delivery itself fails;
 malformed envelopes and internal errors are nonzero. The adjacent detector
 launcher discovers this `run.sh`/`run.bat` path explicitly and never searches
 arbitrary similarly named commands.
+
+The detector's `--no-notify` flag suppresses the optional trigger for one run
+without changing the report. Start the line-oriented MCP server with
+`python3 -m notification_bridge.mcp_server`.
+
+### Continuation protocol
+
+Pass a versioned host capability bundle through `--capabilities` (or the
+equivalent MCP argument). If the Bridge returns `action_required`, perform only
+the returned semantic action using the host's native integration and submit a
+result whose `action_id`, `report_id`, platform, Provider, and operation exactly
+match. Resume with `continue --operation-result ...` or
+`continue_enterprise_notification`. This protocol covers authorization status,
+first-use/expired login, organization listing and explicit selection,
+recipient resolution, first-send confirmation, host summary generation,
+message sending, and stale-delivery reconciliation. Never synthesize a result
+or change correlation fields.
+
+Pending actions, retry envelopes, and confirmation scopes are durable under
+`ENTERPRISE_NOTIFICATION_BRIDGE_STATE`; the metadata-only ledger is separate.
+Use `retry --report-id ...` after a retryable failure so Wi-Fi detection does
+not run again. `status` exposes pending actions after restart.
 
 ### DWS fallback
 

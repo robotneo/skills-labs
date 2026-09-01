@@ -33,18 +33,54 @@ def envelope_payload():
     ).to_dict()
 
 
+def capability_bundle():
+    return {
+        "schema_version": "1",
+        "capabilities": [{
+            "schema_version": "1", "platform": "dingtalk",
+            "provider": "native",
+            "operations": [
+                "auth_status", "login", "list_profiles",
+                "resolve_recipient", "send_report", "delivery_status",
+            ],
+        }],
+    }
+
+
+def operation_result():
+    return {
+        "schema_version": "1", "action_id": "a" * 32,
+        "report_id": envelope_payload()["report_id"],
+        "platform": "dingtalk", "provider": "native",
+        "operation": "auth_status", "status": "succeeded", "reason": "",
+        "retryable": False, "data": {"authorization": "authorized"},
+    }
+
+
 class FakeService(object):
     def __init__(self):
         self.deliver_calls = []
         self.bind_calls = []
+        self.retry_calls = []
+        self.continue_calls = []
 
-    def deliver(self, envelope):
-        self.deliver_calls.append(envelope)
+    def deliver(self, envelope, capabilities=None, request_host_summary=False):
+        self.deliver_calls.append(
+            (envelope, capabilities, request_host_summary)
+        )
         return DeliveryBatchResult([ProviderResult("sent")])
 
-    def bind(self, platform):
-        self.bind_calls.append(platform)
+    def bind(self, platform, capabilities=None):
+        self.bind_calls.append((platform, capabilities))
         return ProviderResult("ok", data={"profile": "corp:user"})
+
+    def retry(self, report_id, capabilities=None):
+        self.retry_calls.append((report_id, capabilities))
+        return DeliveryBatchResult([ProviderResult("sent")])
+
+    def continue_operation(self, result):
+        self.continue_calls.append(result)
+        return DeliveryBatchResult([ProviderResult("sent")])
 
 
 class McpServerTests(unittest.TestCase):
@@ -119,7 +155,7 @@ class McpServerTests(unittest.TestCase):
             with self.subTest(request=request):
                 self.assertIsNone(handle_request(request, self.commands))
 
-    def test_tools_list_exposes_exactly_five_bridge_tools(self):
+    def test_tools_list_exposes_six_bridge_tools_including_continuation(self):
         response = self.request("tools/list", {})
 
         names = [tool["name"] for tool in response["result"]["tools"]]
@@ -130,12 +166,17 @@ class McpServerTests(unittest.TestCase):
             "configure_notification_recipient",
             "deliver_enterprise_report",
             "retry_enterprise_report",
+            "continue_enterprise_notification",
         ])
 
     def test_deliver_tool_returns_structured_content_from_shared_core(self):
         response = self.request("tools/call", {
             "name": "deliver_enterprise_report",
-            "arguments": {"envelope": envelope_payload()},
+            "arguments": {
+                "envelope": envelope_payload(),
+                "capabilities": capability_bundle(),
+                "requestHostSummary": True,
+            },
         })
 
         result = response["result"]
@@ -144,16 +185,38 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(json.loads(result["content"][0]["text"])["status"],
                          "delivered")
         self.assertEqual(len(self.service.deliver_calls), 1)
+        self.assertEqual(self.service.deliver_calls[0][1], capability_bundle())
+        self.assertTrue(self.service.deliver_calls[0][2])
 
     def test_retry_tool_uses_same_delivery_service_method(self):
         response = self.request("tools/call", {
             "name": "retry_enterprise_report",
-            "arguments": {"envelope": envelope_payload()},
+            "arguments": {
+                "reportId": envelope_payload()["report_id"],
+                "capabilities": capability_bundle(),
+            },
         })
 
         self.assertEqual(response["result"]["structuredContent"]["status"],
                          "delivered")
-        self.assertEqual(len(self.service.deliver_calls), 1)
+        self.assertEqual(self.service.deliver_calls, [])
+        self.assertEqual(self.service.retry_calls, [(
+            envelope_payload()["report_id"], capability_bundle(),
+        )])
+
+    def test_continue_tool_passes_correlated_result_to_shared_service(self):
+        current = operation_result()
+
+        response = self.request("tools/call", {
+            "name": "continue_enterprise_notification",
+            "arguments": {"operationResult": current},
+        })
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(
+            response["result"]["structuredContent"]["status"], "delivered"
+        )
+        self.assertEqual(self.service.continue_calls, [current])
 
     def test_bind_tool_uses_same_service_bind_method(self):
         response = self.request("tools/call", {
@@ -162,9 +225,23 @@ class McpServerTests(unittest.TestCase):
         })
 
         self.assertEqual(response["result"]["structuredContent"]["status"], "ok")
-        self.assertEqual(self.service.bind_calls, ["dingtalk"])
+        self.assertEqual(self.service.bind_calls, [("dingtalk", None)])
 
-    def test_configure_recipient_explicitly_activates_fresh_configuration(self):
+    def test_bind_tool_accepts_a_strict_capability_bundle(self):
+        response = self.request("tools/call", {
+            "name": "bind_notification_profile",
+            "arguments": {
+                "platform": "dingtalk",
+                "capabilities": capability_bundle(),
+            },
+        })
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(
+            self.service.bind_calls, [("dingtalk", capability_bundle())]
+        )
+
+    def test_configure_recipient_rejects_a_fresh_unbound_configuration(self):
         self.config.enabled = False
         self.config.channels = []
 
@@ -173,11 +250,13 @@ class McpServerTests(unittest.TestCase):
             "arguments": {"platform": "dingtalk", "recipient": "ops"},
         })
 
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(response["result"]["structuredContent"]["status"], "configured")
-        self.assertTrue(self.config.enabled)
-        self.assertEqual(self.config.channels[0].provider, "auto")
-        self.assertEqual(self.config.channels[0].recipients, ["ops"])
+        self.assertTrue(response["result"]["isError"])
+        self.assertEqual(
+            response["result"]["structuredContent"]["reason"],
+            "profile_not_validated",
+        )
+        self.assertFalse(self.config.enabled)
+        self.assertEqual(self.config.channels, [])
 
     def test_unknown_tool_is_a_json_rpc_error(self):
         response = self.request("tools/call", {
@@ -207,12 +286,32 @@ class McpServerTests(unittest.TestCase):
             ("deliver_enterprise_report", {
                 "envelope": envelope_payload(), "unexpected": True,
             }),
+            ("deliver_enterprise_report", {
+                "envelope": envelope_payload(),
+                "requestHostSummary": "yes",
+            }),
+            ("deliver_enterprise_report", {
+                "envelope": envelope_payload(),
+                "capabilities": {
+                    "schema_version": "1", "capabilities": [{
+                        "schema_version": "1", "platform": "slack",
+                        "provider": "native", "operations": ["send_report"],
+                    }],
+                },
+            }),
             ("retry_enterprise_report", {}),
+            ("retry_enterprise_report", {"reportId": "short"}),
+            ("continue_enterprise_notification", {}),
+            ("continue_enterprise_notification", {
+                "operationResult": dict(operation_result(), unexpected=True),
+            }),
         )
         for name, arguments in cases:
             with self.subTest(name=name, arguments=arguments):
                 self.service.bind_calls = []
                 self.service.deliver_calls = []
+                self.service.retry_calls = []
+                self.service.continue_calls = []
                 self.config.channels[0].recipients = ["ops"]
 
                 response = self.request("tools/call", {
@@ -223,6 +322,8 @@ class McpServerTests(unittest.TestCase):
                 self.assertEqual(response["error"]["code"], -32602)
                 self.assertEqual(self.service.bind_calls, [])
                 self.assertEqual(self.service.deliver_calls, [])
+                self.assertEqual(self.service.retry_calls, [])
+                self.assertEqual(self.service.continue_calls, [])
                 self.assertEqual(self.config.channels[0].recipients, ["ops"])
 
     def test_internal_tool_failure_is_structured_content(self):
@@ -270,7 +371,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(len(responses), 2)
         self.assertIn("result", responses[0])
         self.assertEqual(responses[1]["error"]["code"], -32700)
-        self.assertIn("invalid JSON-RPC", error_stream.getvalue())
+        self.assertEqual(error_stream.getvalue(), "invalid_json\n")
 
 
 if __name__ == "__main__":

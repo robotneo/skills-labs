@@ -23,6 +23,7 @@ class LauncherTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.config_path = os.path.join(self.directory.name, "config.json")
         self.ledger_path = os.path.join(self.directory.name, "ledger.sqlite3")
+        self.state_path = os.path.join(self.directory.name, "state")
         self.envelope_path = os.path.join(self.directory.name, "envelope.json")
         with open(os.path.join(FIXTURES, "standard-report.md"), encoding="utf-8") as handle:
             markdown = handle.read()
@@ -38,6 +39,8 @@ class LauncherTests(unittest.TestCase):
             handle.write("  '--help') echo 'DWS help' ;;\n")
             handle.write("  *'auth status --help'*) echo '--format json' ;;\n")
             handle.write("  *'auth status --format json'*) echo '{\"authenticated\":true}' ;;\n")
+            handle.write("  *'profile list --help'*) echo '--format json' ;;\n")
+            handle.write("  *'profile list --format json'*) echo '{\"profiles\":[{\"profile\":\"corp:user\"}]}' ;;\n")
             handle.write("  *) exit 1 ;;\n")
             handle.write("esac\n")
         os.chmod(self.dws_path, 0o755)
@@ -79,6 +82,9 @@ class LauncherTests(unittest.TestCase):
         self.assertIn('%*', batch)
         self.assertIn('@args', powershell)
         self.assertIn('run.ps1" %*', batch)
+        self.assertIn('PYTHONUTF8', powershell)
+        with open(os.path.join(ROOT, "run.sh"), encoding="utf-8") as handle:
+            self.assertIn("PYTHONUTF8=1", handle.read())
 
     @unittest.skipUnless(shutil.which("pwsh") or shutil.which("powershell"),
                          "PowerShell is not available on this host")
@@ -99,6 +105,7 @@ class LauncherTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG"] = self.config_path
         environment["ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER"] = self.ledger_path
+        environment["ENTERPRISE_NOTIFICATION_BRIDGE_STATE"] = self.state_path
         environment["ENTERPRISE_NOTIFICATION_BRIDGE_PYTHON"] = sys.executable
         environment["PATH"] = self.directory.name + os.pathsep + environment.get("PATH", "")
         return subprocess.run(
