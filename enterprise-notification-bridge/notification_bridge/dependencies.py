@@ -179,27 +179,44 @@ def _format_option_blocks(help_text):
 def _format_value_lists(option_block):
     option_text = option_block[0]
     argument = re.match(
-        r"--format(?:\s+|=)(?:<([^>]+)>|\[([^\]]+)\])", option_text
+        r"--format(?:\s+|=)<([^>]+)>", option_text
     )
     if argument is not None:
-        value_set = argument.group(1) or argument.group(2)
+        value_set = argument.group(1)
         if value_set.strip() not in ("format", "value", "string"):
             yield _value_tokens(value_set)
 
     field_pattern = re.compile(
         r"\b(?:allowed\s+values?|choices?|one\s+of|values?|default)\s*[:=]\s*"
     )
-    for block_line in option_block:
-        without_notes = _without_parenthetical_notes(block_line)
-        for field in field_pattern.finditer(without_notes):
-            remainder = without_notes[field.end():]
-            boundaries = [
-                position for position in (
-                    remainder.find(";"), remainder.find("."), remainder.find("]")
-                ) if position >= 0
-            ]
-            end = min(boundaries) if boundaries else len(remainder)
-            yield _value_tokens(remainder[:end])
+    lines = [_without_parenthetical_notes(line) for line in option_block]
+    for line_index, block_line in enumerate(lines):
+        for bracket in re.finditer(r"\[([^\]]*)\]", block_line):
+            declaration = field_pattern.match(bracket.group(1).lstrip())
+            if declaration is not None:
+                bracket_text = bracket.group(1).lstrip()
+                yield _value_tokens(
+                    _field_value_region(bracket_text[declaration.end():])
+                )
+
+        without_brackets = re.sub(r"\[[^\]]*\]", "", block_line)
+        for field in field_pattern.finditer(without_brackets):
+            value_lines = [without_brackets[field.end():]]
+            for continuation in lines[line_index + 1:]:
+                if field_pattern.search(continuation) is not None:
+                    break
+                if re.search(r"\[\s*(?:allowed\s+values?|choices?|one\s+of|"
+                             r"values?|default)\s*[:=]", continuation):
+                    break
+                value_lines.append(re.sub(r"\[[^\]]*\]", "", continuation))
+            yield _value_tokens(_field_value_region(" ".join(value_lines)))
+
+
+def _field_value_region(value):
+    boundary = re.search(r"[;.]|\s(?:—|–|-)\s", value)
+    if boundary is not None:
+        return value[:boundary.start()]
+    return value
 
 
 def _without_parenthetical_notes(value):

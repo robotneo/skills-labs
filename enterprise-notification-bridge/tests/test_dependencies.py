@@ -313,6 +313,83 @@ class DwsVerificationTests(unittest.TestCase):
         self.assertEqual(status.status, "unavailable")
         self.assertEqual(status.reason, "dependency_verification_failed")
 
+    def test_leaf_help_treats_non_declaration_brackets_as_annotation(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format> allowed values: text, yaml [json unavailable]"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
+    def test_leaf_help_stops_values_at_explanatory_dash(self):
+        executable = sys.executable
+        help_forms = (
+            "  --format <format> allowed values: text, yaml — json unavailable",
+            "  --format <format> allowed values: text, yaml – json unavailable",
+        )
+
+        for help_text in help_forms:
+            runner = verified_runner(executable)
+            runner.responses[
+                (executable, "auth", "status", "--help")
+            ] = CommandResult(help_text)
+
+            status = verify_dws(executable, runner)
+
+            self.assertEqual(status.status, "unavailable", help_text)
+            self.assertEqual(
+                status.reason, "dependency_verification_failed", help_text
+            )
+
+    def test_leaf_help_accepts_bracketed_choices_declaration(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "  --format <format> [choices: text, json]"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "ready")
+        self.assertEqual(status.reason, "dependency_ready")
+
+    def test_leaf_help_accepts_multiline_choices_before_next_option(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format>  Select output encoding\n"
+            "      choices: text,\n"
+            "          json\n"
+            "  --profile <profile>  Select a profile"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "ready")
+        self.assertEqual(status.reason, "dependency_ready")
+
+    def test_leaf_help_does_not_read_values_from_next_option(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format>\n"
+            "      choices: text, yaml\n"
+            "  --profile <profile>\n"
+            "      choices: personal, json"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
     def test_leaf_help_accepts_common_structured_json_value_sets(self):
         executable = sys.executable
         help_forms = (
