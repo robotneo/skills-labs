@@ -1,10 +1,11 @@
 # Task 1 Report: DWS Dependency Discovery and Version Contract
 
-**Audit date:** 2026-09-01
+**Audit date:** 2026-09-02
 **Implementation commit:** `daefe84` (`feat: declare and verify conditional dws dependency`)
 **Review fix commit:** `45a2aa9` (`fix: harden dws dependency verification`)
 **Review fix round 2:** `2352b67` (`fix: bound dws json help parsing`)
 **Review fix round 3:** `4fc1cab` (`fix: parse multiline dws format help`)
+**Review fix round 4:** `ef00175` (`fix: parse declared dws format values`)
 
 ## Scope completed
 
@@ -83,6 +84,14 @@ added.
    `test_leaf_help_rejects_json_only_inside_parenthetical_note` also failed
    because JSON mentioned only in `(no json support)` was incorrectly counted
    as a choice value.
+9. Declared-value grammar tests:
+   `test_leaf_help_treats_non_declaration_brackets_as_annotation` and
+   `test_leaf_help_stops_values_at_explanatory_dash` failed before the round 4
+   fix because square-bracket annotations and em/en-dash explanations were
+   still tokenized as field values. The new multiline `choices` test also
+   failed because a declared value list could not continue onto its next
+   indented line. Dedicated positive bracket-declaration and next-option
+   boundary tests passed, protecting the intended grammar and ownership edge.
 
 ## GREEN and verification evidence
 
@@ -93,10 +102,15 @@ default `python3` currently fails through a missing Xcode Command Line Tools
 Commands/results:
 
 - `python3 -m unittest enterprise-notification-bridge/tests/test_dependencies.py enterprise-notification-bridge/tests/test_dws_provider.py`
-  — 40 tests passed.
-- Parsed both changed Python files with `ast.parse(..., feature_version=(3, 7))`
-  — Python 3.7 syntax accepted.
-- Parsed `manifest.json` with the standard-library `json` module — accepted.
+  — 45 tests passed.
+- `python3 -m unittest discover -s enterprise-notification-bridge/tests`
+  — 167 tests passed, with 1 existing conditional skip.
+- `python3 -m compileall -q enterprise-notification-bridge/notification_bridge enterprise-notification-bridge/tests`
+  — compilation passed.
+- Parsed all 30 Python source and test files with
+  `ast.parse(..., feature_version=(3, 7))` — Python 3.7 syntax accepted.
+- Direct metadata contract tests parsed `manifest.json` and verified both
+  manifest declarations — accepted.
 - `git diff --check` — no whitespace errors.
 
 ## Self-review and risks
@@ -107,11 +121,12 @@ Commands/results:
   string. Free-form version output and numeric prerelease identifiers with
   leading zeroes are rejected.
 - Leaf help is parsed into bounded regions belonging to the `--format` option:
-  its immediate `<...>` or `[...]` value set, or labeled `allowed values`,
-  `choices`, `one of`, `values`, or `default` fields. Field parsing stops at
-  semicolons, sentence boundaries, or bracket boundaries, so unrelated later
-  mentions of JSON cannot satisfy the gate. Common choices, inline value-set,
-  and default-value help forms are covered by positive tests.
+  its immediate `<...>` value set, or labeled `allowed values`, `choices`,
+  `one of`, `values`, or `default` fields. Square brackets are accepted as a
+  value set only when their content begins with one of those declarations;
+  other square-bracket content is an annotation. Field parsing stops at
+  semicolons, sentence boundaries, and explanatory hyphen/en-dash/em-dash
+  separators, so later explanatory JSON mentions cannot satisfy the gate.
 - Multiline help is parsed as a small option block. Continuation lines must be
   more deeply indented than the `--format` start line; collection stops at a
   blank line, the next option, or a same/lower-indented section. Parenthetical
