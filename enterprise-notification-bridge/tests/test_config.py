@@ -18,6 +18,13 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "secret"):
             BridgeConfig.from_dict({"notification": {"token": "secret"}})
 
+    def test_direct_secret_construction_is_rejected_without_creating_a_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "config.json")
+            with self.assertRaisesRegex(ConfigError, "secret"):
+                BridgeConfig(ai_summary={"nested": {"token": "secret"}})
+            self.assertFalse(os.path.exists(path))
+
     def test_config_rejects_nested_refresh_field(self):
         with self.assertRaisesRegex(ConfigError, "secret"):
             BridgeConfig.from_dict({
@@ -53,6 +60,21 @@ class ConfigTests(unittest.TestCase):
             path = os.path.join(directory, "config.json")
             save_config(config, path)
             self.assertEqual(load_config(path).to_dict(), config.to_dict())
+
+    def test_save_rejects_post_construction_secret_mutation_without_overwriting(self):
+        config = BridgeConfig()
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "config.json")
+            save_config(config, path)
+            with open(path, "r") as handle:
+                original = handle.read()
+
+            config.ai_summary["refresh_token"] = "secret"
+            with self.assertRaisesRegex(ConfigError, "secret"):
+                save_config(config, path)
+
+            with open(path, "r") as handle:
+                self.assertEqual(handle.read(), original)
 
 
 if __name__ == "__main__":

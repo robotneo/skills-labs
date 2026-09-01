@@ -18,6 +18,12 @@ _CHANNEL_KEYS = set(("platform", "provider", "profile", "recipients"))
 
 class ChannelConfig(object):
     def __init__(self, platform, provider="auto", profile=None, recipients=None):
+        _validate_channel_data({
+            "platform": platform,
+            "provider": provider,
+            "profile": profile,
+            "recipients": list(recipients or []),
+        })
         self.platform = platform
         self.provider = provider
         self.profile = profile
@@ -25,14 +31,8 @@ class ChannelConfig(object):
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict):
-            raise ConfigError("channel must be an object")
-        _reject_unknown(value, _CHANNEL_KEYS)
-        if not value.get("platform"):
-            raise ConfigError("channel platform is required")
+        _validate_channel_data(value)
         recipients = value.get("recipients", [])
-        if not isinstance(recipients, list):
-            raise ConfigError("channel recipients must be a list")
         return cls(value["platform"], value.get("provider", "auto"),
                    value.get("profile"), recipients)
 
@@ -55,20 +55,13 @@ class BridgeConfig(object):
             "provider": "host_agent", "fallback": "deterministic"
         }
         self.channels = list(channels or [])
+        _validate_config_data(self.to_dict())
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict):
-            raise ConfigError("configuration must be an object")
-        _reject_secrets(value)
-        _reject_unknown(value, _CONFIG_KEYS)
+        _validate_config_data(value)
         notification = value.get("notification", {})
-        if not isinstance(notification, dict):
-            raise ConfigError("notification must be an object")
-        _reject_unknown(notification, _NOTIFICATION_KEYS)
         channels = notification.get("channels", [])
-        if not isinstance(channels, list):
-            raise ConfigError("notification channels must be a list")
         return cls(
             version=value.get("version", 1),
             enabled=notification.get("enabled", False),
@@ -105,6 +98,8 @@ def load_config(path=None):
 def save_config(config, path=None):
     if not isinstance(config, BridgeConfig):
         raise ConfigError("config must be a BridgeConfig")
+    payload = config.to_dict()
+    _validate_config_data(payload)
     path = path or _default_config_path()
     directory = os.path.dirname(path)
     if directory and not os.path.exists(directory):
@@ -112,7 +107,7 @@ def save_config(config, path=None):
     descriptor, temporary_path = tempfile.mkstemp(prefix=".config-", dir=directory or None)
     try:
         with os.fdopen(descriptor, "w") as handle:
-            json.dump(config.to_dict(), handle, indent=2, sort_keys=True)
+            json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
         _replace(temporary_path, path)
     except Exception:
@@ -154,3 +149,31 @@ def _reject_unknown(value, allowed):
     unknown = set(value) - allowed
     if unknown:
         raise ConfigError("unsupported configuration field: {0}".format(sorted(unknown)[0]))
+
+
+def _validate_config_data(value):
+    if not isinstance(value, dict):
+        raise ConfigError("configuration must be an object")
+    _reject_secrets(value)
+    _reject_unknown(value, _CONFIG_KEYS)
+    notification = value.get("notification", {})
+    if not isinstance(notification, dict):
+        raise ConfigError("notification must be an object")
+    _reject_unknown(notification, _NOTIFICATION_KEYS)
+    channels = notification.get("channels", [])
+    if not isinstance(channels, list):
+        raise ConfigError("notification channels must be a list")
+    for channel in channels:
+        _validate_channel_data(channel)
+
+
+def _validate_channel_data(value):
+    if not isinstance(value, dict):
+        raise ConfigError("channel must be an object")
+    _reject_secrets(value)
+    _reject_unknown(value, _CHANNEL_KEYS)
+    if not value.get("platform"):
+        raise ConfigError("channel platform is required")
+    recipients = value.get("recipients", [])
+    if not isinstance(recipients, list):
+        raise ConfigError("channel recipients must be a list")
