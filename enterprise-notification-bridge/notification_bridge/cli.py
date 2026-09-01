@@ -3,12 +3,14 @@ from __future__ import absolute_import
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from .config import ChannelConfig, load_config, save_config
 from .contract import ContractError, validate_envelope
 from .ledger import DeliveryLedger
 from .models import Envelope
+from .providers.dws import DwsProvider
 from .service import BridgeService, DeliveryBatchResult
 
 
@@ -24,6 +26,20 @@ class CommandError(ValueError):
 class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message):
         raise CommandError("invalid_arguments", message)
+
+
+class SubprocessRunner(object):
+    """Run an explicit command vector without a shell or interactive stdin."""
+
+    def __init__(self, run_process=None):
+        self._run_process = run_process or subprocess.run
+
+    def run(self, command):
+        return self._run_process(
+            list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, universal_newlines=True, check=False,
+            shell=False, timeout=30,
+        )
 
 
 class BridgeCommands(object):
@@ -142,7 +158,12 @@ def result_to_dict(result):
     }
 
 
-def build_commands(config_path=None, ledger_path=None, providers=None):
+def production_providers(run_process=None):
+    return [DwsProvider(SubprocessRunner(run_process))]
+
+
+def build_commands(config_path=None, ledger_path=None, providers=None,
+                   run_process=None):
     config_path = config_path or os.environ.get(
         "ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG"
     )
@@ -150,9 +171,9 @@ def build_commands(config_path=None, ledger_path=None, providers=None):
         "ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER"
     ) or _default_state_path("delivery-ledger.sqlite3")
     config = load_config(config_path)
-    service = BridgeService(
-        config, list(providers or []), DeliveryLedger(ledger_path)
-    )
+    provider_list = (production_providers(run_process) if providers is None
+                     else list(providers))
+    service = BridgeService(config, provider_list, DeliveryLedger(ledger_path))
     return BridgeCommands(service, config, config_path)
 
 

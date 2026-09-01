@@ -1,8 +1,10 @@
 from __future__ import absolute_import
 
 import copy
+from datetime import datetime
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 
 from .models import Envelope
@@ -55,6 +57,9 @@ SECTION_FIELDS = (
 DIAGNOSIS_KEYS = (
     "score", "confidence_percent", "verdict", "category_scores", "issues", "recommendations",
 )
+RFC3339_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 
 class ContractError(ValueError):
@@ -82,6 +87,9 @@ def build_envelope(markdown, report_json, summary_text, summary_mode, detector_v
 def validate_envelope(envelope):
     if envelope.schema_version != "1":
         raise ContractError("unsupported envelope schema")
+    _validate_generated_at(envelope.generated_at)
+    _validate_detector(envelope.detector)
+    _validate_ai_summary(envelope.ai_summary)
     if compute_report_id(envelope.report["markdown"], envelope.report["json"]) != envelope.report_id:
         raise ContractError("report_id does not match report")
     validate_markdown_contract(envelope.report["markdown"])
@@ -138,6 +146,38 @@ def validate_json_contract(report_json):
 def _markdown_row_label(row):
     cells = row.split("|")
     return cells[1].strip() if len(cells) >= 3 else ""
+
+
+def _validate_generated_at(value):
+    if not isinstance(value, str) or not value or not RFC3339_PATTERN.match(value):
+        raise ContractError("generated_at must be an RFC3339 string")
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    formats = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z")
+    for timestamp_format in formats:
+        try:
+            datetime.strptime(normalized, timestamp_format)
+            return
+        except ValueError:
+            pass
+    raise ContractError("generated_at must be an RFC3339 string")
+
+
+def _validate_detector(value):
+    if (not isinstance(value, Mapping) or set(value) != set(("name", "version"))
+            or not _non_empty_string(value["name"])
+            or not _non_empty_string(value["version"])):
+        raise ContractError("detector must contain non-empty name and version strings")
+
+
+def _validate_ai_summary(value):
+    if (not isinstance(value, Mapping) or set(value) != set(("mode", "text"))
+            or value["mode"] not in ("host_agent", "deterministic")
+            or not isinstance(value["text"], str)):
+        raise ContractError("ai_summary must contain a supported mode and text string")
+
+
+def _non_empty_string(value):
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _validate_field(field):

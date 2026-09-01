@@ -135,16 +135,16 @@ class BridgeServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.ledger.get(key)["state"], "retryable_failure")
 
-    def test_missing_ai_summary_uses_deterministic_fallback(self):
+    def test_empty_ai_summary_text_uses_deterministic_fallback(self):
         envelope = make_envelope()
-        envelope.ai_summary = None
+        envelope.ai_summary = {"mode": "deterministic", "text": ""}
 
         self.service().deliver(envelope)
 
         sent = self.provider.send_calls[0].envelope
         self.assertIn("Wi-Fi", sent.ai_summary["text"])
         self.assertEqual(sent.ai_summary["mode"], "deterministic")
-        self.assertIsNone(envelope.ai_summary)
+        self.assertEqual(envelope.ai_summary, {"mode": "deterministic", "text": ""})
 
     def test_deterministic_summary_uses_only_report_diagnosis_content(self):
         report = copy.deepcopy(STANDARD_REPORT)

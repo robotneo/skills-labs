@@ -101,6 +101,44 @@ class ContractTests(unittest.TestCase):
         ])
         self.assertEqual(payload["schema_version"], "1")
 
+    def test_validator_rejects_invalid_generated_at(self):
+        for generated_at in (None, "", "not-a-timestamp", "2026-02-30T12:00:00Z"):
+            with self.subTest(generated_at=generated_at):
+                envelope = valid_envelope()
+                envelope.generated_at = generated_at
+                with self.assertRaisesRegex(ContractError, "generated_at"):
+                    validate_envelope(envelope)
+
+    def test_validator_rejects_invalid_detector_identity(self):
+        invalid_detectors = (
+            None,
+            {},
+            {"name": "wifi-health-detector", "version": ""},
+            {"name": "", "version": "2.4.0"},
+            {"name": "wifi-health-detector", "version": "2.4.0", "extra": True},
+        )
+        for detector in invalid_detectors:
+            with self.subTest(detector=detector):
+                envelope = valid_envelope()
+                envelope.detector = detector
+                with self.assertRaisesRegex(ContractError, "detector"):
+                    validate_envelope(envelope)
+
+    def test_validator_rejects_invalid_ai_summary(self):
+        invalid_summaries = (
+            None,
+            {},
+            {"mode": "external", "text": "summary"},
+            {"mode": "host_agent", "text": 42},
+            {"mode": "deterministic", "text": "summary", "extra": True},
+        )
+        for summary in invalid_summaries:
+            with self.subTest(summary=summary):
+                envelope = valid_envelope()
+                envelope.ai_summary = summary
+                with self.assertRaisesRegex(ContractError, "ai_summary"):
+                    validate_envelope(envelope)
+
 
 if __name__ == "__main__":
     unittest.main()

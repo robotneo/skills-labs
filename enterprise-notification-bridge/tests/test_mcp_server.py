@@ -82,6 +82,15 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
         self.assertEqual(response["result"]["capabilities"], {"tools": {}})
 
+    def test_initialize_rejects_unsupported_protocol_version(self):
+        response = self.request("initialize", {
+            "protocolVersion": "2099-01-01", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"},
+        })
+
+        self.assertNotIn("result", response)
+        self.assertEqual(response["error"]["code"], -32602)
+
     def test_initialized_notification_has_no_response(self):
         response = handle_request({
             "jsonrpc": "2.0", "method": "notifications/initialized",
@@ -95,6 +104,20 @@ class McpServerTests(unittest.TestCase):
         }, self.commands)
 
         self.assertIsNone(response)
+
+    def test_invalid_or_unknown_notifications_never_receive_a_response(self):
+        requests = (
+            {"jsonrpc": "2.0", "method": "tools/list", "params": []},
+            {"jsonrpc": "2.0", "method": "unknown", "params": {}},
+            {"jsonrpc": "2.0", "params": {}},
+            {
+                "jsonrpc": "2.0", "method": "tools/call",
+                "params": {"name": "unknown", "arguments": {}},
+            },
+        )
+        for request in requests:
+            with self.subTest(request=request):
+                self.assertIsNone(handle_request(request, self.commands))
 
     def test_tools_list_exposes_exactly_five_bridge_tools(self):
         response = self.request("tools/list", {})
@@ -141,14 +164,51 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["structuredContent"]["status"], "ok")
         self.assertEqual(self.service.bind_calls, ["dingtalk"])
 
-    def test_unknown_tool_is_a_structured_tool_error(self):
+    def test_unknown_tool_is_a_json_rpc_error(self):
         response = self.request("tools/call", {
             "name": "unknown", "arguments": {},
         })
 
-        self.assertTrue(response["result"]["isError"])
-        self.assertEqual(response["result"]["structuredContent"]["reason"],
-                         "tool_not_found")
+        self.assertNotIn("result", response)
+        self.assertEqual(response["error"]["code"], -32602)
+
+    def test_tool_arguments_enforce_required_types_and_additional_properties(self):
+        cases = (
+            ("notification_status", {"unexpected": True}),
+            ("bind_notification_profile", {}),
+            ("bind_notification_profile", {"platform": 42}),
+            ("bind_notification_profile", {
+                "platform": "dingtalk", "unexpected": True,
+            }),
+            ("configure_notification_recipient", {"platform": "dingtalk"}),
+            ("configure_notification_recipient", {
+                "platform": "dingtalk", "recipient": 42,
+            }),
+            ("configure_notification_recipient", {
+                "platform": "dingtalk", "recipient": "network",
+                "profile": "corp:user", "unexpected": True,
+            }),
+            ("deliver_enterprise_report", {"envelope": []}),
+            ("deliver_enterprise_report", {
+                "envelope": envelope_payload(), "unexpected": True,
+            }),
+            ("retry_enterprise_report", {}),
+        )
+        for name, arguments in cases:
+            with self.subTest(name=name, arguments=arguments):
+                self.service.bind_calls = []
+                self.service.deliver_calls = []
+                self.config.channels[0].recipients = ["ops"]
+
+                response = self.request("tools/call", {
+                    "name": name, "arguments": arguments,
+                })
+
+                self.assertNotIn("result", response)
+                self.assertEqual(response["error"]["code"], -32602)
+                self.assertEqual(self.service.bind_calls, [])
+                self.assertEqual(self.service.deliver_calls, [])
+                self.assertEqual(self.config.channels[0].recipients, ["ops"])
 
     def test_internal_tool_failure_is_structured_content(self):
         class RaisingService(FakeService):

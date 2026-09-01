@@ -66,28 +66,42 @@ TOOLS = (
         },
     },
 )
+TOOLS_BY_NAME = dict((tool["name"], tool) for tool in TOOLS)
+
+
+class RpcError(ValueError):
+    def __init__(self, code, message):
+        ValueError.__init__(self, message)
+        self.code = code
+        self.message = message
 
 
 def handle_request(request, commands):
     request_id = request.get("id") if isinstance(request, dict) else None
+    is_notification = isinstance(request, dict) and "id" not in request
     if (not isinstance(request, dict) or request.get("jsonrpc") != "2.0"
             or not isinstance(request.get("method"), str)):
-        return _error(request_id, -32600, "Invalid Request")
+        return None if is_notification else _error(
+            request_id, -32600, "Invalid Request"
+        )
 
     method = request["method"]
     params = request.get("params", {})
-    is_notification = "id" not in request
     if not isinstance(params, dict):
-        return _error(request_id, -32602, "Invalid params")
+        return None if is_notification else _error(
+            request_id, -32602, "Invalid params"
+        )
 
     if method == "notifications/initialized":
         return None if is_notification else _result(request_id, {})
     if method == "initialize":
         requested_version = params.get("protocolVersion")
-        protocol_version = (requested_version if isinstance(requested_version, str)
-                            else PROTOCOL_VERSION)
+        if requested_version != PROTOCOL_VERSION:
+            return None if is_notification else _error(
+                request_id, -32602, "Unsupported protocol version"
+            )
         response = {
-            "protocolVersion": protocol_version,
+            "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
             "serverInfo": {
                 "name": "enterprise-notification-bridge", "version": "1.0.0",
@@ -99,7 +113,12 @@ def handle_request(request, commands):
             request_id, {"tools": list(TOOLS)}
         )
     if method == "tools/call":
-        response = _call_tool(params, commands)
+        try:
+            response = _call_tool(params, commands)
+        except RpcError as error:
+            return None if is_notification else _error(
+                request_id, error.code, error.message
+            )
         return None if is_notification else _result(request_id, response)
     if is_notification:
         return None
@@ -145,8 +164,13 @@ def main():
 def _call_tool(params, commands):
     name = params.get("name")
     arguments = params.get("arguments", {})
-    if not isinstance(name, str) or not isinstance(arguments, dict):
-        return _tool_error("invalid_arguments")
+    if (set(params) - set(("name", "arguments")) or not isinstance(name, str)
+            or not isinstance(arguments, dict)):
+        raise RpcError(-32602, "Invalid tool arguments")
+    tool = TOOLS_BY_NAME.get(name)
+    if tool is None:
+        raise RpcError(-32602, "Unknown tool")
+    _validate_arguments(arguments, tool["inputSchema"])
     try:
         if name == "notification_status":
             result = commands.status()
@@ -161,13 +185,31 @@ def _call_tool(params, commands):
             result = commands.deliver(arguments.get("envelope"))
         elif name == "retry_enterprise_report":
             result = commands.retry(arguments.get("envelope"))
-        else:
-            return _tool_error("tool_not_found")
     except CommandError as error:
         return _tool_error(error.reason)
     except Exception:
         return _tool_error("internal_error")
     return _tool_result(result)
+
+
+def _validate_arguments(arguments, schema):
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    if any(name not in arguments for name in required):
+        raise RpcError(-32602, "Invalid tool arguments")
+    if (schema.get("additionalProperties") is False
+            and set(arguments) - set(properties)):
+        raise RpcError(-32602, "Invalid tool arguments")
+    for name, value in arguments.items():
+        property_schema = properties.get(name, {})
+        expected_type = property_schema.get("type")
+        if expected_type == "string":
+            if not isinstance(value, str):
+                raise RpcError(-32602, "Invalid tool arguments")
+            if len(value) < property_schema.get("minLength", 0):
+                raise RpcError(-32602, "Invalid tool arguments")
+        elif expected_type == "object" and not isinstance(value, dict):
+            raise RpcError(-32602, "Invalid tool arguments")
 
 
 def _tool_result(value):
