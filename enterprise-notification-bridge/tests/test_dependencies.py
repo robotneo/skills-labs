@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+import json
 import os
 import sys
 import tempfile
@@ -7,6 +8,8 @@ import unittest
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MANIFEST_PATH = os.path.join(ROOT, "manifest.json")
+SKILL_YAML_PATH = os.path.join(ROOT, "skill.yaml")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
@@ -38,15 +41,19 @@ class FakeRunner(object):
 
 
 def verified_runner(executable, version="1.0.15"):
+    json_format_help = (
+        'Options:\n  --format <format>  Output format '
+        '[allowed values: "text", "json"]'
+    )
     return FakeRunner({
         (executable, "--version", "--format", "json"):
             CommandResult('{"version":"%s"}' % version),
         (executable, "auth", "status", "--help"):
-            CommandResult("Usage: status --format json"),
+            CommandResult(json_format_help),
         (executable, "auth", "login", "--help"):
-            CommandResult("Usage: login --format json"),
+            CommandResult(json_format_help),
         (executable, "profile", "list", "--help"):
-            CommandResult("Usage: list --format json"),
+            CommandResult(json_format_help),
     })
 
 
@@ -136,6 +143,32 @@ class DwsDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(status.executable, "/npm/bin/dws")
 
+    def test_windows_candidates_use_windows_paths_in_documented_order(self):
+        calls = []
+
+        def which(name):
+            calls.append(name)
+            if name == r"C:\npm\dws.cmd":
+                return name
+            return None
+
+        status = discover_dws(
+            {
+                "USERPROFILE": r"C:\Users\agent",
+                "NPM_CONFIG_PREFIX": r"C:\npm",
+            },
+            "windows",
+            which,
+        )
+
+        self.assertEqual(status.executable, r"C:\npm\dws.cmd")
+        self.assertEqual(calls, [
+            "dws",
+            r"C:\Users\agent\.local\bin\dws.cmd",
+            r"C:\Users\agent\AppData\Roaming\npm\dws.cmd",
+            r"C:\npm\dws.cmd",
+        ])
+
     def test_missing_dws_returns_stable_install_required_reason(self):
         status = discover_dws({"HOME": "/home/agent"}, "linux", lambda name: None)
 
@@ -192,6 +225,16 @@ class DwsVerificationTests(unittest.TestCase):
         self.assertEqual(status.status, "action_required")
         self.assertEqual(status.reason, "dws_upgrade_required")
 
+    def test_numeric_prerelease_identifier_rejects_leading_zero(self):
+        executable = sys.executable
+
+        status = verify_dws(
+            executable, verified_runner(executable, "1.0.16-01")
+        )
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_version_unsupported")
+
     def test_version_output_must_be_a_json_object(self):
         executable = sys.executable
         runner = FakeRunner({
@@ -228,6 +271,20 @@ class DwsVerificationTests(unittest.TestCase):
         self.assertEqual(status.reason, "dependency_verification_failed")
         self.assertEqual(runner.calls[-1], [executable, "auth", "login", "--help"])
 
+    def test_leaf_help_rejects_json_mentioned_as_unsupported(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format>  Output format; json is unsupported"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+        self.assertEqual(runner.calls[-1], [executable, "auth", "status", "--help"])
+
     def test_success_revalidates_all_required_json_leaf_capabilities(self):
         executable = sys.executable
         runner = verified_runner(executable)
@@ -250,6 +307,28 @@ class DwsVerificationTests(unittest.TestCase):
 
         with self.assertRaises(AttributeError):
             status.executable = "/changed/dws"
+
+
+class DependencyMetadataTests(unittest.TestCase):
+    def test_manifest_keeps_python_unconditional_and_dws_conditional(self):
+        with open(MANIFEST_PATH, "r") as handle:
+            manifest = json.load(handle)
+
+        self.assertEqual(manifest["requirements"], ["python>=3.7"])
+        self.assertEqual(
+            manifest["conditional_requirements"],
+            {"dingtalk:dws-cli": ["dws>=1.0.15"]},
+        )
+
+    def test_skill_yaml_keeps_python_unconditional_and_dws_conditional(self):
+        with open(SKILL_YAML_PATH, "r") as handle:
+            lines = [line.rstrip("\n") for line in handle]
+
+        self.assertIn("requirements: [python>=3.7]", lines)
+        section = lines.index("conditional_requirements:")
+        self.assertEqual(
+            lines[section + 1], "  dingtalk:dws-cli: [dws>=1.0.15]"
+        )
 
 
 if __name__ == "__main__":

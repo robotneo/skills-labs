@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
 import json
+import ntpath
 import os
 import re
 from collections import namedtuple
@@ -92,8 +93,7 @@ def verify_dws(executable, runner):
     for leaf in required_leaves:
         result = _run(runner, [executable] + list(leaf) + ["--help"])
         if (result is None or result[0] != 0
-                or "--format" not in result[1]
-                or "json" not in result[1].lower()):
+                or not _help_advertises_json_format(result[1])):
             return _status_for(
                 executable, version, "unavailable", "dependency_verification_failed"
             )
@@ -105,13 +105,20 @@ def _candidate_paths(environment, platform_name):
     home = environment.get("HOME") or environment.get("USERPROFILE")
     windows = str(platform_name).lower().startswith("win")
     executable_name = "dws.cmd" if windows else "dws"
+    path_module = ntpath if windows else os.path
 
     if home:
         if windows:
-            yield "user-local", os.path.join(home, ".local", "bin", executable_name)
-            yield "user-local", os.path.join(home, "AppData", "Roaming", "npm", executable_name)
+            yield "user-local", path_module.join(
+                home, ".local", "bin", executable_name
+            )
+            yield "user-local", path_module.join(
+                home, "AppData", "Roaming", "npm", executable_name
+            )
         else:
-            yield "user-local", os.path.join(home, ".local", "bin", executable_name)
+            yield "user-local", path_module.join(
+                home, ".local", "bin", executable_name
+            )
 
     if str(platform_name).lower() in ("darwin", "macos", "mac"):
         yield "homebrew", "/opt/homebrew/bin/dws"
@@ -120,9 +127,11 @@ def _candidate_paths(environment, platform_name):
     npm_prefix = environment.get("NPM_CONFIG_PREFIX")
     if npm_prefix:
         if windows:
-            yield "npm-global", os.path.join(npm_prefix, executable_name)
+            yield "npm-global", path_module.join(npm_prefix, executable_name)
         else:
-            yield "npm-global", os.path.join(npm_prefix, "bin", executable_name)
+            yield "npm-global", path_module.join(
+                npm_prefix, "bin", executable_name
+            )
 
 
 def _discovered(executable, source):
@@ -140,6 +149,24 @@ def _is_executable_reference(executable):
     return os.path.isfile(executable) and os.access(executable, os.X_OK)
 
 
+def _help_advertises_json_format(help_text):
+    for line in _text(help_text).splitlines():
+        normalized = line.lower()
+        if re.search(r"(?:^|\s)--format(?:\s|=|,|$)", normalized) is None:
+            continue
+        if re.search(
+                r"\b(?:unsupported|not\s+supported|disabled|unavailable)\b",
+                normalized):
+            continue
+        if re.search(
+                r"\b(?:allowed\s+values?|choices?|one\s+of)\b[^\n]*\bjson\b",
+                normalized):
+            return True
+        if re.search(r"--format\s+(?:<|\[)[^>\]]*\bjson\b[^>\]]*(?:>|\])", normalized):
+            return True
+    return False
+
+
 def _status_for(executable, version, status, reason):
     dependency = DwsDependency(
         executable, version, MINIMUM_DWS_VERSION, "discovered"
@@ -155,9 +182,23 @@ def _parse_version(stdout):
     if not isinstance(payload, dict):
         return None
     version = payload.get("version")
-    if not isinstance(version, str) or _SEMVER.match(version) is None:
+    if not isinstance(version, str) or not _is_strict_semver(version):
         return None
     return version
+
+
+def _is_strict_semver(version):
+    if _SEMVER.match(version) is None:
+        return False
+    version_without_build = version.split("+", 1)[0]
+    if "-" not in version_without_build:
+        return True
+    prerelease = version_without_build.split("-", 1)[1]
+    return all(
+        not (identifier.isdigit() and len(identifier) > 1
+             and identifier.startswith("0"))
+        for identifier in prerelease.split(".")
+    )
 
 
 def _version_key(version):
