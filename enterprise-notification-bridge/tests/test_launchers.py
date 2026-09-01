@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import shutil
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,6 +70,30 @@ class LauncherTests(unittest.TestCase):
     def test_launcher_has_all_cross_platform_entrypoints(self):
         for name in ("run.sh", "run.bat", "run.ps1"):
             self.assertTrue(os.path.isfile(os.path.join(ROOT, name)))
+
+    def test_windows_launchers_forward_all_arguments(self):
+        with open(os.path.join(ROOT, "run.bat"), encoding="utf-8") as handle:
+            batch = handle.read()
+        with open(os.path.join(ROOT, "run.ps1"), encoding="utf-8") as handle:
+            powershell = handle.read()
+        self.assertIn('%*', batch)
+        self.assertIn('@args', powershell)
+        self.assertIn('run.ps1" %*', batch)
+
+    @unittest.skipUnless(shutil.which("pwsh") or shutil.which("powershell"),
+                         "PowerShell is not available on this host")
+    def test_powershell_launcher_forwards_help_when_available(self):
+        executable = shutil.which("pwsh") or shutil.which("powershell")
+        result = subprocess.run(
+            [executable, "-NoProfile", "-File", os.path.join(ROOT, "run.ps1"), "--help"],
+            env=dict(os.environ, ENTERPRISE_NOTIFICATION_BRIDGE_PYTHON=sys.executable),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "ok")
 
     def _run(self, launcher, command):
         environment = os.environ.copy()

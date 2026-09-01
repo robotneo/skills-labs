@@ -33,7 +33,7 @@ TOOLS = (
     },
     {
         "name": "configure_notification_recipient",
-        "description": "Configure a fixed recipient for a platform profile.",
+        "description": "Explicitly enable a configured channel and set a fixed recipient for a platform profile.",
         "inputSchema": {
             "type": "object",
             "properties": {

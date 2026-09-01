@@ -164,6 +164,21 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["structuredContent"]["status"], "ok")
         self.assertEqual(self.service.bind_calls, ["dingtalk"])
 
+    def test_configure_recipient_explicitly_activates_fresh_configuration(self):
+        self.config.enabled = False
+        self.config.channels = []
+
+        response = self.request("tools/call", {
+            "name": "configure_notification_recipient",
+            "arguments": {"platform": "dingtalk", "recipient": "ops"},
+        })
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(response["result"]["structuredContent"]["status"], "configured")
+        self.assertTrue(self.config.enabled)
+        self.assertEqual(self.config.channels[0].provider, "auto")
+        self.assertEqual(self.config.channels[0].recipients, ["ops"])
+
     def test_unknown_tool_is_a_json_rpc_error(self):
         response = self.request("tools/call", {
             "name": "unknown", "arguments": {},

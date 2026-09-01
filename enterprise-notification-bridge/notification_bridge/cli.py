@@ -14,7 +14,7 @@ from .providers.dws import DwsProvider
 from .service import BridgeService, DeliveryBatchResult
 
 
-COMMAND_NAMES = ("status", "bind", "recipients", "deliver", "retry")
+COMMAND_NAMES = ("status", "enable", "bind", "recipients", "deliver", "retry")
 
 
 class CommandError(ValueError):
@@ -56,6 +56,25 @@ class BridgeCommands(object):
             "channels": [channel.to_dict() for channel in self.config.channels],
         }
 
+    def enable(self, platform, provider="auto"):
+        if not isinstance(platform, str) or not platform:
+            raise CommandError("invalid_arguments", "platform is required")
+        if not isinstance(provider, str) or not provider:
+            raise CommandError("invalid_arguments", "provider must be a non-empty string")
+
+        channel = self._channel(platform)
+        if channel is None:
+            channel = ChannelConfig(platform, provider=provider)
+            self.config.channels.append(channel)
+        else:
+            channel.provider = provider
+        self.config.enabled = True
+        save_config(self.config, self.config_path)
+        return {
+            "status": "enabled",
+            "channel": channel.to_dict(),
+        }
+
     def bind(self, platform):
         if not isinstance(platform, str) or not platform:
             raise CommandError("invalid_arguments", "platform is required")
@@ -85,6 +104,9 @@ class BridgeCommands(object):
             if profile is not None:
                 channel.profile = profile
             channel.recipients = list(recipients)
+        # Explicit recipient configuration is also an explicit activation
+        # action for a fresh, default-disabled Bridge configuration.
+        self.config.enabled = True
         save_config(self.config, self.config_path)
         return {
             "status": "configured",
@@ -206,6 +228,8 @@ def main(argv=None, commands=None, stdout=None, stderr=None):
 def _execute(arguments, commands):
     if arguments.command == "status":
         return commands.status()
+    if arguments.command == "enable":
+        return commands.enable(arguments.platform, arguments.provider)
     if arguments.command == "bind":
         return commands.bind(arguments.platform)
     if arguments.command == "recipients":
@@ -225,6 +249,10 @@ def _parser():
     parser.add_argument("--ledger")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("status")
+
+    enable = subparsers.add_parser("enable")
+    enable.add_argument("--platform", required=True)
+    enable.add_argument("--provider", default="auto")
 
     bind = subparsers.add_parser("bind")
     bind.add_argument("--platform", required=True)

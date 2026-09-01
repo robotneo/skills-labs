@@ -19,6 +19,7 @@ if ROOT not in sys.path:
 from wifi_health.cli import main
 from wifi_health.diagnose import diagnose
 from wifi_health.models import Field, Report
+from wifi_health import notification as notification_module
 from wifi_health.notification import ReportContractError, trigger_notification
 from wifi_health.output import render_json, render_text
 
@@ -362,6 +363,104 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(result.status, "skipped")
         self.assertEqual(result.reason, "bridge_unavailable")
         self.assertFalse(result.requires_attention)
+
+    def test_adjacent_bridge_discovery_passes_validated_envelope_and_is_non_blocking(self):
+        config_path = os.path.join(self.directory.name, "adjacent-config.json")
+        ledger_path = os.path.join(self.directory.name, "adjacent-ledger.sqlite3")
+        with open(config_path, "w") as handle:
+            json.dump({
+                "version": 1,
+                "notification": {
+                    "enabled": True,
+                    "failure_policy": "non_blocking",
+                    "channels": [{
+                        "platform": "dingtalk",
+                        "provider": "auto",
+                        "profile": "corp:user",
+                        "recipients": [],
+                    }],
+                },
+            }, handle)
+        dws_path = os.path.join(self.directory.name, "dws")
+        dws_log = os.path.join(self.directory.name, "dws.log")
+        with open(dws_path, "w") as handle:
+            handle.write("#!/bin/sh\n")
+            handle.write("echo \"$*\" >> \"$DWS_LOG\"\n")
+            handle.write("case \"$*\" in\n")
+            handle.write("  '--help') echo 'DWS help' ;;\n")
+            handle.write("  *'auth status --help'*) echo '--format json' ;;\n")
+            handle.write("  *'auth status --format json'*)\n")
+            handle.write("    if [ \"${DWS_MODE:-ok}\" = failure ]; then exit 9; fi\n")
+            handle.write("    echo '{\"authenticated\":true}' ;;\n")
+            handle.write("  *) exit 1 ;;\n")
+            handle.write("esac\n")
+        os.chmod(dws_path, 0o755)
+
+        report = self._sample_report()
+        expected = render_text(report, language="en")
+        adjacent_launcher = os.path.join(
+            REPOSITORY_ROOT, "enterprise-notification-bridge", "run.sh"
+        )
+        observed = []
+        real_run = notification_module.subprocess.run
+        bridge_statuses = []
+
+        def observe_and_run(command, *args, **kwargs):
+            if command and os.path.abspath(command[0]) == os.path.abspath(adjacent_launcher):
+                envelope_path = command[command.index("--envelope") + 1]
+                with open(envelope_path, encoding="utf-8") as handle:
+                    observed.append(json.load(handle))
+            result = real_run(command, *args, **kwargs)
+            if command and os.path.abspath(command[0]) == os.path.abspath(adjacent_launcher):
+                bridge_statuses.append(json.loads(result.stdout)["status"])
+            return result
+
+        environment = {
+            "ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG": config_path,
+            "ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER": ledger_path,
+            "WIFI_HEALTH_PYTHON": sys.executable,
+            "DWS_LOG": dws_log,
+            "PATH": self.directory.name + os.pathsep + os.environ.get("PATH", ""),
+        }
+        with patch.dict(os.environ, environment, clear=True), patch(
+            "wifi_health.cli.collect_report", return_value=report
+        ), patch("wifi_health.cli.apply_quality"), patch(
+            "wifi_health.notification.subprocess.run", side_effect=observe_and_run
+        ):
+            code, stdout, stderr = self._run_detector_without_override()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, expected)
+        self.assertEqual(stderr, "")
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["report"]["markdown"], expected)
+        self.assertEqual(observed[0]["report"]["json"], json.loads(render_json(report)))
+        self.assertEqual(observed[0]["ai_summary"]["mode"], "deterministic")
+        self.assertEqual(bridge_statuses, ["recipient_not_configured"])
+
+        with patch.dict(os.environ, dict(environment, DWS_MODE="failure"), clear=True), patch(
+            "wifi_health.cli.collect_report", return_value=report
+        ), patch("wifi_health.cli.apply_quality"), patch(
+            "wifi_health.notification.subprocess.run", side_effect=observe_and_run
+        ):
+            code, failed_stdout, failed_stderr = self._run_detector_without_override()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(failed_stdout, expected)
+        self.assertIn("dws_command_failed", failed_stderr)
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(bridge_statuses, ["recipient_not_configured", "dws_command_failed"])
+        with open(dws_log, encoding="utf-8") as handle:
+            dws_calls = handle.read().splitlines()
+        self.assertTrue(dws_calls)
+        self.assertFalse(any("send" in call or "recipient" in call for call in dws_calls))
+
+    def _run_detector_without_override(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = main(["--language", "en", "--no-public-test"])
+        return code, stdout.getvalue(), stderr.getvalue()
 
     def _bridge_command(self, response, record_path=None, return_code=0):
         script = [

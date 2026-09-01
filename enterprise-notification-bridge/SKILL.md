@@ -59,6 +59,28 @@ run.sh deliver --envelope <validated-envelope.json>
 run.sh retry --envelope <validated-envelope.json>
 ```
 
+### Fresh installation setup
+
+The default configuration is disabled and report generation never enables it
+implicitly. Use this explicit CLI sequence, with a temporary or configured
+`ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG` path as needed:
+
+```text
+run.sh status
+run.sh enable --platform dingtalk --provider auto
+run.sh bind --platform dingtalk
+run.sh recipients --platform dingtalk --profile corpId:userId --recipient <configured-selector>
+run.sh deliver --envelope <validated-envelope.json>
+```
+
+`enable` only persists an enabled channel and performs no login or delivery.
+`bind` then performs the Provider's authorization/Profile handshake. The
+existing MCP tool `configure_notification_recipient` is also an explicit
+activation path: it enables the Bridge, persists the requested platform and
+recipient, and keeps the MCP tool list at exactly five tools. MCP clients can
+then call `bind_notification_profile` followed by
+`deliver_enterprise_report`.
+
 The CLI emits exactly one JSON document on stdout and diagnostics on stderr.
 `deliver` and `retry` remain process-successful when delivery itself fails;
 malformed envelopes and internal errors are nonzero. The adjacent detector

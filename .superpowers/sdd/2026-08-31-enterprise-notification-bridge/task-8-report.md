@@ -42,3 +42,45 @@ metadata-only ledger.
 ## Report path
 
 `.superpowers/sdd/2026-08-31-enterprise-notification-bridge/task-8-report.md`
+
+## Fix Round 1 — RED/GREEN Evidence
+
+### RED
+
+- Fresh-install activation test:
+  `python3 -m unittest enterprise-notification-bridge.tests.test_cli.CliTests.test_fresh_config_can_be_enabled_bound_configured_and_delivered -v`
+  failed with `AssertionError: 2 != 0` because the CLI had no explicit
+  `enable` operation and argparse rejected the setup step.
+- The new adjacent-discovery test initially exposed the provider-failure
+  diagnostic as `dws_command_failed`; the assertion was corrected to verify
+  the actual structured reason while retaining the required zero detector exit
+  status and unchanged stdout.
+
+### GREEN
+
+After adding explicit CLI activation and making recipient configuration an
+explicit activation path for MCP (without adding a sixth MCP tool), the focused
+behavioral checks passed:
+
+```text
+Ran 3 tests in 1.029s
+OK
+```
+
+Those checks cover the complete `status -> enable -> bind -> recipients ->
+deliver` flow from a fresh temporary config, the real adjacent detector-to-
+Bridge launcher with a fake DWS executable, one validated envelope with exact
+report preservation, empty-recipient no-send, non-blocking Provider failure,
+and the executable fake-Provider report/summary/deduplication fixture.
+
+Windows launcher coverage now checks `%*` and `@args` forwarding statically;
+PowerShell execution is explicitly skipped because neither `pwsh` nor
+`powershell` is installed on this host.
+
+Final fix-round verification using the bundled Python runtime:
+
+- `compileall`: passed for both Skills.
+- Wi-Fi detector suite: 47 passed.
+- Enterprise Bridge suite: 95 passed, 1 explicit PowerShell skip.
+- Both `quick_validate.py` invocations: valid.
+- `git diff --check`: clean.

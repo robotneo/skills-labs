@@ -15,7 +15,10 @@ if ROOT not in sys.path:
 from notification_bridge.cli import BridgeCommands, build_commands, main
 from notification_bridge.config import BridgeConfig, ChannelConfig, load_config, save_config
 from notification_bridge.contract import build_envelope
+from notification_bridge.ledger import DeliveryLedger
+from notification_bridge.providers.base import Provider
 from notification_bridge.providers.base import ProviderResult
+from notification_bridge.service import BridgeService
 from notification_bridge.service import DeliveryBatchResult
 
 
@@ -47,6 +50,30 @@ class FakeService(object):
     def bind(self, platform):
         self.bind_calls.append(platform)
         return ProviderResult("ok", data={"profile": "corp:user"})
+
+
+class ActivationProvider(Provider):
+    platform = "dingtalk"
+    name = "activation-fake"
+    priority = 100
+
+    def capabilities(self):
+        return {"available": True}
+
+    def auth_status(self, profile=None):
+        return ProviderResult("authorized")
+
+    def login(self):
+        return ProviderResult("authorized")
+
+    def list_profiles(self):
+        return ProviderResult("ok", data={"profile": "corp:user"})
+
+    def resolve_recipient(self, profile, selector):
+        return ProviderResult("resolved", data={"recipient": selector})
+
+    def send_report(self, profile, recipient, envelope):
+        return ProviderResult("sent", data={"external_id": "fake-message"})
 
 
 class CliTests(unittest.TestCase):
@@ -199,6 +226,55 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["channels"][0]["platform"], "dingtalk")
         self.assertEqual(stderr, "")
         self.assertEqual(self.service.deliver_calls, [])
+
+    def test_fresh_config_can_be_enabled_bound_configured_and_delivered(self):
+        config = BridgeConfig()
+        config_path = os.path.join(self.directory.name, "fresh-config.json")
+        ledger_path = os.path.join(self.directory.name, "fresh-ledger.sqlite3")
+        save_config(config, config_path)
+        service = BridgeService(
+            config, [ActivationProvider()], DeliveryLedger(ledger_path)
+        )
+
+        def invoke(arguments):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            code = main(
+                ["--config", config_path] + arguments,
+                commands=BridgeCommands(service, config, config_path),
+                stdout=stdout,
+                stderr=stderr,
+            )
+            return code, json.loads(stdout.getvalue()), stderr.getvalue()
+
+        code, status, _ = invoke(["status"])
+        self.assertEqual(code, 0)
+        self.assertEqual(status["status"], "disabled")
+
+        code, enabled, _ = invoke(["enable", "--platform", "dingtalk"])
+        self.assertEqual(code, 0)
+        self.assertEqual(enabled["status"], "enabled")
+        self.assertEqual(enabled["channel"]["provider"], "auto")
+        self.assertTrue(load_config(config_path).enabled)
+
+        code, bound, _ = invoke(["bind", "--platform", "dingtalk"])
+        self.assertEqual(code, 0)
+        self.assertEqual(bound["status"], "ok")
+        self.assertEqual(load_config(config_path).channels[0].profile, "corp:user")
+
+        code, configured, _ = invoke([
+            "recipients", "--platform", "dingtalk", "--profile", "corp:user",
+            "--recipient", "ops",
+        ])
+        self.assertEqual(code, 0)
+        self.assertEqual(configured["status"], "configured")
+        self.assertEqual(load_config(config_path).channels[0].recipients, ["ops"])
+
+        code, delivered, _ = invoke([
+            "deliver", "--envelope", self.envelope_path,
+        ])
+        self.assertEqual(code, 0)
+        self.assertEqual(delivered["status"], "delivered")
 
     def test_help_still_emits_one_json_document(self):
         code, stdout, stderr = self.run_cli(["--help"])

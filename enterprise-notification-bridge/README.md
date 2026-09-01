@@ -24,6 +24,23 @@ run.bat status
 run.bat deliver --envelope C:\path\to\validated-envelope.json
 ```
 
+Fresh installations start disabled. Activate delivery explicitly in this
+order; no report generation enables notifications implicitly:
+
+```text
+run.sh status
+run.sh enable --platform dingtalk --provider auto
+run.sh bind --platform dingtalk
+run.sh recipients --platform dingtalk --profile corpId:userId --recipient <configured-selector>
+run.sh deliver --envelope /path/to/validated-envelope.json
+```
+
+`enable` only persists the enabled channel and has no authentication side
+effect. For MCP clients, call the existing
+`configure_notification_recipient` tool to explicitly enable and configure the
+channel, then call `bind_notification_profile` and
+`deliver_enterprise_report`; the MCP surface remains exactly five tools.
+
 The CLI writes one JSON result to stdout. Configure state and the metadata-only
 delivery ledger with `ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG` and
 `ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER` when a non-default location is needed.
