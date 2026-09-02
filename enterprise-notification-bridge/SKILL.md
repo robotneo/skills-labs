@@ -81,8 +81,11 @@ run.sh deliver --envelope <validated-envelope.json>
 ```
 
 `enable` only persists an enabled channel and performs no login or delivery.
-`setup` prefers an available host-native Provider. Only when native capability
-is unavailable and DingTalk resolves to `dws-cli` may it inspect the conditional
+`setup` prefers a host-native Provider only when it declares the complete setup
+operation set: `auth_status`, `login`, and `list_profiles`. Send-only or partial
+native capability is unavailable for setup; `auto` falls back to DWS and an
+explicit `native` selection fails closed. Only when native setup capability is
+unavailable and DingTalk resolves to `dws-cli` may it inspect the conditional
 DWS dependency. Missing or outdated DWS returns a correlated install action; it
 never installs at detector startup. Show the source and command to the user,
 then rerun with `--install-dws --yes` only after explicit approval. GitHub is
@@ -96,9 +99,11 @@ into a shell.
 
 After dependency verification, setup performs the authorization/Profile
 handshake. Request a DingTalk login window or device/QR flow only on first use
-or after authorization expires. Fixed recipients are configured afterward and
-may be decided or changed independently. Do not configure recipients before an
-exact Provider/Profile binding has completed.
+or after authorization expires. `--device-login` (MCP: `deviceLogin`) selects
+the documented `dws auth login --device` flow only when DWS login is required;
+it is intentionally a no-op for an already-authorized Profile. Fixed recipients
+are configured afterward and may be decided or changed independently. Do not
+configure recipients before an exact Provider/Profile binding has completed.
 MCP clients use `bind_notification_profile`,
 `configure_notification_recipient`, `deliver_enterprise_report`,
 `retry_enterprise_report`, and `continue_enterprise_notification`; the full

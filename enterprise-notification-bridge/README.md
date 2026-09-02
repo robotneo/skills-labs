@@ -47,10 +47,13 @@ run.sh deliver --envelope /path/to/validated-envelope.json
 ```
 
 `enable` only persists the enabled channel and has no authentication side
-effect. `setup` is native-first: a declared host-native DingTalk capability is
-used without touching DWS. If native is unavailable, DWS 1.0.15 or newer is
-checked as a conditional fallback. Missing or outdated DWS returns an action
-without executing it. Review that action, then approve explicitly with:
+effect. `setup` is native-first when the declared host-native DingTalk
+capability includes the complete setup operation set (`auth_status`, `login`,
+and `list_profiles`). A send-only or otherwise partial native capability is not
+setup-capable, so `provider=auto` falls back to DWS while explicit
+`provider=native` returns `configured_provider_unavailable`. DWS 1.0.15 or
+newer is checked as a conditional fallback. Missing or outdated DWS returns an
+action without executing it. Review that action, then approve explicitly with:
 
 ```text
 run.sh setup --platform dingtalk --provider dws-cli --install-dws --yes
@@ -64,8 +67,11 @@ private temporary location, and executes locally; it never pipes a download
 into a shell. SHA-256 is verified before execution only when the downloader's
 receipt supplies `expected_sha256`; the default URL download does not claim an
 unconditional artifact checksum. Setup requests DingTalk login or QR/device
-authorization only on first use or after authorization expires, then binds a
-Provider-returned Profile. Multiple Profiles require the user's exact choice.
+authorization only on first use or after authorization expires. `--device-login`
+(MCP: `deviceLogin`) uses the documented `dws auth login --device` flow when a
+DWS login is actually required; it has no effect when authorization is already
+valid. Setup then binds a Provider-returned Profile. Multiple Profiles require
+the user's exact choice.
 Fixed recipients are configured afterward and can be decided later. For MCP
 clients, use `bind_notification_profile`,
 `configure_notification_recipient`, and `deliver_enterprise_report`.

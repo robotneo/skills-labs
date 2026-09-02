@@ -156,6 +156,28 @@ class AgentInstructionContractTests(unittest.TestCase):
         self.assertEqual(result["reason"], "native_provider_selected")
         self.assertEqual(calls, [])
 
+    def test_setup_cli_auto_falls_back_from_send_only_native_capability(self):
+        capabilities = {"schema_version": "1", "capabilities": [{
+            "schema_version": "1", "platform": "dingtalk",
+            "provider": "native", "operations": ["send_report"],
+        }]}
+        capability_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        )
+        self.addCleanup(lambda: os.path.exists(capability_file.name)
+                        and os.unlink(capability_file.name))
+        json.dump(capabilities, capability_file)
+        capability_file.close()
+
+        code, result, calls, unused = self._setup_cli(argv=[
+            "setup", "--platform", "dingtalk", "--provider", "auto",
+            "--capabilities", capability_file.name,
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(calls, ["discover", "verify"])
+
     def test_setup_cli_missing_dws_returns_install_action_without_installing(self):
         missing = DependencyStatus(
             "action_required", "dependency_install_required", None

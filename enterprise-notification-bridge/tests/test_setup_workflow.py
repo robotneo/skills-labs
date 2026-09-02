@@ -33,10 +33,12 @@ class ReadyProvider(object):
     name = "dws-cli"
     priority = 10
     availability = "available"
+    supports_device_login = True
 
     def __init__(self):
         self.auth_calls = 0
         self.login_calls = 0
+        self.login_modes = []
         self.authorizations = []
 
     def capabilities(self):
@@ -48,8 +50,9 @@ class ReadyProvider(object):
             return self.authorizations.pop(0)
         return ProviderResult("authorized")
 
-    def login(self):
+    def login(self, device_login=False):
         self.login_calls += 1
+        self.login_modes.append(device_login)
         return ProviderResult("ok")
 
     def list_profiles(self):
@@ -120,6 +123,48 @@ class SetupWorkflowTests(unittest.TestCase):
             "dingtalk", "auto", capabilities=native_bundle()
         )
         self.assertEqual(result.reason, "native_provider_selected")
+        self.assertEqual(self.calls, [])
+
+    def test_auto_falls_back_to_dws_when_native_has_only_send_report(self):
+        capabilities = {"schema_version": "1", "capabilities": [{
+            "schema_version": "1", "platform": "dingtalk",
+            "provider": "native", "operations": ["send_report"],
+        }]}
+
+        result = self.service().setup_dependency(
+            "dingtalk", "auto", capabilities=capabilities
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(self.calls, ["discover", "verify"])
+
+    def test_auto_falls_back_to_dws_when_native_setup_is_partial(self):
+        capabilities = {"schema_version": "1", "capabilities": [{
+            "schema_version": "1", "platform": "dingtalk",
+            "provider": "native",
+            "operations": ["auth_status", "login", "send_report"],
+        }]}
+
+        result = self.service().setup_dependency(
+            "dingtalk", "auto", capabilities=capabilities
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(self.calls, ["discover", "verify"])
+
+    def test_explicit_native_with_partial_setup_capabilities_is_unavailable(self):
+        capabilities = {"schema_version": "1", "capabilities": [{
+            "schema_version": "1", "platform": "dingtalk",
+            "provider": "native",
+            "operations": ["auth_status", "login", "send_report"],
+        }]}
+
+        result = self.service().setup_dependency(
+            "dingtalk", "native", capabilities=capabilities
+        )
+
+        self.assertEqual(result.status, "unavailable")
+        self.assertEqual(result.reason, "configured_provider_unavailable")
         self.assertEqual(self.calls, [])
 
     def test_missing_dws_returns_correlated_install_action(self):
@@ -356,6 +401,18 @@ class SetupWorkflowTests(unittest.TestCase):
             service.setup_dependency("dingtalk", "dws-cli").status, "ok"
         )
         self.assertEqual(self.provider.login_calls, 1)
+
+    def test_device_login_uses_documented_dws_device_flow(self):
+        self.provider.authorizations = [
+            ProviderResult("missing"), ProviderResult("authorized"),
+        ]
+
+        result = self.service().setup_dependency(
+            "dingtalk", "dws-cli", device_login=True
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(self.provider.login_modes, [True])
 
 
 if __name__ == "__main__":

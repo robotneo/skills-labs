@@ -470,6 +470,58 @@ class DwsVerificationTests(unittest.TestCase):
             self.assertEqual(status.status, "ready", help_text)
             self.assertEqual(status.reason, "dependency_ready", help_text)
 
+    def test_leaf_help_accepts_explicit_parenthetical_json_value_sets(self):
+        executable = sys.executable
+        help_forms = (
+            "  --format <format> Output format (choices: text, json)",
+            "  --format <format> Output format (one of: text | json)",
+        )
+
+        for help_text in help_forms:
+            runner = verified_runner(executable)
+            runner.responses[
+                (executable, "auth", "status", "--help")
+            ] = CommandResult(help_text)
+
+            status = verify_dws(executable, runner)
+
+            self.assertEqual(status.status, "ready", help_text)
+            self.assertEqual(status.reason, "dependency_ready", help_text)
+
+    def test_leaf_help_accepts_documented_cobra_output_format_values(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            '  --format string  Output format: json|table|raw (default "json")'
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "ready")
+        self.assertEqual(status.reason, "dependency_ready")
+
+    def test_leaf_help_rejects_negative_parenthetical_json_notes(self):
+        executable = sys.executable
+        help_forms = (
+            "  --format <format> Output format (no json support)",
+            "  --format <format> Output format (json unavailable)",
+            "  --format <format> Output format (choices: text, jsonl)",
+            "  --format <format> Output format (choices: text, no-json)",
+        )
+
+        for help_text in help_forms:
+            runner = verified_runner(executable)
+            runner.responses[
+                (executable, "auth", "status", "--help")
+            ] = CommandResult(help_text)
+
+            status = verify_dws(executable, runner)
+
+            self.assertEqual(status.status, "unavailable", help_text)
+            self.assertEqual(
+                status.reason, "dependency_verification_failed", help_text
+            )
+
     def test_leaf_help_accepts_choices_on_indented_continuation_line(self):
         executable = sys.executable
         runner = verified_runner(executable)

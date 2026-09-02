@@ -42,3 +42,17 @@ Baseline: `035fecb`
   skipped/0 failed; compileall, both Skill validators, Python 3.7 AST, and diff check
   passed.
 - Real external preflight remains gated and was not executed.
+
+## Final whole-branch fix
+
+- Status: implemented; awaiting final re-review.
+- Task 1 help verification now accepts explicit parenthetical choices/one-of
+  declarations and the documented Cobra-style `Output format:
+  json|table|raw` declaration while preserving fail-closed negative cases.
+- Native setup availability now requires `auth_status`, `login`, and
+  `list_profiles`; `auto` falls back to DWS for partial/send-only native
+  descriptors and explicit `native` remains stably unavailable.
+- `--device-login` / MCP `deviceLogin` now selects the documented
+  `dws auth login --device` path only when DWS login is required.
+- Removed whole-branch Markdown trailing whitespace and the extra final-review
+  EOF blank line. No real external side effect was executed.

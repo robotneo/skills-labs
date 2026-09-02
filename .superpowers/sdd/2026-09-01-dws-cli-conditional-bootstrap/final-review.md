@@ -128,4 +128,3 @@ Remove the trailing spaces before merge.
   lines listed above.
 - No real DWS download, installation, login/QR flow, organization query,
   recipient lookup, or message send was performed.
-

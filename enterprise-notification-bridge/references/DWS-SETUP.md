@@ -54,6 +54,13 @@ device code, or QR scan is requested only on first use or when saved
 authorization has expired. A currently authorized user must not be prompted on
 every report.
 
+Use `--device-login` (or MCP `deviceLogin: true`) to select the documented
+`dws auth login --device` flow for remote/headless environments. The flag is
+forwarded only when DWS login is required; it does not trigger a new login when
+the current Profile is already authorized. Native setup is considered available
+only when the host declares `auth_status`, `login`, and `list_profiles`; partial
+or send-only native capability falls back to DWS under `provider=auto`.
+
 Organization binding uses only Profiles returned by the Provider. A stable
 Profile has the shape `corpId:userId`. If exactly one Profile is returned, it
 may be persisted. If several are returned, stop and have the user select the

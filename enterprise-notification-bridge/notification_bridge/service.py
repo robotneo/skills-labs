@@ -28,6 +28,9 @@ from .selector import select_provider
 SUCCESS_STATUSES = frozenset((
     "ok", "sent", "delivered", "succeeded", "success",
 ))
+NATIVE_SETUP_OPERATIONS = frozenset((
+    "auth_status", "login", "list_profiles",
+))
 
 
 class DeliveryBatchResult(object):
@@ -76,14 +79,16 @@ class BridgeService(object):
                          install_dws=False, china_mirror=False,
                          device_login=False, approved=False):
         """Prepare one notification dependency without selecting a recipient."""
-        del device_login  # Reserved for the existing login continuation surface.
         capability_list = _capability_list(capabilities)
         if platform != "dingtalk":
             return ProviderResult("ready", "dws_dependency_not_applicable")
         if provider not in ("auto", "native", "dws-cli"):
             return ProviderResult("failed", "provider_unsupported")
         native_available = any(
-            item["platform"] == platform for item in capability_list
+            item["platform"] == platform
+            and item["provider"] == "native"
+            and NATIVE_SETUP_OPERATIONS.issubset(item["operations"])
+            for item in capability_list
         )
         if provider == "native":
             if not native_available:
@@ -142,7 +147,7 @@ class BridgeService(object):
         if getattr(selected, "availability", "available") == "unavailable":
             return ProviderResult("unavailable", selected.reason)
         return self._begin_authorization(
-            None, capability_list, index, selected, "bind"
+            None, capability_list, index, selected, "bind", device_login
         ).results[0]
 
     def _dependency_install_action(self, platform, requested_provider,
@@ -408,14 +413,14 @@ class BridgeService(object):
         )
 
     def _begin_authorization(self, envelope, capabilities, channel_index,
-                             provider, kind):
+                             provider, kind, device_login=False):
         return self._request_auth_status(
             envelope, capabilities, channel_index, provider, kind,
-            "auth_status",
+            "auth_status", device_login,
         )
 
     def _request_auth_status(self, envelope, capabilities, channel_index,
-                             provider, kind, stage):
+                             provider, kind, stage, device_login=False):
         channel = self.config.channels[channel_index]
         try:
             result = provider.auth_status(channel.profile)
@@ -443,11 +448,12 @@ class BridgeService(object):
                 provider.platform, provider.name,
             ),
             authorization, recheck=(stage == "auth_recheck"),
-            provider=provider,
+            provider=provider, device_login=device_login,
         )
 
     def _continue_authorization(self, envelope, capabilities, context,
-                                authorization, recheck=False, provider=None):
+                                authorization, recheck=False, provider=None,
+                                device_login=False):
         if provider is None:
             provider = self._provider_for_context(context, capabilities)
         if authorization == "authorized":
@@ -457,7 +463,10 @@ class BridgeService(object):
             )
         if authorization in ("missing", "expired") and not recheck:
             try:
-                result = provider.login()
+                if getattr(provider, "supports_device_login", False):
+                    result = provider.login(device_login=device_login)
+                else:
+                    result = provider.login()
             except Exception:
                 result = ProviderResult(
                     "failed", "provider_login_failed", retryable=True

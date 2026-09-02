@@ -1,7 +1,7 @@
 # Task 3 Scoped Code Review
 
-**Review date:** 2026-09-02  
-**Scope:** `77ab5de..630dd0f`  
+**Review date:** 2026-09-02
+**Scope:** `77ab5de..630dd0f`
 **Decision:** **CHANGES REQUESTED**
 
 ## Re-review 1 — `aefce0f`

@@ -16,6 +16,7 @@ class DwsProvider(Provider):
     platform = "dingtalk"
     name = "dws-cli"
     priority = 10
+    supports_device_login = True
 
     def __init__(self, runner, executable="dws"):
         self._runner = runner
@@ -37,8 +38,12 @@ class DwsProvider(Provider):
     def auth_status(self, profile=None):
         return self._json_command([self.executable, "auth", "status", "--format", "json"])
 
-    def login(self):
-        return self._json_command([self.executable, "auth", "login", "--format", "json"])
+    def login(self, device_login=False):
+        command = [self.executable, "auth", "login"]
+        if device_login:
+            command.append("--device")
+        command.extend(["--format", "json"])
+        return self._json_command(command)
 
     def list_profiles(self):
         result = self._json_command([self.executable, "profile", "list", "--format", "json"])
@@ -90,7 +95,9 @@ class DwsProvider(Provider):
         return ProviderResult("ok", data=payload)
 
     def _confirm_json_format(self, command):
-        leaf_command = tuple(command[:-2])
+        leaf_command = tuple(
+            item for item in command[:-2] if item != "--device"
+        )
         if leaf_command in self._json_help_confirmed:
             return None
 

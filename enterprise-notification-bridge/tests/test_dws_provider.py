@@ -107,6 +107,21 @@ class DwsProviderTests(unittest.TestCase):
         self.assertEqual(runner.calls, [help_command, business_command])
         self.assertEqual(result.status, "ok")
 
+    def test_device_login_uses_documented_device_flag(self):
+        help_command = ["dws", "auth", "login", "--help"]
+        business_command = [
+            "dws", "auth", "login", "--device", "--format", "json"
+        ]
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("Usage: login --device --format json"),
+            tuple(business_command): CommandResult('{"authenticated":true}'),
+        })
+
+        result = DwsProvider(runner).login(device_login=True)
+
+        self.assertEqual(runner.calls, [help_command, business_command])
+        self.assertEqual(result.status, "ok")
+
     def test_missing_json_flag_in_leaf_help_blocks_business_command(self):
         help_command = ["dws", "auth", "status", "--help"]
         runner = FakeRunner("", responses={

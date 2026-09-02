@@ -191,6 +191,21 @@ def _format_value_lists(option_block):
     field_pattern = re.compile(
         r"\b(?:allowed\s+values?|choices?|one\s+of|values?|default)\s*[:=]\s*"
     )
+    cobra_pattern = re.compile(r"\boutput\s+format\s*:\s*")
+
+    for block_line in option_block:
+        for parenthetical in re.finditer(r"\(([^()]*)\)", block_line):
+            declaration = field_pattern.match(parenthetical.group(1).lstrip())
+            if declaration is not None:
+                parenthetical_text = parenthetical.group(1).lstrip()
+                values = _enum_value_tokens(
+                    _field_value_region(
+                        parenthetical_text[declaration.end():]
+                    )
+                )
+                if values is not None:
+                    yield values
+
     lines = [_without_parenthetical_notes(line) for line in option_block]
     for line_index, block_line in enumerate(lines):
         for bracket in re.finditer(r"\[([^\]]*)\]", block_line):
@@ -219,6 +234,13 @@ def _format_value_lists(option_block):
                 value_lines.append(continuation_value)
             values = _enum_value_tokens(
                 _field_value_region(" ".join(value_lines))
+            )
+            if values is not None:
+                yield values
+
+        for field in cobra_pattern.finditer(without_brackets):
+            values = _enum_value_tokens(
+                _field_value_region(without_brackets[field.end():])
             )
             if values is not None:
                 yield values
