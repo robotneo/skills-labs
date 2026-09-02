@@ -4,6 +4,49 @@
 **Scope:** `77ab5de..630dd0f`  
 **Decision:** **CHANGES REQUESTED**
 
+## Re-review 1 — `aefce0f`
+
+**Decision:** **CHANGES REQUESTED**
+
+The original two reproductions are fixed:
+
+- A newer `provider=auto` setup with a declared native capability deletes the
+  older matching auto install action, and replay fails before DWS is touched.
+- Dependency-ready and directly approved successful setup delete matching
+  pending install actions, preventing the previously observed duplicate install.
+- The install action now preserves `requested_provider`; continuation delegates
+  back through the same setup selection boundary rather than forcing `dws-cli`.
+
+One adjacent stale-action path remains.
+
+### Important — Explicit native selection does not invalidate an older auto install action
+
+The native branch returns at `service.py:88-91` without calling
+`_delete_dependency_install_actions()`. Only the following `provider == "auto"`
+native-capability branch invalidates the old auto action. Consequently:
+
+1. An earlier `setup_dependency("dingtalk", "auto")` creates an install action.
+2. A newer explicit `setup_dependency("dingtalk", "native", native_bundle)`
+   returns `native_provider_selected` but leaves that auto action pending.
+3. Continuing the old auto action uses its stored no-native capability snapshot
+   and executes the DWS installer.
+
+The adversarial probe reproduced one `install` call after the explicit native
+selection. This leaves a stale cross-request action able to contradict the
+newer provider decision and the invariant that native selection never causes a
+DWS installation. When explicit native selection succeeds, invalidate pending
+`requested_provider="auto"` install actions for that platform before returning.
+Consider whether an explicit newer provider decision should also invalidate
+other obsolete setup actions according to the intended last-request semantics.
+
+Re-review verification:
+
+- Focused setup/CLI/MCP/DWS/workflow/continuation suite: **77 passed**.
+- Full Bridge suite: **214 passed, 1 skipped**.
+- Original auto-to-auto stale-action probe: fixed by action invalidation.
+- Original direct-install duplicate probe: covered and fixed.
+- New auto-to-explicit-native stale-action probe: **reproduced installation**.
+
 ## Findings
 
 ### Important — A stale install action can bypass current `auto` selection and repeat installation
@@ -66,4 +109,3 @@ without executing the installer again.
   `auto` selection.
 - Adversarial duplicate-action probe: reproduced a second installer invocation
   by continuing a pending action after direct approved installation succeeded.
-
