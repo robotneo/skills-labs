@@ -80,3 +80,33 @@ Python 3.12 runtime.
   DWS as usable.
 - This task intentionally does not add CLI/MCP setup orchestration, provider
   selection, detector integration, authorization, or Profile binding.
+
+## Review remediation: round 1
+
+The scoped Task 2 review identified three fail-closed boundary defects. They
+were reproduced with tests before implementation changes:
+
+- An object with attacker-controlled `__eq__` initially impersonated an
+  official plan and reached download and execution.
+- Non-Boolean truthy values such as `"false"` and `1` initially authorized
+  installation.
+- A cleanup exception initially escaped or could be ignored while a completed
+  installer was reported ready; a mode-`000` private directory was also left
+  behind by the old best-effort cleanup.
+
+The remediation now requires the exact `DwsInstallPlan` type, validates every
+canonical scalar, command, and environment value using exact built-in types,
+and never invokes candidate-supplied equality. Approval is accepted only when
+`approved is True`. Cleanup restores private-directory permissions, makes two
+bounded removal attempts, and overrides any otherwise successful result with
+the stable, non-sensitive `dependency_cleanup_failed` outcome if removal still
+cannot be confirmed.
+
+Post-remediation verification on 2026-09-02:
+
+- Focused installer suite: 20 tests passed.
+- Full Bridge suite: 191 tests passed, with 1 existing conditional skip.
+- `compileall` passed for Bridge source and tests.
+- Both changed Python files parsed with
+  `ast.parse(..., feature_version=(3, 7))`.
+- `git diff --check` passed.

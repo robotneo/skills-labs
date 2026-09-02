@@ -6,6 +6,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,6 +73,27 @@ class SymlinkDownloader(object):
         return DownloadReceipt(None)
 
 
+class DeceptivePlan(object):
+    platform = "linux"
+    source = "official-github"
+    url = "https://evil.invalid/payload.sh"
+    filename = "payload.sh"
+    command = ("sh", "{installer}")
+    environment = (("DWS_NO_FALLBACK", "1"),)
+
+    def __eq__(self, unused_other):
+        return True
+
+
+class RestrictiveRunner(RecordingRunner):
+    def run(self, command, shell=False, cwd=None, env=None):
+        result = super(RestrictiveRunner, self).run(
+            command, shell=shell, cwd=cwd, env=env
+        )
+        os.chmod(cwd, 0)
+        return result
+
+
 class DwsInstallPlanningTests(unittest.TestCase):
     def test_macos_and_linux_use_downloaded_local_shell_script(self):
         for platform_name in ("darwin", "linux"):
@@ -132,6 +154,13 @@ class DwsInstallExecutionTests(unittest.TestCase):
         self.temp_root = tempfile.mkdtemp(prefix="dws-install-test-")
 
     def tearDown(self):
+        for root, directories, unused_files in os.walk(
+                self.temp_root, topdown=True):
+            os.chmod(root, 0o700)
+            for directory in directories:
+                path = os.path.join(root, directory)
+                if not os.path.islink(path):
+                    os.chmod(path, 0o700)
         for root, directories, files in os.walk(self.temp_root, topdown=False):
             for filename in files:
                 os.unlink(os.path.join(root, filename))
@@ -153,6 +182,36 @@ class DwsInstallExecutionTests(unittest.TestCase):
 
         self.assertEqual(result.status, "action_required")
         self.assertEqual(result.reason, "dependency_install_declined")
+        self.assertEqual(downloader.calls, [])
+        self.assertEqual(runner.calls, [])
+        self._assert_temp_root_empty()
+
+    def test_installer_requires_literal_boolean_true_approval(self):
+        for approved in ("false", 1, None, [], {}):
+            downloader = RecordingDownloader()
+            runner = RecordingRunner()
+
+            result = execute_dws_install(
+                plan_dws_install("darwin", False), approved,
+                downloader, runner, self.temp_root,
+            )
+
+            self.assertEqual(result.status, "action_required")
+            self.assertEqual(result.reason, "dependency_install_declined")
+            self.assertEqual(downloader.calls, [])
+            self.assertEqual(runner.calls, [])
+            self._assert_temp_root_empty()
+
+    def test_deceptive_equality_cannot_bypass_official_plan_allowlist(self):
+        downloader = RecordingDownloader()
+        runner = RecordingRunner()
+
+        result = execute_dws_install(
+            DeceptivePlan(), True, downloader, runner, self.temp_root,
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "dependency_install_failed")
         self.assertEqual(downloader.calls, [])
         self.assertEqual(runner.calls, [])
         self._assert_temp_root_empty()
@@ -313,6 +372,35 @@ class DwsInstallExecutionTests(unittest.TestCase):
         self.assertEqual(result.reason, "dependency_install_failed")
         self.assertNotIn("private", repr(result))
         self._assert_temp_root_empty()
+
+    def test_cleanup_restores_permissions_before_removing_installer(self):
+        downloader = RecordingDownloader()
+        runner = RestrictiveRunner()
+
+        result = execute_dws_install(
+            plan_dws_install("linux", False), True,
+            downloader, runner, self.temp_root,
+        )
+
+        self.assertEqual(result.reason, "dependency_ready")
+        self._assert_temp_root_empty()
+
+    def test_cleanup_failure_overrides_success_with_stable_failure(self):
+        downloader = RecordingDownloader()
+        runner = RecordingRunner()
+
+        with mock.patch(
+                "notification_bridge.installer.shutil.rmtree",
+                side_effect=OSError("secret cleanup path")) as cleanup:
+            result = execute_dws_install(
+                plan_dws_install("linux", False), True,
+                downloader, runner, self.temp_root,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "dependency_cleanup_failed")
+        self.assertNotIn("secret", repr(result))
+        self.assertEqual(cleanup.call_count, 2)
 
     def test_private_directory_creation_failure_returns_stable_install_code(self):
         missing_root = os.path.join(self.temp_root, "missing", "root")

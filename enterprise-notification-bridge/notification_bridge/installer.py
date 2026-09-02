@@ -73,8 +73,8 @@ def plan_dws_install(platform_name, china_mirror=False):
 def execute_dws_install(
         plan, approved, downloader, process_runner, temp_root=None):
     """Download and locally execute one fixed plan after explicit approval."""
-    source = getattr(plan, "source", None)
-    if not approved:
+    source = _public_source(plan)
+    if approved is not True:
         return DwsInstallResult(
             "action_required", "dependency_install_declined", source
         )
@@ -138,8 +138,10 @@ def execute_dws_install(
             )
         return DwsInstallResult("ready", "dependency_ready", plan.source)
     finally:
-        if private_dir is not None:
-            shutil.rmtree(private_dir, ignore_errors=True)
+        if private_dir is not None and not _remove_private_dir(private_dir):
+            return DwsInstallResult(
+                "failed", "dependency_cleanup_failed", plan.source
+            )
 
 
 def _platform_key(platform_name):
@@ -158,12 +160,76 @@ def _platform_key(platform_name):
 
 
 def _is_official_plan(plan):
+    if type(plan) is not DwsInstallPlan:
+        return False
     try:
         github_plan = plan_dws_install(plan.platform, False)
         gitee_plan = plan_dws_install(plan.platform, True)
-    except (AttributeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return False
-    return plan == github_plan or plan == gitee_plan
+    return (_plan_fields_match(plan, github_plan) or
+            _plan_fields_match(plan, gitee_plan))
+
+
+def _plan_fields_match(candidate, expected):
+    scalar_fields = ("platform", "source", "url", "filename")
+    for field in scalar_fields:
+        candidate_value = getattr(candidate, field)
+        expected_value = getattr(expected, field)
+        if (type(candidate_value) is not str or
+                not str.__eq__(candidate_value, expected_value)):
+            return False
+    return (_trusted_string_tuple_matches(candidate.command, expected.command)
+            and _trusted_environment_matches(
+                candidate.environment, expected.environment
+            ))
+
+
+def _trusted_string_tuple_matches(candidate, expected):
+    if type(candidate) is not tuple or len(candidate) != len(expected):
+        return False
+    for candidate_value, expected_value in zip(candidate, expected):
+        if (type(candidate_value) is not str or
+                not str.__eq__(candidate_value, expected_value)):
+            return False
+    return True
+
+
+def _trusted_environment_matches(candidate, expected):
+    if type(candidate) is not tuple or len(candidate) != len(expected):
+        return False
+    for candidate_pair, expected_pair in zip(candidate, expected):
+        if (type(candidate_pair) is not tuple or
+                not _trusted_string_tuple_matches(
+                    candidate_pair, expected_pair
+                )):
+            return False
+    return True
+
+
+def _public_source(plan):
+    if type(plan) is DwsInstallPlan and type(plan.source) is str:
+        if plan.source in ("official-github", "official-gitee"):
+            return plan.source
+    return None
+
+
+def _remove_private_dir(private_dir):
+    for unused_attempt in range(2):
+        try:
+            if os.path.isdir(private_dir) and not os.path.islink(private_dir):
+                os.chmod(private_dir, 0o700)
+                for root, directories, unused_files in os.walk(private_dir):
+                    os.chmod(root, 0o700)
+                    for directory in directories:
+                        path = os.path.join(root, directory)
+                        if not os.path.islink(path):
+                            os.chmod(path, 0o700)
+            shutil.rmtree(private_dir)
+            return True
+        except Exception:
+            continue
+    return not os.path.lexists(private_dir)
 
 
 def _download(downloader, url, destination):
