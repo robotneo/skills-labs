@@ -31,7 +31,7 @@ The report always contains exactly five top-level sections in this order: `📶 
 
 JSON and CSV are explicit machine-data exports and retain all eight raw data sections. They never change or extend the Markdown report.
 
-Enterprise notification is an optional `enterprise-notification-bridge` integration. Trigger it only when the adjacent Bridge is installed and an enabled channel is configured; its diagnostics remain outside the fixed report and never change detector stdout or exit status.
+Enterprise notification is an optional `enterprise-notification-bridge` integration. Trigger it only when the adjacent Bridge is installed and an enabled channel is configured; its diagnostics remain outside the fixed report and never change detector stdout or exit status. The detector must never install, upgrade, authorize, or uninstall DWS. If Bridge setup is incomplete, preserve the report and return the Bridge's non-blocking setup action for a separate, explicitly approved workflow.
 
 Run without `--mask` so the standard report shows the Wi-Fi name. Add `--mask` only when the user explicitly requests redaction or says the report will be shared publicly; never hide the SSID by default. Throughput testing is opt-in with `--speedtest`. Default public checks aggregate mainland-China targets: AliDNS `223.5.5.5` and `223.6.6.6`, Tencent Public DNS `119.29.29.29`, Baidu `www.baidu.com`, and Taobao `www.taobao.com`.
 

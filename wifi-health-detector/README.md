@@ -61,7 +61,7 @@ run.bat --view summary
 
 在 Codex、Claude Code、WorkBuddy、OpenClaw 或其他兼容 Agent 中，启动器成功后必须把 stdout 原样作为完整最终答复，不得添加前言、代码围栏、摘要、解释或结论，也不得删除、合并、翻译或重排报告内容。
 
-企业通知是可选的 `enterprise-notification-bridge` 集成。只有在 Bridge 已安装且存在启用的渠道配置时才触发通知；通知诊断不会改变标准 stdout 或退出状态。Bridge 按配置选择平台和 Provider，空收件人不会发送，也不会推断当前用户或默认收件人。
+企业通知是可选的 `enterprise-notification-bridge` 集成。只有在 Bridge 已安装且存在启用的渠道配置时才触发通知；通知诊断不会改变标准 stdout 或退出状态。Bridge 按配置选择平台和 Provider，空收件人不会发送，也不会推断当前用户或默认收件人。检测器本身绝不安装、升级、授权或卸载 DWS；若 Bridge 尚未完成依赖、扫码授权、组织 Profile 或固定人员配置，检测报告仍正常输出，并把非阻断的后续动作交给独立 Bridge 设置流程处理。
 
 在 Codex 或其他 AI 助手中，用户可以说：
 

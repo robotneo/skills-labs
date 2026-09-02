@@ -31,3 +31,14 @@ Baseline: `035fecb`
   installer is executed unsafely and no detector output is affected.
 
 ## Final review
+## Task 5 — Documentation, validation, and gated real-environment test
+
+- Status: implemented; ready for task review.
+- Added CLI-driven behavioral coverage for native, missing DWS, declined
+  install, fake successful install, and expired authorization.
+- Added conditional setup and live-test documentation, including the explicit
+  zero-send boundary.
+- Full local verification: Wi-Fi 52 run/1 skipped/0 failed; Bridge 223 run/1
+  skipped/0 failed; compileall, both Skill validators, Python 3.7 AST, and diff check
+  passed.
+- Real external preflight remains gated and was not executed.

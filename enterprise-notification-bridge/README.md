@@ -41,13 +41,28 @@ order; no report generation enables notifications implicitly:
 ```text
 run.sh status
 run.sh enable --platform dingtalk --provider auto
-run.sh bind --platform dingtalk
+run.sh setup --platform dingtalk --provider auto [--capabilities /path/to/capabilities.json]
 run.sh recipients --platform dingtalk --profile corpId:userId --recipient <configured-selector>
 run.sh deliver --envelope /path/to/validated-envelope.json
 ```
 
 `enable` only persists the enabled channel and has no authentication side
-effect. Binding must finish before recipients can be configured. For MCP
+effect. `setup` is native-first: a declared host-native DingTalk capability is
+used without touching DWS. If native is unavailable, DWS 1.0.15 or newer is
+checked as a conditional fallback. Missing or outdated DWS returns an action
+without executing it. Review that action, then approve explicitly with:
+
+```text
+run.sh setup --platform dingtalk --provider dws-cli --install-dws --yes
+```
+
+The default source is the official DingTalk GitHub release. Add
+`--china-mirror` only to select the official Gitee China mirror. Installation
+downloads to a private temporary location and executes locally; it never pipes
+a download into a shell. Setup requests DingTalk login or QR/device
+authorization only on first use or after authorization expires, then binds a
+Provider-returned Profile. Multiple Profiles require the user's exact choice.
+Fixed recipients are configured afterward and can be decided later. For MCP
 clients, use `bind_notification_profile`,
 `configure_notification_recipient`, and `deliver_enterprise_report`.
 
@@ -105,6 +120,17 @@ documented commands with `--format json` and never uses a direct HTTP/browser
 fallback. DWS recipient resolution and message sending remain host-mediated
 until DWS documents those leaf operations; the Bridge returns a resumable
 action instead of guessing a command.
+
+DWS lifecycle management is independent of detection. Rerun approved setup
+when the Bridge reports `dws_upgrade_required`, or use the official DWS release
+procedure. Uninstall DWS with its official platform procedure, then select a
+native Provider or disable the channel. The detector never installs, upgrades,
+authorizes, or uninstalls DWS.
+
+See [references/DWS-SETUP.md](references/DWS-SETUP.md) for cross-platform and
+cross-Agent setup, upgrade/uninstall guidance, and a gated real-environment
+runbook. The runbook sends nothing unless an exact Profile, fixed recipient,
+and separate first-send approval have all been supplied.
 
 Local verification covers Python 3.7-compatible source and launcher behavior.
 Release CI should also run the suite with Python 3.7 and on Windows with

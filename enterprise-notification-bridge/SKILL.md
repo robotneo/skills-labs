@@ -58,6 +58,7 @@ delegates to `run.ps1`). The launcher forwards the explicit Bridge commands:
 
 ```text
 run.sh status
+run.sh setup --platform dingtalk --provider auto [--capabilities <capabilities.json>]
 run.sh bind --platform <configured-platform>
 run.sh recipients --platform <configured-platform> --profile corpId:userId --recipient <configured-selector>
 run.sh deliver --envelope <validated-envelope.json> [--capabilities <capabilities.json>] [--request-host-summary]
@@ -74,14 +75,26 @@ implicitly. Use this explicit CLI sequence, with a temporary or configured
 ```text
 run.sh status
 run.sh enable --platform dingtalk --provider auto
-run.sh bind --platform dingtalk
+run.sh setup --platform dingtalk --provider auto [--capabilities <capabilities.json>]
 run.sh recipients --platform dingtalk --profile corpId:userId --recipient <configured-selector>
 run.sh deliver --envelope <validated-envelope.json>
 ```
 
 `enable` only persists an enabled channel and performs no login or delivery.
-`bind` then performs the Provider's authorization/Profile handshake. Do not
-configure recipients before an exact Provider/Profile binding has completed.
+`setup` prefers an available host-native Provider. Only when native capability
+is unavailable and DingTalk resolves to `dws-cli` may it inspect the conditional
+DWS dependency. Missing or outdated DWS returns a correlated install action; it
+never installs at detector startup. Show the source and command to the user,
+then rerun with `--install-dws --yes` only after explicit approval. GitHub is
+the default official source; `--china-mirror` explicitly selects the official
+Gitee China mirror. Never substitute an unofficial mirror or pipe a download
+directly into a shell.
+
+After dependency verification, setup performs the authorization/Profile
+handshake. Request a DingTalk login window or device/QR flow only on first use
+or after authorization expires. Fixed recipients are configured afterward and
+may be decided or changed independently. Do not configure recipients before an
+exact Provider/Profile binding has completed.
 MCP clients use `bind_notification_profile`,
 `configure_notification_recipient`, `deliver_enterprise_report`,
 `retry_enterprise_report`, and `continue_enterprise_notification`; the full
@@ -124,6 +137,11 @@ returned (`corpId:userId`); do not construct IDs or call undocumented send
 commands. Recipient resolution and sending remain host-mediated when DWS does
 not expose a documented operation. No direct HTTP/browser fallback is allowed
 for DWS.
+
+Read [references/DWS-SETUP.md](references/DWS-SETUP.md) when DWS setup is
+required. It defines source policy, cross-platform commands, independent
+upgrade/uninstall, Profile and recipient boundaries, and the gated live-test
+procedure that stops before sending without separate approval.
 
 ### Agent handoff
 
