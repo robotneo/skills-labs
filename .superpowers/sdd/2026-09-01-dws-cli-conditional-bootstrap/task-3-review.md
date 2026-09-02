@@ -84,6 +84,33 @@ Successful direct setup must consume/invalidate matching pending install actions
 or the continuation must detect that DWS is already verified and complete
 without executing the installer again.
 
+## Re-review 2 — `5cf6ba6`
+
+**Decision:** **PASS**
+
+The remaining explicit-native stale-action path is fixed at the provider
+selection boundary. A successful `provider=native` selection now invalidates
+same-platform install actions whose `requested_provider` is `auto` before it
+returns `native_provider_selected`.
+
+Scoped and adversarial checks confirmed:
+
+- the invalidated same-platform auto action cannot be continued or replayed;
+- no DWS discovery or installation occurs after the explicit native selection;
+- an auto action for another platform is retained;
+- a same-platform action originating from explicit `provider=dws-cli` is
+  retained, preserving the user's distinct explicit request;
+- an unavailable explicit native request does not claim success or reach DWS;
+- previously fixed ready/direct-install cleanup and continuation correlation
+  tests remain green.
+
+Verification evidence for this re-review:
+
+- Focused setup/CLI/MCP/DWS/workflow/continuation suite: **79 passed**.
+- Full Bridge suite: **216 passed, 1 skipped**.
+- No additional Task 3 correctness, security, privacy, correlation, or
+  idempotency findings were identified in the scoped fix.
+
 ## Checks that passed
 
 - Native provider requests and non-DingTalk platforms return before DWS
