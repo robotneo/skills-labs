@@ -184,7 +184,9 @@ def _format_value_lists(option_block):
     if argument is not None:
         value_set = argument.group(1)
         if value_set.strip() not in ("format", "value", "string"):
-            yield _value_tokens(value_set)
+            values = _enum_value_tokens(value_set)
+            if values is not None:
+                yield values
 
     field_pattern = re.compile(
         r"\b(?:allowed\s+values?|choices?|one\s+of|values?|default)\s*[:=]\s*"
@@ -195,9 +197,11 @@ def _format_value_lists(option_block):
             declaration = field_pattern.match(bracket.group(1).lstrip())
             if declaration is not None:
                 bracket_text = bracket.group(1).lstrip()
-                yield _value_tokens(
+                values = _enum_value_tokens(
                     _field_value_region(bracket_text[declaration.end():])
                 )
+                if values is not None:
+                    yield values
 
         without_brackets = re.sub(r"\[[^\]]*\]", "", block_line)
         for field in field_pattern.finditer(without_brackets):
@@ -208,12 +212,20 @@ def _format_value_lists(option_block):
                 if re.search(r"\[\s*(?:allowed\s+values?|choices?|one\s+of|"
                              r"values?|default)\s*[:=]", continuation):
                     break
-                value_lines.append(re.sub(r"\[[^\]]*\]", "", continuation))
-            yield _value_tokens(_field_value_region(" ".join(value_lines)))
+                continuation_value = re.sub(r"\[[^\]]*\]", "", continuation)
+                if not _ends_with_enum_continuation(value_lines[-1]):
+                    value_lines.append(continuation_value)
+                    break
+                value_lines.append(continuation_value)
+            values = _enum_value_tokens(
+                _field_value_region(" ".join(value_lines))
+            )
+            if values is not None:
+                yield values
 
 
 def _field_value_region(value):
-    boundary = re.search(r"[;.]|\s(?:—|–|-)\s", value)
+    boundary = re.search(r"[;.—–]", value)
     if boundary is not None:
         return value[:boundary.start()]
     return value
@@ -227,7 +239,15 @@ def _without_parenthetical_notes(value):
     return value
 
 
-def _value_tokens(value):
+def _ends_with_enum_continuation(value):
+    return re.search(r"(?:,|\||/)\s*$", value) is not None
+
+
+def _enum_value_tokens(value):
+    item = r'(?:"[0-9a-z][0-9a-z_-]*"|\'[0-9a-z][0-9a-z_-]*\'|[0-9a-z][0-9a-z_-]*)'
+    enum_list = item + r"(?:\s*(?:,|\||/)\s*" + item + r")*"
+    if re.fullmatch(r"\s*" + enum_list + r"\s*", value.lower()) is None:
+        return None
     return set(re.findall(r"[0-9a-z][0-9a-z_-]*", value.lower()))
 
 

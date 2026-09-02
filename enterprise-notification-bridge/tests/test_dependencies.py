@@ -346,6 +346,67 @@ class DwsVerificationTests(unittest.TestCase):
                 status.reason, "dependency_verification_failed", help_text
             )
 
+    def test_leaf_help_stops_values_at_unspaced_em_dash(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "  --format <format> choices: text, yaml—json unavailable"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
+    def test_leaf_help_stops_values_at_unspaced_en_dash(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "  --format <format> choices: text, yaml–json unavailable"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
+    def test_leaf_help_rejects_descriptive_continuation_as_value_list(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "Options:\n"
+            "  --format <format>\n"
+            "      choices: text, yaml\n"
+            "          json is unavailable"
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "unavailable")
+        self.assertEqual(status.reason, "dependency_verification_failed")
+
+    def test_leaf_help_keeps_explicit_enum_list_forms_ready(self):
+        executable = sys.executable
+        help_forms = (
+            "  --format <text|json>",
+            "  --format <format> [choices: text, json]",
+            "Options:\n"
+            "  --format <format>\n"
+            "      choices: text,\n"
+            "          json",
+        )
+
+        for help_text in help_forms:
+            runner = verified_runner(executable)
+            runner.responses[
+                (executable, "auth", "status", "--help")
+            ] = CommandResult(help_text)
+
+            status = verify_dws(executable, runner)
+
+            self.assertEqual(status.status, "ready", help_text)
+            self.assertEqual(status.reason, "dependency_ready", help_text)
+
     def test_leaf_help_accepts_bracketed_choices_declaration(self):
         executable = sys.executable
         runner = verified_runner(executable)

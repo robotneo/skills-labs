@@ -92,6 +92,14 @@ added.
    failed because a declared value list could not continue onto its next
    indented line. Dedicated positive bracket-declaration and next-option
    boundary tests passed, protecting the intended grammar and ownership edge.
+10. Final fail-closed grammar tests:
+    `test_leaf_help_stops_values_at_unspaced_em_dash`,
+    `test_leaf_help_stops_values_at_unspaced_en_dash`, and
+    `test_leaf_help_rejects_descriptive_continuation_as_value_list` all failed
+    before the round 5 fix because unspaced dash explanations and arbitrary
+    deeply indented text were tokenized as declared values. The paired
+    `test_leaf_help_keeps_explicit_enum_list_forms_ready` passed throughout,
+    protecting angle-bracket, bracketed, and explicit comma-continuation forms.
 
 ## GREEN and verification evidence
 
@@ -102,9 +110,9 @@ default `python3` currently fails through a missing Xcode Command Line Tools
 Commands/results:
 
 - `python3 -m unittest enterprise-notification-bridge/tests/test_dependencies.py enterprise-notification-bridge/tests/test_dws_provider.py`
-  — 45 tests passed.
+  — 49 tests passed.
 - `python3 -m unittest discover -s enterprise-notification-bridge/tests`
-  — 167 tests passed, with 1 existing conditional skip.
+  — 171 tests passed, with 1 existing conditional skip.
 - `python3 -m compileall -q enterprise-notification-bridge/notification_bridge enterprise-notification-bridge/tests`
   — compilation passed.
 - Parsed all 30 Python source and test files with
@@ -124,14 +132,18 @@ Commands/results:
   its immediate `<...>` value set, or labeled `allowed values`, `choices`,
   `one of`, `values`, or `default` fields. Square brackets are accepted as a
   value set only when their content begins with one of those declarations;
-  other square-bracket content is an annotation. Field parsing stops at
-  semicolons, sentence boundaries, and explanatory hyphen/en-dash/em-dash
-  separators, so later explanatory JSON mentions cannot satisfy the gate.
+  other square-bracket content is an annotation. Declared values now use a
+  fail-closed complete enum-list grammar: the whole candidate must contain only
+  quoted or unquoted identifiers separated by comma, pipe, or slash. Field
+  parsing stops at semicolons, sentence boundaries, and en/em-dash separators
+  regardless of surrounding whitespace, so later explanatory JSON mentions
+  cannot satisfy the gate.
 - Multiline help is parsed as a small option block. Continuation lines must be
   more deeply indented than the `--format` start line; collection stops at a
-  blank line, the next option, or a same/lower-indented section. Parenthetical
-  notes are removed before labeled fields are tokenized by punctuation,
-  whitespace, and quoting, so only an independent `json` value is accepted.
+  blank line, the next option, or a same/lower-indented section. A plain value
+  continuation is accepted only when the preceding fragment ends with comma,
+  pipe, or slash. Parenthetical notes are removed before grammar validation;
+  descriptive sentences or extra words invalidate the candidate declaration.
 - Windows candidates use `ntpath` and are tested in the documented order:
   current `PATH`, user-local paths, roaming npm, then the declared npm prefix.
 - Both metadata files have direct tests proving Python stays unconditional and
