@@ -13,6 +13,13 @@
 - Documented the official DingTalk GitHub source and the explicitly selected
   official Gitee China mirror, including the approval gate and prohibition on
   download-to-shell pipelines and unofficial mirrors.
+- Corrected the installation trust boundary: the default is the official
+  repository installer script at the fixed allowlisted `main/scripts` URL, not
+  a versioned release artifact. The documentation now states that the installer
+  enforces fixed official source, plan, and downloaded-file boundaries, and
+  verifies SHA-256 only when the download receipt supplies `expected_sha256`.
+- Corrected the Windows PowerShell launcher example to invoke the local script
+  as `./run.ps1`.
 - Documented first-use/expired-only login, exact Profile selection, fixed
   recipient configuration after binding, and non-blocking detector behavior.
 - Documented independent DWS upgrade/uninstall, cross-Agent use by Codex,
@@ -49,6 +56,9 @@
 - The host `/usr/bin/python3` remains unusable because its Apple Command Line
   Tools proxy references a missing `xcrun`; verification used the installed
   offline Python 3.12 runtime at `/Users/hua/.local/bin/python3.12`.
+
+The same full verification set was rerun after the Task 5 documentation
+accuracy corrections; the counts and results above remain unchanged.
 
 ## Gated real-environment preflight not executed
 

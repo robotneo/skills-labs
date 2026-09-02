@@ -30,18 +30,22 @@ setup command with both `--install-dws` and `--yes`:
 ./run.sh setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --yes
 
 # Windows PowerShell launcher, official GitHub source
-run.ps1 setup --platform dingtalk --provider dws-cli --install-dws --yes
+./run.ps1 setup --platform dingtalk --provider dws-cli --install-dws --yes
 
 # Windows batch launcher
 run.bat setup --platform dingtalk --provider dws-cli --install-dws --yes
 ```
 
-The installer accepts only the official DingTalk GitHub release source or the
-explicit official Gitee China mirror. It downloads into a private temporary
-directory, validates the planned artifact, executes it locally without a shell
-pipeline, removes temporary material on success or failure, and verifies the
-installed binary again. Never replace these sources with a package-manager
-guess, an unofficial mirror, `curl | sh`, or `irm | iex`.
+The installer accepts only the official DingTalk GitHub repository installer
+script at the fixed allowlisted `main/scripts` URL or the matching explicit
+official Gitee China mirror plan. It validates the fixed official source, plan,
+and downloaded-file boundaries, downloads into a private temporary directory,
+executes locally without a shell pipeline, removes temporary material on
+success or failure, and verifies the installed binary again. SHA-256 is checked
+before execution only when the download receipt supplies `expected_sha256`; the
+default URL download does not provide or claim an unconditional artifact
+checksum. Never replace these sources with a package-manager guess, an
+unofficial mirror, `curl | sh`, or `irm | iex`.
 
 ## Authorization, organization, and recipients
 
@@ -70,7 +74,7 @@ separate correlated confirmation.
 
 The Bridge reports `dws_upgrade_required` when the discovered version is below
 1.0.15. Repeat the approved setup flow to upgrade from an official source, or
-follow the official DWS release procedure outside the detector. To uninstall,
+follow the official DWS upgrade procedure outside the detector. To uninstall,
 use the official DWS uninstall procedure for the installed platform, then switch
 the channel to a native Provider or disable it. These lifecycle operations do
 not remove or modify `wifi-health-detector`.

@@ -56,10 +56,14 @@ without executing it. Review that action, then approve explicitly with:
 run.sh setup --platform dingtalk --provider dws-cli --install-dws --yes
 ```
 
-The default source is the official DingTalk GitHub release. Add
-`--china-mirror` only to select the official Gitee China mirror. Installation
-downloads to a private temporary location and executes locally; it never pipes
-a download into a shell. Setup requests DingTalk login or QR/device
+The default source is the official DingTalk GitHub repository installer script
+at the fixed allowlisted `main/scripts` URL. Add `--china-mirror` only to select
+the matching official Gitee China mirror plan. Installation accepts only those
+fixed official source, plan, and downloaded-file boundaries, downloads to a
+private temporary location, and executes locally; it never pipes a download
+into a shell. SHA-256 is verified before execution only when the downloader's
+receipt supplies `expected_sha256`; the default URL download does not claim an
+unconditional artifact checksum. Setup requests DingTalk login or QR/device
 authorization only on first use or after authorization expires, then binds a
 Provider-returned Profile. Multiple Profiles require the user's exact choice.
 Fixed recipients are configured afterward and can be decided later. For MCP
@@ -122,7 +126,7 @@ until DWS documents those leaf operations; the Bridge returns a resumable
 action instead of guessing a command.
 
 DWS lifecycle management is independent of detection. Rerun approved setup
-when the Bridge reports `dws_upgrade_required`, or use the official DWS release
+when the Bridge reports `dws_upgrade_required`, or use the official DWS upgrade
 procedure. Uninstall DWS with its official platform procedure, then select a
 native Provider or disable the channel. The detector never installs, upgrades,
 authorizes, or uninstalls DWS.
