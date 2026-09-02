@@ -132,18 +132,40 @@ class LauncherTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("pwsh") or shutil.which("powershell"),
                          "PowerShell is not available on this host")
-    def test_powershell_launcher_forwards_help_when_available(self):
+    def test_powershell_launcher_forwards_all_arguments_when_available(self):
         executable = shutil.which("pwsh") or shutil.which("powershell")
+        capture_path = os.path.join(self.directory.name, "powershell-argv.json")
+        python_path = os.path.join(self.directory.name, "capture python.ps1")
+        with open(python_path, "w", encoding="utf-8") as handle:
+            handle.write("if ($args[0] -eq '-c') { exit 0 }\n")
+            handle.write("$json = ConvertTo-Json -Compress -InputObject @($args)\n")
+            handle.write("[IO.File]::WriteAllText($env:CAPTURE_PATH, $json)\n")
+            handle.write("exit 0\n")
+        arguments = [
+            "setup", "--platform", "dingtalk", "--provider", "dws-cli",
+            "--capabilities", "value with spaces",
+            "--profile", 'corp:"quoted user"',
+            "--recipient", "",
+            "--install-dws", "--china-mirror", "--device-login", "--yes",
+            "literal;$()&|<>`'\"*?[]{}",
+        ]
         result = subprocess.run(
-            [executable, "-NoProfile", "-File", os.path.join(ROOT, "run.ps1"), "--help"],
-            env=dict(os.environ, ENTERPRISE_NOTIFICATION_BRIDGE_PYTHON=sys.executable),
+            [executable, "-NoProfile", "-File", os.path.join(ROOT, "run.ps1")] + arguments,
+            env=dict(
+                os.environ,
+                ENTERPRISE_NOTIFICATION_BRIDGE_PYTHON=python_path,
+                CAPTURE_PATH=capture_path,
+            ),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["status"], "ok")
+        with open(capture_path, encoding="utf-8") as handle:
+            forwarded = json.load(handle)
+        self.assertTrue(forwarded[0].endswith("main.py"))
+        self.assertEqual(forwarded[1:], arguments)
 
     def _run(self, launcher, command):
         environment = os.environ.copy()

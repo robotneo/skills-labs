@@ -153,6 +153,37 @@ class NotificationIntegrationTests(unittest.TestCase):
                 )
                 self.assertNotIn(secret, stderr)
 
+    def test_untrusted_bridge_statuses_map_to_stable_failure_without_leaking(self):
+        report = self._sample_report()
+        expected = render_text(report, language="en")
+        statuses = (
+            "unknown_status",
+            " token=secret-profile ",
+            "dependency_install_required\norg=secret",
+            "delivered\t",
+            "delivered\x1b[31m",
+            "dependency install required",
+            "UPPER_CASE_STATUS",
+            "status;token=secret",
+            7,
+            None,
+        )
+
+        for status in statuses:
+            with self.subTest(status=status):
+                code, stdout, stderr = self._run_detector(
+                    report,
+                    bridge_command=self._bridge_command(
+                        {"status": status, "reason": "org=secret token=private"}
+                    ),
+                )
+
+                self.assertEqual(code, 0)
+                self.assertEqual(stdout, expected)
+                self.assertEqual(stderr, "Enterprise notification: bridge_failed\n")
+                self.assertNotIn(str(status), stderr)
+                self.assertNotIn("secret", stderr)
+
     def test_invalid_markdown_never_invokes_bridge(self):
         record_path = os.path.join(self.directory.name, "called.json")
         invalid_markdown = self.markdown.replace("## ⭐ 核心参数", "## 核心参数")

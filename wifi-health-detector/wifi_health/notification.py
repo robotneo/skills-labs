@@ -21,6 +21,61 @@ RFC3339_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
 
+# Only codes defined by the Bridge delivery protocol may cross into detector
+# diagnostics. Treat the subprocess response as untrusted even when it is JSON.
+BRIDGE_DELIVERY_STATUSES = frozenset((
+    "action_required",
+    "authorization_recheck_failed",
+    "authorization_required",
+    "configured_provider_unavailable",
+    "delivered",
+    "delivery_reconciliation_required",
+    "delivery_status_failed",
+    "dependency_cleanup_failed",
+    "dependency_download_failed",
+    "dependency_install_declined",
+    "dependency_install_failed",
+    "dependency_install_required",
+    "dependency_integrity_failed",
+    "dependency_verification_failed",
+    "dependency_version_unsupported",
+    "duplicate_resolved_recipient",
+    "dws_admin_authorization_required",
+    "dws_authorization_required",
+    "dws_command_failed",
+    "dws_executable_invalid",
+    "dws_invalid_json",
+    "dws_json_format_unconfirmed",
+    "dws_json_format_unsupported",
+    "dws_profiles_invalid",
+    "dws_unavailable",
+    "dws_upgrade_required",
+    "first_delivery_confirmation_required",
+    "host_send_required",
+    "login_required",
+    "native_operation_required",
+    "native_operation_result_invalid",
+    "native_operation_unavailable",
+    "notification_disabled",
+    "notification_failed",
+    "platform_not_configured",
+    "profile_not_validated",
+    "profile_selection_required",
+    "provider_auth_status_failed",
+    "provider_login_failed",
+    "provider_profile_list_failed",
+    "provider_recipient_resolution_failed",
+    "provider_send_failed",
+    "provider_unavailable",
+    "provider_unsupported",
+    "recipient_not_configured",
+    "recipient_not_resolved",
+    "recipient_selection_required",
+    "reconciled_not_delivered",
+    "skipped",
+    "stale_delivery_result",
+))
+
 
 class NotificationResult(object):
     def __init__(self, status, reason=""):
@@ -174,7 +229,7 @@ def _result_from_process(completed):
         return NotificationResult(
             "bridge_failed", payload.get("reason", "bridge_failed")
         )
-    if not isinstance(payload.get("status"), str):
+    if payload.get("status") not in BRIDGE_DELIVERY_STATUSES:
         return NotificationResult("bridge_failed", "invalid_bridge_response")
     reason = payload.get("reason", "")
     if not isinstance(reason, str):
