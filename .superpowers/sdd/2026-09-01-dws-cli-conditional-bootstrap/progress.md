@@ -56,3 +56,6 @@ Baseline: `035fecb`
   `dws auth login --device` path only when DWS login is required.
 - Removed whole-branch Markdown trailing whitespace and the extra final-review
   EOF blank line. No real external side effect was executed.
+- Post-commit verification passed: Wi-Fi 52 run/1 skipped, Bridge 232 run/1
+  skipped, compileall, both Skill validators, Python 3.7 AST (49 files), and
+  `git diff --check 035fecb..HEAD`.
