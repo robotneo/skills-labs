@@ -1,8 +1,12 @@
 # Task 5 Review: Documentation, Validation, and Gated Live Test
 
-**Review date:** 2026-09-02  
-**Reviewed commit:** `4263a7f9777eef90781144a4652670812492311f`  
-**Verdict:** **CHANGES REQUESTED**
+**Review date:** 2026-09-02
+
+**Initial reviewed commit:** `4263a7f9777eef90781144a4652670812492311f`
+
+**Re-reviewed fix commit:** `2cce4fa26b4bbdb1330de5243409d36374c83837`
+
+**Final verdict:** **PASS**
 
 ## Findings
 
@@ -64,6 +68,37 @@ commands, so the documented local launcher form should be `./run.ps1 ...` (or
 - `git diff --check` passed before this review artifact was added.
 - The pre-review worktree was clean.
 
-Automated verification is green, but Task 5 is not approved until the two
-documentation accuracy issues are resolved and the same verification set is
-rerun.
+## Scoped re-review round 1
+
+The fix commit resolves every requested documentation issue:
+
+- README, Skill instructions, and DWS setup reference now describe the actual
+  official repository installer scripts at the fixed allowlisted
+  `main/scripts` URLs instead of calling them release artifacts.
+- The integrity boundary now matches `installer.py`: fixed source, plan, and
+  downloaded-file checks are unconditional; SHA-256 is checked only when a
+  download receipt supplies `expected_sha256`; the default URL downloader does
+  not claim an unconditional checksum.
+- The Windows PowerShell local-launcher example now uses `./run.ps1`.
+- Adjacent lifecycle language now says official upgrade procedure rather than
+  release procedure, and the Task 5 report records the corrected trust boundary.
+
+The five behavior tests remain aligned with the documented setup flow and
+continue to exercise the real CLI parser, `BridgeCommands`, and setup service.
+The successful path ends at Profile binding. Recipient resolution and
+`send_report` are not entered, while the runbook still requires a separate
+approval naming the exact Profile and fixed recipient before any real send.
+
+### Fresh re-review verification
+
+- Wi-Fi detector: 52 tests run, 1 platform skip, 0 failures.
+- Enterprise Notification Bridge: 223 tests run, 1 platform skip, 0 failures.
+- `compileall` passed for both projects.
+- Both Skill `quick_validate.py` checks passed.
+- Python 3.7 grammar parse passed for all 49 Python files.
+- `git diff --check` passed before this review update.
+- The pre-review worktree was clean.
+- No real DWS command, installation, login/QR flow, organization query,
+  recipient lookup, or message send was executed.
+
+Task 5 is approved.
