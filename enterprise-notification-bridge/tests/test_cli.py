@@ -58,6 +58,11 @@ class FakeService(object):
         self.bind_calls = []
         self.retry_calls = []
         self.continue_calls = []
+        self.setup_calls = []
+
+    def setup_dependency(self, *args):
+        self.setup_calls.append(args)
+        return ProviderResult("action_required", "dependency_install_required")
 
     def deliver(self, envelope, capabilities=None, request_host_summary=False):
         self.deliver_calls.append(
@@ -146,6 +151,27 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(self.service.deliver_calls[0][0].report_id,
                          envelope_payload()["report_id"])
+
+    def test_setup_prints_one_json_and_delegates_all_flags(self):
+        code, stdout, stderr = self.run_cli([
+            "setup", "--platform", "dingtalk", "--provider", "dws-cli",
+            "--capabilities", self.capabilities_path,
+            "--install-dws", "--china-mirror", "--device-login", "--yes",
+        ])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(stdout.strip().splitlines()), 1)
+        self.assertEqual(json.loads(stdout)["reason"], "dependency_install_required")
+        self.assertEqual(stderr, "")
+        self.assertEqual(self.service.setup_calls[0][0:2], ("dingtalk", "dws-cli"))
+        self.assertEqual(self.service.setup_calls[0][3:], (True, True, True, True))
+
+    def test_setup_rejects_install_without_yes(self):
+        code, stdout, stderr = self.run_cli([
+            "setup", "--platform", "dingtalk", "--install-dws",
+        ])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(stdout)["reason"], "dependency_install_declined")
+        self.assertEqual(self.service.setup_calls, [])
 
     def test_notification_failure_keeps_cli_success(self):
         self.service.deliver_result = DeliveryBatchResult([

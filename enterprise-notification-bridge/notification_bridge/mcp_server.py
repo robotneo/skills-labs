@@ -10,6 +10,7 @@ from .cli import CommandError, _json_value, build_commands
 PROTOCOL_VERSION = "2024-11-05"
 EXPECTED_TOOLS = (
     "notification_status",
+    "setup_notification_dependency",
     "bind_notification_profile",
     "configure_notification_recipient",
     "deliver_enterprise_report",
@@ -65,6 +66,7 @@ OPERATION_RESULT_SCHEMA = {
                 "auth_status", "login", "list_profiles", "select_profile",
                 "resolve_recipient", "confirm_delivery", "send_report",
                 "delivery_status", "summarize_report",
+                "install_dependency",
             ],
         },
         "status": {
@@ -87,6 +89,24 @@ TOOLS = (
         "name": "notification_status",
         "description": "Show notification Bridge configuration status.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "setup_notification_dependency",
+        "description": "Prepare an explicitly selected notification dependency.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "platform": {"type": "string", "enum": ["dingtalk", "feishu", "wecom"]},
+                "provider": {"type": "string", "enum": ["auto", "native", "dws-cli"]},
+                "capabilities": CAPABILITY_BUNDLE_SCHEMA,
+                "installDws": {"type": "boolean"},
+                "chinaMirror": {"type": "boolean"},
+                "deviceLogin": {"type": "boolean"},
+                "approved": {"type": "boolean"},
+            },
+            "required": ["platform"],
+            "additionalProperties": False,
+        },
     },
     {
         "name": "bind_notification_profile",
@@ -265,6 +285,13 @@ def _call_tool(params, commands):
     try:
         if name == "notification_status":
             result = commands.status()
+        elif name == "setup_notification_dependency":
+            result = commands.setup(
+                arguments.get("platform"), arguments.get("provider", "auto"),
+                arguments.get("capabilities"), arguments.get("installDws", False),
+                arguments.get("chinaMirror", False),
+                arguments.get("deviceLogin", False), arguments.get("approved", False),
+            )
         elif name == "bind_notification_profile":
             result = commands.bind(
                 arguments.get("platform"), arguments.get("capabilities")

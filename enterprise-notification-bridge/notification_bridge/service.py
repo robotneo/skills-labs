@@ -1,6 +1,9 @@
 from __future__ import absolute_import
 
 import hashlib
+import os
+import platform as runtime_platform
+import shutil
 from collections.abc import Mapping
 
 from .config import BridgeConfig, ConfigError
@@ -13,6 +16,8 @@ from .continuation import (
     validate_operation_result,
 )
 from .contract import validate_envelope
+from .dependencies import MINIMUM_DWS_VERSION, discover_dws, verify_dws
+from .installer import plan_dws_install
 from .ledger import Claim, DeliveryKey
 from .models import Envelope
 from .providers.base import ProviderResult
@@ -48,12 +53,147 @@ class DeliveryBatchResult(object):
 
 class BridgeService(object):
     def __init__(self, config, providers, ledger, state_store=None,
-                 persist_config=None):
+                 persist_config=None, dependency_discoverer=None,
+                 dependency_verifier=None, dependency_installer=None,
+                 dependency_plan=None, environment=None, platform_name=None,
+                 which=None):
         self.config = config
         self.providers = list(providers)
         self.ledger = ledger
         self.state_store = state_store or MemoryStateStore()
         self._persist_config_callback = persist_config or (lambda: None)
+        self._dependency_discoverer = dependency_discoverer or discover_dws
+        self._dependency_verifier = dependency_verifier or verify_dws
+        self._dependency_installer = dependency_installer
+        self._dependency_plan = dependency_plan or plan_dws_install
+        self._dependency_environment = dict(
+            os.environ if environment is None else environment
+        )
+        self._dependency_platform = platform_name or runtime_platform.system()
+        self._dependency_which = which or shutil.which
+
+    def setup_dependency(self, platform, provider="auto", capabilities=None,
+                         install_dws=False, china_mirror=False,
+                         device_login=False, approved=False):
+        """Prepare one notification dependency without selecting a recipient."""
+        del device_login  # Reserved for the existing login continuation surface.
+        capability_list = _capability_list(capabilities)
+        if platform != "dingtalk":
+            return ProviderResult("ready", "dws_dependency_not_applicable")
+        if provider not in ("auto", "native", "dws-cli"):
+            return ProviderResult("failed", "provider_unsupported")
+        native_available = any(
+            item["platform"] == platform for item in capability_list
+        )
+        if provider == "native":
+            if not native_available:
+                return ProviderResult("unavailable", "configured_provider_unavailable")
+            return ProviderResult("ready", "native_provider_selected")
+        if provider == "auto" and native_available:
+            return ProviderResult("ready", "native_provider_selected")
+
+        discovered = self._dependency_discoverer(
+            self._dependency_environment, self._dependency_platform,
+            self._dependency_which,
+        )
+        if discovered.status == "discovered":
+            verified = self._dependency_verifier(
+                discovered.executable, _runner_for_dependency(self.providers)
+            )
+        else:
+            verified = discovered
+
+        if verified.reason in ("dependency_install_required", "dws_upgrade_required"):
+            if not install_dws or approved is not True:
+                if install_dws:
+                    return ProviderResult(
+                        "action_required", "dependency_install_declined"
+                    )
+                return self._dependency_install_action(
+                    platform, china_mirror, capability_list
+                )
+            if self._dependency_installer is None:
+                return ProviderResult("failed", "dependency_install_failed")
+            plan = self._dependency_plan(
+                self._dependency_platform, china_mirror
+            )
+            installed = self._dependency_installer(plan, True)
+            if installed.status != "ready":
+                return ProviderResult(installed.status, installed.reason)
+            discovered = self._dependency_discoverer(
+                self._dependency_environment, self._dependency_platform,
+                self._dependency_which,
+            )
+            if discovered.status != "discovered":
+                return ProviderResult(discovered.status, discovered.reason)
+            verified = self._dependency_verifier(
+                discovered.executable, _runner_for_dependency(self.providers)
+            )
+
+        if verified.status != "ready":
+            return ProviderResult(verified.status, verified.reason)
+
+        self._inject_verified_dws(verified.executable)
+        index, channel = self._ensure_setup_channel(platform, provider)
+        selected = self._select(channel, capability_list)
+        if getattr(selected, "availability", "available") == "unavailable":
+            return ProviderResult("unavailable", selected.reason)
+        return self._begin_authorization(
+            None, capability_list, index, selected, "bind"
+        ).results[0]
+
+    def _dependency_install_action(self, platform, china_mirror, capabilities):
+        data = {
+            "minimum_version": MINIMUM_DWS_VERSION,
+            "china_mirror": bool(china_mirror),
+        }
+        pending_actions = getattr(self.state_store, "pending_actions", None)
+        if pending_actions is not None:
+            for action in pending_actions():
+                if (action.get("platform") == platform
+                        and action.get("provider") == "dws-cli"
+                        and action.get("operation") == "install_dependency"
+                        and action.get("data") == data):
+                    return ProviderResult(
+                        "action_required", "dependency_install_required",
+                        data={"action": action},
+                    )
+        report_id = hashlib.sha256(
+            ("dependency:{0}:dws-cli".format(platform)).encode("utf-8")
+        ).hexdigest()
+        action = create_action(
+            report_id, platform, "dws-cli", "install_dependency", data
+        )
+        self.state_store.save_pending(
+            action, None, capabilities,
+            _context("setup", "install_dependency", 0, 0, [], None,
+                     False, platform, "dws-cli"),
+        )
+        return ProviderResult(
+            "action_required", "dependency_install_required",
+            data={"action": action},
+        )
+
+    def _inject_verified_dws(self, executable):
+        for provider in self.providers:
+            if provider.platform == "dingtalk" and provider.name == "dws-cli":
+                if hasattr(provider, "executable"):
+                    provider.executable = executable
+
+    def _ensure_setup_channel(self, platform, provider):
+        for index, channel in enumerate(self.config.channels):
+            if channel.platform == platform:
+                channel.provider = "dws-cli" if provider == "auto" else provider
+                self._persist_config_callback()
+                return index, channel
+        from .config import ChannelConfig
+        channel = ChannelConfig(
+            platform, provider="dws-cli" if provider == "auto" else provider
+        )
+        self.config.channels.append(channel)
+        self.config.enabled = True
+        self._persist_config_callback()
+        return len(self.config.channels) - 1, channel
 
     def deliver(self, envelope, capabilities=None, request_host_summary=False):
         self._validate_runtime_config()
@@ -154,6 +294,14 @@ class BridgeService(object):
                 self._provider_for_context(context, capabilities),
                 context["kind"], result["data"]["profiles"],
             )
+        elif stage == "install_dependency":
+            setup_result = self.setup_dependency(
+                action["platform"], "dws-cli", {
+                    "schema_version": "1", "capabilities": capabilities,
+                }, install_dws=True,
+                china_mirror=action["data"]["china_mirror"], approved=True,
+            )
+            batch = DeliveryBatchResult([setup_result])
         elif stage == "select_profile":
             selected = result["data"]["profile"]
             choices = [item["profile"] for item in action["data"]["profiles"]]
@@ -709,6 +857,15 @@ def _envelope_from_dict(value):
 
 def _capability_list(value):
     return normalize_capabilities(value)
+
+
+def _runner_for_dependency(providers):
+    for provider in providers:
+        if provider.platform == "dingtalk" and provider.name == "dws-cli":
+            runner = getattr(provider, "_runner", None)
+            if runner is not None:
+                return runner
+    return lambda unused: (1, "", "")
 
 
 def _authorization_state(result):

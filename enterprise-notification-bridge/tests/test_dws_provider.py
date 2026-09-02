@@ -35,6 +35,20 @@ class FakeRunner(object):
 
 
 class DwsProviderTests(unittest.TestCase):
+    def test_verified_executable_is_used_and_leaf_help_gate_is_preserved(self):
+        executable = "/verified/bin/dws"
+        help_command = [executable, "auth", "status", "--help"]
+        business_command = [
+            executable, "auth", "status", "--format", "json"
+        ]
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("--format json"),
+            tuple(business_command): CommandResult('{"authenticated":true}'),
+        })
+        result = DwsProvider(runner, executable=executable).auth_status()
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(runner.calls, [help_command, business_command])
+
     def test_dws_profile_list_uses_json_and_stable_profile(self):
         help_command = ["dws", "profile", "list", "--help"]
         business_command = ["dws", "profile", "list", "--format", "json"]

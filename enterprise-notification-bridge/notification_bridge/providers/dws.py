@@ -17,12 +17,13 @@ class DwsProvider(Provider):
     name = "dws-cli"
     priority = 10
 
-    def __init__(self, runner):
+    def __init__(self, runner, executable="dws"):
         self._runner = runner
+        self.executable = executable
         self._json_help_confirmed = set()
 
     def capabilities(self):
-        result = self._run(["dws", "--help"])
+        result = self._run([self.executable, "--help"])
         if result[0] is not None or result[1] != 0:
             return {"available": False}
         return {
@@ -34,13 +35,13 @@ class DwsProvider(Provider):
         }
 
     def auth_status(self, profile=None):
-        return self._json_command(["dws", "auth", "status", "--format", "json"])
+        return self._json_command([self.executable, "auth", "status", "--format", "json"])
 
     def login(self):
-        return self._json_command(["dws", "auth", "login", "--format", "json"])
+        return self._json_command([self.executable, "auth", "login", "--format", "json"])
 
     def list_profiles(self):
-        result = self._json_command(["dws", "profile", "list", "--format", "json"])
+        result = self._json_command([self.executable, "profile", "list", "--format", "json"])
         if result.status != "ok":
             return result
         if not isinstance(result.data, dict) or not isinstance(result.data.get("profiles"), list):

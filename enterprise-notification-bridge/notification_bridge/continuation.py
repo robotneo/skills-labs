@@ -22,6 +22,7 @@ NATIVE_OPERATIONS = frozenset((
 ))
 HOST_OPERATIONS = frozenset((
     "summarize_report", "select_profile", "confirm_delivery",
+    "install_dependency",
 ))
 ALL_OPERATIONS = NATIVE_OPERATIONS | HOST_OPERATIONS
 ACTION_KEYS = frozenset((
@@ -354,6 +355,11 @@ def _validate_action_data(operation, data):
     elif operation in ("login", "list_profiles"):
         if data:
             raise ContinuationError("operation action data must be empty")
+    elif operation == "install_dependency":
+        if (set(data) != set(("minimum_version", "china_mirror"))
+                or not _non_empty_string(data["minimum_version"])
+                or not isinstance(data["china_mirror"], bool)):
+            raise ContinuationError("dependency install action data is invalid")
     elif operation == "select_profile":
         if set(data) != set(("profiles",)):
             raise ContinuationError("select_profile action data is invalid")
@@ -424,6 +430,9 @@ def _validate_success_data(operation, data):
     elif operation == "summarize_report":
         if set(data) != set(("text",)) or not _non_empty_string(data["text"]):
             raise ContinuationError("summarize_report result data is invalid")
+    elif operation == "install_dependency":
+        if data:
+            raise ContinuationError("dependency install result data must be empty")
 
 
 def _validate_profiles(profiles):
@@ -445,7 +454,7 @@ def _validate_profiles(profiles):
 def _validate_context(value):
     if not isinstance(value, dict) or set(value) != CONTEXT_KEYS:
         raise ContinuationError("pending context fields are invalid")
-    if value["kind"] not in ("deliver", "bind") or value["stage"] not in CONTEXT_STAGES:
+    if value["kind"] not in ("deliver", "bind", "setup") or value["stage"] not in CONTEXT_STAGES:
         raise ContinuationError("pending context stage is invalid")
     if (value["platform"] not in PLATFORMS | frozenset(("host",))
             or not _non_empty_string(value["provider"])):

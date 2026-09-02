@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 
 from .config import ChannelConfig, load_config, save_config
 from .continuation import (
@@ -13,6 +14,7 @@ from .continuation import (
 )
 from .contract import ContractError, validate_envelope
 from .ledger import DeliveryLedger
+from .installer import execute_dws_install
 from .models import Envelope
 from .providers.dws import DwsProvider
 from .service import BridgeService, DeliveryBatchResult
@@ -20,7 +22,7 @@ from .service import BridgeService, DeliveryBatchResult
 
 COMMAND_NAMES = (
     "status", "enable", "bind", "recipients", "deliver", "retry",
-    "continue",
+    "continue", "setup",
 )
 REPORT_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
@@ -48,6 +50,20 @@ class SubprocessRunner(object):
             stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
             check=False, shell=False, timeout=30,
         )
+
+
+class InstallerProcessRunner(object):
+    def run(self, command, shell=False, cwd=None, env=None):
+        return subprocess.run(
+            list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, check=False, shell=shell, cwd=cwd, env=env,
+        )
+
+
+class UrlDownloader(object):
+    def download(self, url, destination):
+        urllib.request.urlretrieve(url, destination)
+        return None
 
 
 class BridgeCommands(object):
@@ -99,6 +115,24 @@ class BridgeCommands(object):
         profile = result.data.get("profile")
         if result.status == "ok" and isinstance(profile, str) and profile:
             self._store_profile(platform, profile)
+        return result_to_dict(result)
+
+    def setup(self, platform, provider="auto", capabilities=None,
+              install_dws=False, china_mirror=False, device_login=False,
+              approved=False):
+        if install_dws and not approved:
+            raise CommandError(
+                "dependency_install_declined",
+                "--install-dws requires explicit --yes approval",
+            )
+        capability_bundle = load_capabilities(capabilities)
+        try:
+            result = self.service.setup_dependency(
+                platform, provider, capability_bundle, install_dws,
+                china_mirror, device_login, approved,
+            )
+        except ContinuationError as error:
+            raise CommandError("malformed_capabilities", str(error))
         return result_to_dict(result)
 
     def configure_recipients(self, platform, recipients, profile=None):
@@ -274,6 +308,9 @@ def build_commands(config_path=None, ledger_path=None, state_path=None,
         config, provider_list, DeliveryLedger(ledger_path),
         state_store=PendingStateStore(state_path),
         persist_config=lambda: save_config(config, config_path),
+        dependency_installer=lambda plan, approved: execute_dws_install(
+            plan, approved, UrlDownloader(), InstallerProcessRunner()
+        ),
     )
     return BridgeCommands(service, config, config_path)
 
@@ -326,6 +363,12 @@ def _execute(arguments, commands):
         return commands.retry(arguments.report_id, arguments.capabilities)
     if arguments.command == "continue":
         return commands.continue_operation(arguments.operation_result)
+    if arguments.command == "setup":
+        return commands.setup(
+            arguments.platform, arguments.provider, arguments.capabilities,
+            arguments.install_dws, arguments.china_mirror,
+            arguments.device_login, arguments.yes,
+        )
     raise CommandError("invalid_arguments", "unsupported command")
 
 
@@ -336,6 +379,17 @@ def _parser():
     parser.add_argument("--state")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("status")
+
+    setup = subparsers.add_parser("setup")
+    setup.add_argument("--platform", required=True,
+                       choices=("dingtalk", "feishu", "wecom"))
+    setup.add_argument("--provider", default="auto",
+                       choices=("auto", "native", "dws-cli"))
+    setup.add_argument("--capabilities")
+    setup.add_argument("--install-dws", action="store_true")
+    setup.add_argument("--china-mirror", action="store_true")
+    setup.add_argument("--device-login", action="store_true")
+    setup.add_argument("--yes", action="store_true")
 
     enable = subparsers.add_parser("enable")
     enable.add_argument("--platform", required=True)

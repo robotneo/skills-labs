@@ -63,6 +63,11 @@ class FakeService(object):
         self.bind_calls = []
         self.retry_calls = []
         self.continue_calls = []
+        self.setup_calls = []
+
+    def setup_dependency(self, *args):
+        self.setup_calls.append(args)
+        return ProviderResult("action_required", "dependency_install_required")
 
     def deliver(self, envelope, capabilities=None, request_host_summary=False):
         self.deliver_calls.append(
@@ -118,6 +123,20 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
         self.assertEqual(response["result"]["capabilities"], {"tools": {}})
 
+    def test_setup_tool_delegates_to_shared_command_service(self):
+        response = self.request("tools/call", {
+            "name": "setup_notification_dependency",
+            "arguments": {
+                "platform": "dingtalk", "provider": "dws-cli",
+                "installDws": True, "chinaMirror": True,
+                "deviceLogin": True, "approved": True,
+            },
+        })
+        content = response["result"]["structuredContent"]
+        self.assertEqual(content["reason"], "dependency_install_required")
+        self.assertEqual(self.service.setup_calls[0][0:2], ("dingtalk", "dws-cli"))
+        self.assertEqual(self.service.setup_calls[0][3:], (True, True, True, True))
+
     def test_initialize_rejects_unsupported_protocol_version(self):
         response = self.request("initialize", {
             "protocolVersion": "2099-01-01", "capabilities": {},
@@ -155,13 +174,14 @@ class McpServerTests(unittest.TestCase):
             with self.subTest(request=request):
                 self.assertIsNone(handle_request(request, self.commands))
 
-    def test_tools_list_exposes_six_bridge_tools_including_continuation(self):
+    def test_tools_list_exposes_setup_and_continuation(self):
         response = self.request("tools/list", {})
 
         names = [tool["name"] for tool in response["result"]["tools"]]
         self.assertEqual(names, list(EXPECTED_TOOLS))
         self.assertEqual(names, [
             "notification_status",
+            "setup_notification_dependency",
             "bind_notification_profile",
             "configure_notification_recipient",
             "deliver_enterprise_report",
