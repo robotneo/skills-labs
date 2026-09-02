@@ -1,8 +1,9 @@
 # Task 4 Independent Review
 
-**Review date:** 2026-09-02  
-**Range:** `4cedc78..9ccb51e`  
-**Decision:** **CHANGES REQUESTED**
+**Review date:** 2026-09-02
+**Original range:** `4cedc78..9ccb51e`
+**Re-review fix:** `8fba1fe`
+**Current decision:** **PASS**
 
 ## Findings
 
@@ -84,4 +85,50 @@ the host's missing Xcode Command Line Tools `xcrun`:
 - `git diff --check 4cedc78..9ccb51e`: passed.
 - PowerShell runtime checks: unavailable (`pwsh`/Windows PowerShell absent).
 
-The Important status-validation finding blocks Task 4 approval.
+The Important status-validation finding blocked the original Task 4 revision.
+
+## Scoped re-review — round 1
+
+Commit `8fba1fe` resolves the blocking finding and the adjacent Windows test gap.
+
+### Status-boundary result
+
+- The detector now accepts only a closed set of Bridge delivery protocol codes.
+- Unknown, whitespace-padded, newline/tab/escape-bearing, secret-bearing, and
+  non-string status values map to the stable local `bridge_failed` diagnostic.
+- Rejected status and reason values are not included in stderr.
+- Documented dependency/upgrade/authorization statuses remain visible as their
+  stable codes, while `delivered` remains silent.
+- The detector continues to exit `0` and preserves the standardized Markdown
+  stdout exactly for both accepted and rejected Bridge statuses.
+
+Additional adversarial probes covered JSON arrays and objects, including
+`["dependency_install_required"]` and `{"code":"delivered"}`. They produced
+only `Enterprise notification: bridge_failed`, did not leak the synthetic
+secret reason, preserved stdout, and exited `0`.
+
+### Launcher-test result
+
+- The conditional PowerShell test now captures the actual argument vector.
+- It covers the full setup flag set, an empty recipient value, spaces, embedded
+  quotes, and PowerShell/shell metacharacters.
+- The host has no PowerShell runtime, so this behavior test was skipped locally;
+  its conditional form will execute on PowerShell/Windows CI.
+- The production launcher still uses the call operator with argument arrays and
+  contains no dynamic expression or string-command execution.
+
+### Fresh verification
+
+Using `/Users/hua/.local/bin/python3.12` because the host `/usr/bin/python3`
+still depends on the unavailable Xcode Command Line Tools `xcrun`:
+
+- Focused Task 4 suite: **27 passed, 1 skipped**.
+- Full Wi-Fi detector suite: **52 passed, 1 skipped**.
+- Full Enterprise Notification Bridge suite: **218 passed, 1 skipped**.
+- Python 3.7 AST parse: **49 files passed**.
+- `compileall`: passed for both projects.
+- POSIX launcher syntax validation: passed.
+- `git diff --check c82cd85..8fba1fe`: passed.
+
+No Critical, Important, or Minor findings remain within the scoped Task 4
+re-review. **Task 4 is approved.**
