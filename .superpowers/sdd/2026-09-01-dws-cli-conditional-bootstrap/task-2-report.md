@@ -135,3 +135,30 @@ Post-remediation verification on 2026-09-02:
 - The installer implementation and focused test file parsed with
   `ast.parse(..., feature_version=(3, 7))`.
 - `git diff --check` passed.
+
+## Review remediation: round 3
+
+The latest re-review identified one remaining untrusted-return-object gap.
+Three adversarial tests were added and observed failing before implementation
+changes:
+
+- A downloader receipt whose `expected_sha256` property raised an exception
+  initially propagated sensitive exception text. The integrity boundary now
+  returns the stable `dependency_integrity_failed` result and still cleans the
+  private installer directory.
+- A process result whose `returncode` property raised an exception initially
+  propagated sensitive exception text. The execution boundary now returns the
+  stable `dependency_install_failed` result and still cleans up.
+- A process result containing an attacker-controlled return-code object could
+  invoke its comparison method. Successful execution now requires an exact
+  built-in integer return code equal to zero, so adapter-supplied comparison
+  methods are never called.
+
+Post-remediation verification on 2026-09-02:
+
+- Focused installer suite: 25 tests passed.
+- Full Bridge suite: 196 tests passed, with 1 existing conditional skip.
+- `compileall` passed for Bridge source and tests.
+- The installer implementation and focused test file parsed with
+  `ast.parse(..., feature_version=(3, 7))`.
+- `git diff --check` passed.

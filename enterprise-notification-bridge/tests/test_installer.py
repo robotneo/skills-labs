@@ -31,6 +31,23 @@ class CommandResult(object):
         self.stderr = stderr
 
 
+class ExplodingReceipt(object):
+    @property
+    def expected_sha256(self):
+        raise RuntimeError("receipt-token=top-secret")
+
+
+class ExplodingCommandResult(object):
+    @property
+    def returncode(self):
+        raise RuntimeError("process-cookie=top-secret")
+
+
+class DeceptiveReturnCode(object):
+    def __ne__(self, unused_other):
+        raise RuntimeError("returncode-secret=top-secret")
+
+
 class RecordingDownloader(object):
     def __init__(self, receipt=None, error=None, write_file=True):
         self.receipt = receipt or DownloadReceipt(None)
@@ -394,6 +411,21 @@ class DwsInstallExecutionTests(unittest.TestCase):
         self.assertEqual(runner.calls, [])
         self._assert_temp_root_empty()
 
+    def test_receipt_getter_error_returns_integrity_failure_and_cleans_up(self):
+        downloader = RecordingDownloader(ExplodingReceipt())
+        runner = RecordingRunner()
+
+        result = execute_dws_install(
+            plan_dws_install("darwin", False), True,
+            downloader, runner, self.temp_root,
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "dependency_integrity_failed")
+        self.assertNotIn("top-secret", repr(result))
+        self.assertEqual(runner.calls, [])
+        self._assert_temp_root_empty()
+
     def test_nonzero_installer_exit_returns_stable_code_without_stderr(self):
         downloader = RecordingDownloader()
         runner = RecordingRunner(CommandResult(
@@ -405,6 +437,34 @@ class DwsInstallExecutionTests(unittest.TestCase):
             downloader, runner, self.temp_root,
         )
 
+        self.assertEqual(result.reason, "dependency_install_failed")
+        self.assertNotIn("top-secret", repr(result))
+        self._assert_temp_root_empty()
+
+    def test_returncode_getter_error_returns_install_failure_and_cleans_up(self):
+        downloader = RecordingDownloader()
+        runner = RecordingRunner(ExplodingCommandResult())
+
+        result = execute_dws_install(
+            plan_dws_install("linux", False), True,
+            downloader, runner, self.temp_root,
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "dependency_install_failed")
+        self.assertNotIn("top-secret", repr(result))
+        self._assert_temp_root_empty()
+
+    def test_untrusted_returncode_value_is_not_compared(self):
+        downloader = RecordingDownloader()
+        runner = RecordingRunner(CommandResult(DeceptiveReturnCode()))
+
+        result = execute_dws_install(
+            plan_dws_install("linux", False), True,
+            downloader, runner, self.temp_root,
+        )
+
+        self.assertEqual(result.status, "failed")
         self.assertEqual(result.reason, "dependency_install_failed")
         self.assertNotIn("top-secret", repr(result))
         self._assert_temp_root_empty()

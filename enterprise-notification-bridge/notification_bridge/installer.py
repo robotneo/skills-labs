@@ -110,7 +110,12 @@ def execute_dws_install(
                 "failed", "dependency_download_failed", plan.source
             )
 
-        expected_sha256 = getattr(receipt, "expected_sha256", None)
+        try:
+            expected_sha256 = getattr(receipt, "expected_sha256", None)
+        except Exception:
+            return DwsInstallResult(
+                "failed", "dependency_integrity_failed", plan.source
+            )
         if expected_sha256 is not None:
             try:
                 checksum_matches = (
@@ -138,7 +143,13 @@ def execute_dws_install(
             return DwsInstallResult(
                 "failed", "dependency_install_failed", plan.source
             )
-        if getattr(process_result, "returncode", 1) != 0:
+        try:
+            returncode = getattr(process_result, "returncode", None)
+        except Exception:
+            return DwsInstallResult(
+                "failed", "dependency_install_failed", plan.source
+            )
+        if type(returncode) is not int or returncode != 0:
             return DwsInstallResult(
                 "failed", "dependency_install_failed", plan.source
             )
