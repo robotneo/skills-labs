@@ -1,38 +1,30 @@
-# Task 2 Scoped Re-review
+# Task 2 Scoped Re-review — Round 2
 
 **Review date:** 2026-09-02  
-**Fix commit:** `32db606`  
-**Baseline review:** `b3470ca`  
+**Fix commit:** `63a1be4`  
+**Previous review:** `d259b92`  
 **Verdict:** **CHANGES REQUESTED**
 
-## Original findings
+## Previous findings
 
-### Resolved: official-source allowlist equality bypass
+### Resolved: malformed exact-type plan exception
 
-The executor now requires `type(plan) is DwsInstallPlan` and compares every
-canonical field using trusted built-in string/tuple comparisons. A deceptive
-non-plan object whose `__eq__` always returns `True` is rejected before any
-download or process call.
+`_is_official_plan()` now rejects a non-string platform before calling
+`plan_dws_install()`. Tests also cover malformed source, URL, filename,
+command, and environment fields. All malformed plans return the stable
+`dependency_install_failed` result without downloading or executing.
 
-Adversarial result:
+### Resolved: checksum file-read exception
 
-```text
-status=failed reason=dependency_install_failed source=None
-downloads=0 runs=0
-```
+Checksum calculation is now inside an exception boundary. Hashing errors fail
+closed as `dependency_integrity_failed`, do not execute the installer, do not
+copy exception text, and clean the temporary directory.
 
-### Resolved: weak approval typing
+### Regression status of earlier findings
 
-The gate now requires `approved is True`. The string `"false"`, integer `1`,
-`None`, and collection values all decline without creating a temporary
-directory, downloading, or executing.
-
-### Resolved: silent cleanup failure
-
-Cleanup now restores directory permissions, retries removal, and returns the
-stable `dependency_cleanup_failed` result if the directory still exists.
-Both the restrictive-directory probe and mocked persistent-removal failure are
-covered by focused tests.
+- Deceptive candidate equality remains rejected.
+- Only the literal Boolean `True` authorizes installation.
+- Cleanup permission restoration and stable cleanup failure remain intact.
 
 ## New findings
 
@@ -42,48 +34,35 @@ None.
 
 ### Important
 
-1. **Malformed exact-type plans can still escape the stable failure contract.**
+1. **Adapter result-property exceptions still escape the stable, non-leaking boundary.**
 
-   `installer.py:163-169` calls `plan_dws_install(plan.platform, ...)` and
-   catches only `TypeError` and `ValueError`. An exact `DwsInstallPlan` can
-   contain a non-string platform value; `_platform_key()` then calls `.strip()`
-   and raises `AttributeError`. The exception escapes
-   `execute_dws_install()` instead of returning
-   `dependency_install_failed`.
+   `execute_dws_install()` catches exceptions while invoking the downloader
+   and process runner, but accesses attributes on their returned objects after
+   those `try` blocks:
 
-   Reproduction:
+   - `installer.py:113`: `getattr(receipt, "expected_sha256", None)`
+   - `installer.py:141`: `getattr(process_result, "returncode", 1)`
 
-   ```python
-   plan = DwsInstallPlan(1, "official-github", "x", "x", (), ())
-   execute_dws_install(plan, True, downloader, runner, temp_root)
-   # AttributeError: 'int' object has no attribute 'strip'
-   ```
+   A downloader receipt whose `expected_sha256` property raises causes the raw
+   exception to escape instead of returning a download/integrity failure. A
+   process result whose `returncode` property raises likewise escapes instead
+   of returning `dependency_install_failed`. In both cases the exception text
+   can reach upper-layer logs, contrary to the privacy contract.
 
-   This does not permit execution, but it breaks the installer boundary's
-   fail-closed, stable-result behavior and can propagate through the future
-   non-blocking setup workflow. Validate the platform field type before plan
-   construction/comparison or contain all expected malformed-plan exceptions.
-   Add exact-type malformed-field tests, not only deceptive-object tests.
-
-2. **Checksum I/O failures leak raw exceptions instead of producing the stable integrity result.**
-
-   `installer.py:113-120` calls `_file_sha256()` outside an exception boundary.
-   If the downloaded file cannot be opened or read, `OSError` escapes with its
-   original text. The temporary directory is cleaned, but callers receive no
-   `DwsInstallResult`, and sensitive path/error text may propagate into upper
-   layer logs.
-
-   Read-only probe with `_file_sha256` raising
-   `OSError("secret path")` produced:
+   Read-only probes produced:
 
    ```text
-   RAISED OSError secret path
-   remaining=[]
+   receipt RAISED RuntimeError receipt-secret
+   process-result RAISED RuntimeError runner-secret
    ```
 
-   Convert checksum-read failures to `dependency_integrity_failed` without
-   copying exception text, and add a regression test. This is required by the
-   Task 2 contract for distinct stable download/integrity/execution outcomes.
+   Cleanup did run, but no `DwsInstallResult` was returned. Treat adapter
+   invocation and validation of its returned value as one exception boundary,
+   or require and validate an exact safe receipt/result shape before reading
+   fields. Map receipt inspection failures to a stable download or integrity
+   reason and process-result inspection failures to
+   `dependency_install_failed`. Add regression tests that use raising
+   properties and assert the secret text is absent.
 
 ### Minor
 
@@ -91,22 +70,22 @@ None.
 
 ## Positive observations
 
-- The exact official GitHub/Gitee URLs, explicit mirror selection, local-file
-  execution, PowerShell `-File`, and `shell=False` behavior remain intact.
-- The allowlist fix avoids candidate-defined equality at nested field levels,
-  including string and tuple subclasses.
-- Cleanup failures can no longer silently coexist with `dependency_ready`.
-- Results continue to exclude installer stdout/stderr and caught exception
-  text.
+- Official GitHub/Gitee plan validation remains strict and candidate-defined
+  equality is not invoked.
+- The approval gate, private temporary directory, local-file execution,
+  `shell=False`, PowerShell `-File`, checksum comparison, and cleanup behavior
+  remain unchanged and correct under the covered paths.
+- Existing stable results never include subprocess stdout/stderr or caught
+  exception details.
 
 ## Verification evidence
 
-- Focused installer suite: **20 passed**.
-- Full Bridge suite: **191 passed, 1 skipped**.
-- `git diff --check b3470ca..32db606`: **passed**.
-- Original adversarial probes: all three original findings are fixed.
-- Adjacent malformed-plan and checksum-I/O probes reproduced the two Important
-  findings above.
+- Focused installer suite: **22 passed**.
+- Full Bridge suite: **193 passed, 1 skipped**.
+- `git diff --check d259b92..63a1be4`: **passed**.
+- Previous malformed-plan and checksum-I/O probes: **fixed**.
+- New receipt-property and process-result-property probes: both reproduced the
+  Important finding above; temporary directories were still cleaned.
 
-Task 2 is not ready to proceed until public installer inputs and integrity I/O
-failures consistently return stable, non-leaking results.
+Task 2 is not ready to proceed while injected downloader/runner result objects
+can bypass stable error handling and expose raw exception text.
