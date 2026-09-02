@@ -63,3 +63,26 @@
 - Task 1's parked help-parser compatibility issue was not modified. Task 4
   detector/launcher integration and Task 5 documentation/live preflight were
   not started.
+
+## Review fix: stale install-action lifecycle
+
+- Added the original requested provider (`auto` or `dws-cli`) to the correlated
+  install action. Continuation now resumes through that original selection
+  boundary instead of forcing `dws-cli`.
+- A newer successful `auto` selection through a declared native DingTalk
+  capability invalidates the older matching install action before returning;
+  replay is rejected as a missing/consumed pending action and never reaches DWS
+  discovery or installation.
+- Once DWS is verified ready—whether it became available externally, was
+  installed by a directly approved setup, or was installed by continuation—all
+  pending DingTalk DWS install actions are invalidated before authorization.
+  Replaying an older approval therefore cannot execute the installer again.
+- TDD RED evidence: the native-selection and direct-install regression tests
+  both failed because the old pending action remained present. The existing
+  dependency-ready continuation test stayed green and was retained to prove
+  that an externally satisfied dependency consumes the action without calling
+  the installer.
+- Focused Task 3/CLI/MCP/DWS/workflow/continuation suite: 77 tests passed.
+- Full Bridge suite: 214 tests passed, with 1 existing conditional skip.
+- All 34 Bridge Python files parsed with Python 3.7 grammar; `compileall` and
+  `git diff --check` passed.

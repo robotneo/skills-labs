@@ -11,7 +11,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from notification_bridge.config import BridgeConfig, ChannelConfig
-from notification_bridge.continuation import MemoryStateStore
+from notification_bridge.continuation import ContinuationError, MemoryStateStore
 from notification_bridge.dependencies import DependencyStatus, DwsDependency
 from notification_bridge.installer import DwsInstallResult
 from notification_bridge.ledger import DeliveryLedger
@@ -203,6 +203,85 @@ class SetupWorkflowTests(unittest.TestCase):
         self.assertEqual(continued.results[0].status, "ok")
         self.assertEqual(self.calls, ["discover", "discover", "install",
                                       "discover", "verify"])
+        self.assertEqual(service.state_store.pending_actions(), [])
+
+    def test_new_native_auto_setup_invalidates_older_auto_install_action(self):
+        missing = DependencyStatus(
+            "action_required", "dependency_install_required", None
+        )
+        service = self.service(discovery=missing)
+        required = service.setup_dependency("dingtalk", "auto")
+        action = required.data["action"]
+
+        selected = service.setup_dependency(
+            "dingtalk", "auto", capabilities=native_bundle()
+        )
+
+        self.assertEqual(selected.reason, "native_provider_selected")
+        self.assertEqual(service.state_store.pending_actions(), [])
+        with self.assertRaises(ContinuationError):
+            service.continue_operation({
+                "schema_version": "1", "action_id": action["action_id"],
+                "report_id": action["report_id"], "platform": "dingtalk",
+                "provider": "dws-cli", "operation": "install_dependency",
+                "status": "succeeded", "reason": "", "retryable": False,
+                "data": {},
+            })
+        self.assertEqual(self.calls, ["discover"])
+
+    def test_direct_approved_install_invalidates_older_install_action(self):
+        states = [
+            DependencyStatus("action_required", "dependency_install_required", None),
+            DependencyStatus("action_required", "dependency_install_required", None),
+            DependencyStatus("discovered", "dependency_discovered",
+                             DwsDependency("/opt/dws", None, "1.0.15", "path")),
+        ]
+        service = self.service()
+        service._dependency_discoverer = lambda *unused: (
+            self.calls.append("discover") or states.pop(0)
+        )
+        required = service.setup_dependency("dingtalk", "dws-cli")
+        action = required.data["action"]
+
+        installed = service.setup_dependency(
+            "dingtalk", "dws-cli", install_dws=True, approved=True
+        )
+
+        self.assertEqual(installed.status, "ok")
+        self.assertEqual(service.state_store.pending_actions(), [])
+        with self.assertRaises(ContinuationError):
+            service.continue_operation({
+                "schema_version": "1", "action_id": action["action_id"],
+                "report_id": action["report_id"], "platform": "dingtalk",
+                "provider": "dws-cli", "operation": "install_dependency",
+                "status": "succeeded", "reason": "", "retryable": False,
+                "data": {},
+            })
+        self.assertEqual(self.calls.count("install"), 1)
+
+    def test_continuation_consumes_action_without_install_when_dws_is_now_ready(self):
+        states = [
+            DependencyStatus("action_required", "dependency_install_required", None),
+            DependencyStatus("discovered", "dependency_discovered",
+                             DwsDependency("/opt/dws", None, "1.0.15", "path")),
+        ]
+        service = self.service()
+        service._dependency_discoverer = lambda *unused: (
+            self.calls.append("discover") or states.pop(0)
+        )
+        required = service.setup_dependency("dingtalk", "dws-cli")
+        action = required.data["action"]
+
+        continued = service.continue_operation({
+            "schema_version": "1", "action_id": action["action_id"],
+            "report_id": action["report_id"], "platform": "dingtalk",
+            "provider": "dws-cli", "operation": "install_dependency",
+            "status": "succeeded", "reason": "", "retryable": False,
+            "data": {},
+        })
+
+        self.assertEqual(continued.results[0].status, "ok")
+        self.assertNotIn("install", self.calls)
         self.assertEqual(service.state_store.pending_actions(), [])
 
     def test_ready_dependency_does_not_install_or_repeat_login(self):

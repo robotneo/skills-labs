@@ -356,9 +356,11 @@ def _validate_action_data(operation, data):
         if data:
             raise ContinuationError("operation action data must be empty")
     elif operation == "install_dependency":
-        if (set(data) != set(("minimum_version", "china_mirror"))
+        if (set(data) != set(("minimum_version", "china_mirror",
+                              "requested_provider"))
                 or not _non_empty_string(data["minimum_version"])
-                or not isinstance(data["china_mirror"], bool)):
+                or not isinstance(data["china_mirror"], bool)
+                or data["requested_provider"] not in ("auto", "dws-cli")):
             raise ContinuationError("dependency install action data is invalid")
     elif operation == "select_profile":
         if set(data) != set(("profiles",)):

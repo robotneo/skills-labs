@@ -90,6 +90,7 @@ class BridgeService(object):
                 return ProviderResult("unavailable", "configured_provider_unavailable")
             return ProviderResult("ready", "native_provider_selected")
         if provider == "auto" and native_available:
+            self._delete_dependency_install_actions(platform, "auto")
             return ProviderResult("ready", "native_provider_selected")
 
         discovered = self._dependency_discoverer(
@@ -110,7 +111,7 @@ class BridgeService(object):
                         "action_required", "dependency_install_declined"
                     )
                 return self._dependency_install_action(
-                    platform, china_mirror, capability_list
+                    platform, provider, china_mirror, capability_list
                 )
             if self._dependency_installer is None:
                 return ProviderResult("failed", "dependency_install_failed")
@@ -134,6 +135,7 @@ class BridgeService(object):
             return ProviderResult(verified.status, verified.reason)
 
         self._inject_verified_dws(verified.executable)
+        self._delete_dependency_install_actions(platform)
         index, channel = self._ensure_setup_channel(platform, provider)
         selected = self._select(channel, capability_list)
         if getattr(selected, "availability", "available") == "unavailable":
@@ -142,10 +144,12 @@ class BridgeService(object):
             None, capability_list, index, selected, "bind"
         ).results[0]
 
-    def _dependency_install_action(self, platform, china_mirror, capabilities):
+    def _dependency_install_action(self, platform, requested_provider,
+                                   china_mirror, capabilities):
         data = {
             "minimum_version": MINIMUM_DWS_VERSION,
             "china_mirror": bool(china_mirror),
+            "requested_provider": requested_provider,
         }
         pending_actions = getattr(self.state_store, "pending_actions", None)
         if pending_actions is not None:
@@ -173,6 +177,21 @@ class BridgeService(object):
             "action_required", "dependency_install_required",
             data={"action": action},
         )
+
+    def _delete_dependency_install_actions(self, platform,
+                                           requested_provider=None):
+        pending_actions = getattr(self.state_store, "pending_actions", None)
+        if pending_actions is None:
+            return
+        for action in pending_actions():
+            data = action.get("data", {})
+            if (action.get("platform") == platform
+                    and action.get("provider") == "dws-cli"
+                    and action.get("operation") == "install_dependency"
+                    and (requested_provider is None
+                         or data.get("requested_provider")
+                         == requested_provider)):
+                self.state_store.delete_pending(action["action_id"])
 
     def _inject_verified_dws(self, executable):
         for provider in self.providers:
@@ -296,7 +315,7 @@ class BridgeService(object):
             )
         elif stage == "install_dependency":
             setup_result = self.setup_dependency(
-                action["platform"], "dws-cli", {
+                action["platform"], action["data"]["requested_provider"], {
                     "schema_version": "1", "capabilities": capabilities,
                 }, install_dws=True,
                 china_mirror=action["data"]["china_mirror"], approved=True,
