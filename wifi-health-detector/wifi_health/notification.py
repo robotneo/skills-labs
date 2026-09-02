@@ -36,8 +36,9 @@ class NotificationResult(object):
 
     @property
     def message(self):
-        detail = " ({0})".format(self.reason) if self.reason else ""
-        return "Enterprise notification: {0}{1}".format(self.status, detail)
+        # Bridge details may contain provider, Profile, organization, or auth
+        # context. The detector emits only the stable status outside stdout.
+        return "Enterprise notification: {0}".format(self.status)
 
 
 def trigger_notification(markdown, report_json, summary=None, bridge_command=None):

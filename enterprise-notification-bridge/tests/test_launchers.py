@@ -80,11 +80,55 @@ class LauncherTests(unittest.TestCase):
         with open(os.path.join(ROOT, "run.ps1"), encoding="utf-8") as handle:
             powershell = handle.read()
         self.assertIn('%*', batch)
-        self.assertIn('@args', powershell)
+        self.assertIn('@ForwardedArgs', powershell)
         self.assertIn('run.ps1" %*', batch)
         self.assertIn('PYTHONUTF8', powershell)
         with open(os.path.join(ROOT, "run.sh"), encoding="utf-8") as handle:
             self.assertIn("PYTHONUTF8=1", handle.read())
+
+    def test_unix_launcher_forwards_setup_arguments_without_evaluation(self):
+        capture_path = os.path.join(self.directory.name, "argv.json")
+        python_path = os.path.join(self.directory.name, "capture-python")
+        with open(python_path, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\n")
+            handle.write("printf '%s\\n' \"$@\" > \"$CAPTURE_PATH\"\n")
+        os.chmod(python_path, 0o755)
+        marker = os.path.join(self.directory.name, "must-not-exist")
+        arguments = [
+            "setup", "--platform", "dingtalk", "--provider", "dws-cli",
+            "--capabilities", "capabilities;touch " + marker,
+            "--install-dws", "--china-mirror", "--device-login", "--yes",
+        ]
+        environment = dict(
+            os.environ,
+            ENTERPRISE_NOTIFICATION_BRIDGE_PYTHON=python_path,
+            CAPTURE_PATH=capture_path,
+        )
+
+        result = subprocess.run(
+            [os.path.join(ROOT, "run.sh")] + arguments,
+            cwd=ROOT,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(capture_path, encoding="utf-8") as handle:
+            forwarded = handle.read().splitlines()
+        self.assertEqual(forwarded[1:], arguments)
+        self.assertTrue(forwarded[0].endswith("main.py"))
+        self.assertFalse(os.path.exists(marker))
+
+    def test_launchers_do_not_use_dynamic_shell_evaluation(self):
+        for name in ("run.sh", "run.ps1"):
+            with self.subTest(name=name):
+                with open(os.path.join(ROOT, name), encoding="utf-8") as handle:
+                    source = handle.read().lower()
+                self.assertNotIn("eval ", source)
+                self.assertNotIn("invoke-expression", source)
 
     @unittest.skipUnless(shutil.which("pwsh") or shutil.which("powershell"),
                          "PowerShell is not available on this host")

@@ -1,5 +1,6 @@
 #!/bin/sh
 set -u
+set -f
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PYTHON_BIN=""

@@ -32,5 +32,6 @@ if (-not $PythonCommand) {
 }
 
 $env:PYTHONUTF8 = "1"
-& $PythonCommand @PythonPrefix (Join-Path $ScriptDir "main.py") @args
+$ForwardedArgs = @($args)
+& $PythonCommand @PythonPrefix (Join-Path $ScriptDir "main.py") @ForwardedArgs
 exit $LASTEXITCODE

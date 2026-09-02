@@ -82,7 +82,7 @@ class NotificationIntegrationTests(unittest.TestCase):
                 self._bridge_command(
                     {"status": "notification_failed", "reason": "send_failed"}
                 ),
-                "send_failed",
+                "notification_failed",
             ),
             (
                 "action required",
@@ -119,6 +119,39 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(stdout, render_text(report, language="en"))
         self.assertEqual(stderr, "")
         self.assertFalse(os.path.exists(record_path))
+
+    def test_dependency_attention_statuses_preserve_report_and_hide_bridge_details(self):
+        report = self._sample_report()
+        expected = render_text(report, language="en")
+        statuses = (
+            "dependency_install_required",
+            "dependency_install_declined",
+            "dependency_download_failed",
+            "dependency_integrity_failed",
+            "dependency_install_failed",
+            "dependency_version_unsupported",
+            "dependency_verification_failed",
+            "dws_upgrade_required",
+            "dws_authorization_required",
+            "dws_admin_authorization_required",
+        )
+        secret = "corp:secret-profile token=private org=ding-secret"
+
+        for status in statuses:
+            with self.subTest(status=status):
+                code, stdout, stderr = self._run_detector(
+                    report,
+                    bridge_command=self._bridge_command(
+                        {"status": status, "reason": secret}
+                    ),
+                )
+
+                self.assertEqual(code, 0)
+                self.assertEqual(stdout, expected)
+                self.assertEqual(
+                    stderr, "Enterprise notification: {0}\n".format(status)
+                )
+                self.assertNotIn(secret, stderr)
 
     def test_invalid_markdown_never_invokes_bridge(self):
         record_path = os.path.join(self.directory.name, "called.json")
@@ -338,7 +371,7 @@ class NotificationIntegrationTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, expected)
-        self.assertIn("invalid_bridge_command", stderr)
+        self.assertEqual(stderr, "Enterprise notification: bridge_failed\n")
 
     def test_blank_explicit_bridge_overrides_return_structured_failure(self):
         for override in ("   ", "''"):
@@ -363,7 +396,7 @@ class NotificationIntegrationTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertEqual(stdout, expected)
-                self.assertIn("invalid_bridge_command", stderr)
+                self.assertEqual(stderr, "Enterprise notification: bridge_failed\n")
 
     def test_absent_override_and_adjacent_bridge_remains_unavailable_skip(self):
         with patch.dict(os.environ, {}, clear=True), patch(

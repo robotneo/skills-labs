@@ -16,7 +16,7 @@ Baseline: `035fecb`
 - [x] Task 1: Dependency discovery and version contract (implementation complete; one load-bearing parser finding is reserved for the final branch fix/re-review)
 - [ ] Task 2: Official installer planning and approved execution
 - [ ] Task 3: Setup orchestration, CLI, and MCP continuation
-- [ ] Task 4: Detector integration and launcher behavior
+- [x] Task 4: Detector integration and launcher behavior (implementation complete; awaiting scoped review)
 - [ ] Task 5: Documentation, validation, and gated real-environment test
 
 ## Rulings
