@@ -86,3 +86,19 @@
 - Full Bridge suite: 214 tests passed, with 1 existing conditional skip.
 - All 34 Bridge Python files parsed with Python 3.7 grammar; `compileall` and
   `git diff --check` passed.
+
+## Review fix: explicit native invalidation
+
+- A successful explicit `provider=native` selection now invalidates every
+  pending DingTalk install action whose original `requested_provider` was
+  `auto` before returning `native_provider_selected`.
+- Replaying the invalidated action is rejected by the continuation store and
+  cannot reach dependency discovery or the installer.
+- The cleanup remains scoped to the selected platform and to auto-originated
+  actions: another platform's auto action and an explicit `dws-cli` action are
+  retained.
+- TDD RED evidence: both new regression tests failed before the service change
+  because the same-platform auto action remained pending; after the one-line
+  invalidation change, the focused setup suite passed all 16 tests.
+- Focused Task 3/CLI/MCP/DWS/workflow/continuation suite: 79 tests passed.
+- Full Bridge suite: 216 tests passed, with 1 existing conditional skip.

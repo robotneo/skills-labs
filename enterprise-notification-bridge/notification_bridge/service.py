@@ -88,6 +88,7 @@ class BridgeService(object):
         if provider == "native":
             if not native_available:
                 return ProviderResult("unavailable", "configured_provider_unavailable")
+            self._delete_dependency_install_actions(platform, "auto")
             return ProviderResult("ready", "native_provider_selected")
         if provider == "auto" and native_available:
             self._delete_dependency_install_actions(platform, "auto")

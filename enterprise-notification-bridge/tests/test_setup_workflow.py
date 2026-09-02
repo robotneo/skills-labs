@@ -229,6 +229,55 @@ class SetupWorkflowTests(unittest.TestCase):
             })
         self.assertEqual(self.calls, ["discover"])
 
+    def test_explicit_native_setup_invalidates_older_auto_install_action(self):
+        missing = DependencyStatus(
+            "action_required", "dependency_install_required", None
+        )
+        service = self.service(discovery=missing)
+        required = service.setup_dependency("dingtalk", "auto")
+        action = required.data["action"]
+
+        selected = service.setup_dependency(
+            "dingtalk", "native", capabilities=native_bundle()
+        )
+
+        self.assertEqual(selected.reason, "native_provider_selected")
+        self.assertEqual(service.state_store.pending_actions(), [])
+        with self.assertRaises(ContinuationError):
+            service.continue_operation({
+                "schema_version": "1", "action_id": action["action_id"],
+                "report_id": action["report_id"], "platform": "dingtalk",
+                "provider": "dws-cli", "operation": "install_dependency",
+                "status": "succeeded", "reason": "", "retryable": False,
+                "data": {},
+            })
+        self.assertEqual(self.calls, ["discover"])
+
+    def test_explicit_native_only_invalidates_same_platform_auto_actions(self):
+        missing = DependencyStatus(
+            "action_required", "dependency_install_required", None
+        )
+        service = self.service(discovery=missing)
+        stale_auto = service.setup_dependency("dingtalk", "auto")
+        explicit_dws = service.setup_dependency("dingtalk", "dws-cli")
+        other_platform = service._dependency_install_action(
+            "feishu", "auto", False, []
+        )
+
+        selected = service.setup_dependency(
+            "dingtalk", "native", capabilities=native_bundle()
+        )
+
+        self.assertEqual(selected.reason, "native_provider_selected")
+        pending_ids = {
+            action["action_id"]
+            for action in service.state_store.pending_actions()
+        }
+        self.assertNotIn(stale_auto.data["action"]["action_id"], pending_ids)
+        self.assertIn(explicit_dws.data["action"]["action_id"], pending_ids)
+        self.assertIn(other_platform.data["action"]["action_id"], pending_ids)
+        self.assertEqual(self.calls, ["discover", "discover"])
+
     def test_direct_approved_install_invalidates_older_install_action(self):
         states = [
             DependencyStatus("action_required", "dependency_install_required", None),
