@@ -112,9 +112,15 @@ def execute_dws_install(
 
         expected_sha256 = getattr(receipt, "expected_sha256", None)
         if expected_sha256 is not None:
-            if (not isinstance(expected_sha256, str) or
-                    _SHA256.fullmatch(expected_sha256) is None or
-                    _file_sha256(installer_path) != expected_sha256.lower()):
+            try:
+                checksum_matches = (
+                    isinstance(expected_sha256, str) and
+                    _SHA256.fullmatch(expected_sha256) is not None and
+                    _file_sha256(installer_path) == expected_sha256.lower()
+                )
+            except Exception:
+                checksum_matches = False
+            if not checksum_matches:
                 return DwsInstallResult(
                     "failed", "dependency_integrity_failed", plan.source
                 )
@@ -161,6 +167,8 @@ def _platform_key(platform_name):
 
 def _is_official_plan(plan):
     if type(plan) is not DwsInstallPlan:
+        return False
+    if type(plan.platform) is not str:
         return False
     try:
         github_plan = plan_dws_install(plan.platform, False)

@@ -110,3 +110,28 @@ Post-remediation verification on 2026-09-02:
 - Both changed Python files parsed with
   `ast.parse(..., feature_version=(3, 7))`.
 - `git diff --check` passed.
+
+## Review remediation: round 2
+
+The scoped re-review found two remaining exception-boundary gaps. Both were
+captured as failing adversarial tests before the implementation changed:
+
+- An exact `DwsInstallPlan` containing a non-string platform initially raised
+  `AttributeError` while reconstructing the official allowlisted plan. The
+  executor now rejects malformed exact-type plans with the stable
+  `dependency_install_failed` result before creating a temporary directory,
+  downloading, or running a process. The regression matrix also covers
+  malformed source, URL, filename, command, and environment fields.
+- A checksum file read error initially leaked its raw `OSError`. Checksum
+  calculation is now contained by the integrity boundary and returns
+  `dependency_integrity_failed` without exception text; the existing `finally`
+  cleanup still removes the private installer directory.
+
+Post-remediation verification on 2026-09-02:
+
+- Focused installer suite: 22 tests passed.
+- Full Bridge suite: 193 tests passed, with 1 existing conditional skip.
+- `compileall` passed for Bridge source and tests.
+- The installer implementation and focused test file parsed with
+  `ast.parse(..., feature_version=(3, 7))`.
+- `git diff --check` passed.

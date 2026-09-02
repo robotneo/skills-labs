@@ -15,6 +15,7 @@ if ROOT not in sys.path:
 
 from notification_bridge.installer import (  # noqa: E402
     DownloadReceipt,
+    DwsInstallPlan,
     execute_dws_install,
     plan_dws_install,
 )
@@ -216,6 +217,35 @@ class DwsInstallExecutionTests(unittest.TestCase):
         self.assertEqual(runner.calls, [])
         self._assert_temp_root_empty()
 
+    def test_malformed_exact_type_plans_return_stable_install_failure(self):
+        canonical = plan_dws_install("linux", False)
+        malformed_plans = (
+            DwsInstallPlan(
+                1, canonical.source, canonical.url, canonical.filename,
+                canonical.command, canonical.environment,
+            ),
+            canonical._replace(source=1),
+            canonical._replace(url=1),
+            canonical._replace(filename=1),
+            canonical._replace(command=["sh", "{installer}"]),
+            canonical._replace(environment=(("DWS_NO_FALLBACK", 1),)),
+        )
+
+        for plan in malformed_plans:
+            downloader = RecordingDownloader()
+            runner = RecordingRunner()
+
+            result = execute_dws_install(
+                plan, True, downloader, runner, self.temp_root,
+            )
+
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.reason, "dependency_install_failed")
+            self.assertNotIn("AttributeError", repr(result))
+            self.assertEqual(downloader.calls, [])
+            self.assertEqual(runner.calls, [])
+            self._assert_temp_root_empty()
+
     def test_download_uses_private_directory_and_runner_uses_shell_false(self):
         downloader = RecordingDownloader()
         runner = RecordingRunner()
@@ -342,6 +372,25 @@ class DwsInstallExecutionTests(unittest.TestCase):
         )
 
         self.assertEqual(result.reason, "dependency_integrity_failed")
+        self.assertEqual(runner.calls, [])
+        self._assert_temp_root_empty()
+
+    def test_checksum_read_error_returns_integrity_failure_and_cleans_up(self):
+        expected = hashlib.sha256(INSTALLER_BYTES).hexdigest()
+        downloader = RecordingDownloader(DownloadReceipt(expected))
+        runner = RecordingRunner()
+
+        with mock.patch(
+                "notification_bridge.installer._file_sha256",
+                side_effect=OSError("secret checksum path")):
+            result = execute_dws_install(
+                plan_dws_install("darwin", False), True,
+                downloader, runner, self.temp_root,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "dependency_integrity_failed")
+        self.assertNotIn("secret", repr(result))
         self.assertEqual(runner.calls, [])
         self._assert_temp_root_empty()
 
