@@ -1,79 +1,89 @@
-# Task 2 Scoped Code Review
+# Task 2 Scoped Re-review
 
 **Review date:** 2026-09-02  
-**Scope:** `bef321b..9356902`  
-**Primary files:** `notification_bridge/installer.py`, `tests/test_installer.py`  
+**Fix commit:** `32db606`  
+**Baseline review:** `b3470ca`  
 **Verdict:** **CHANGES REQUESTED**
 
-## Findings
+## Original findings
+
+### Resolved: official-source allowlist equality bypass
+
+The executor now requires `type(plan) is DwsInstallPlan` and compares every
+canonical field using trusted built-in string/tuple comparisons. A deceptive
+non-plan object whose `__eq__` always returns `True` is rejected before any
+download or process call.
+
+Adversarial result:
+
+```text
+status=failed reason=dependency_install_failed source=None
+downloads=0 runs=0
+```
+
+### Resolved: weak approval typing
+
+The gate now requires `approved is True`. The string `"false"`, integer `1`,
+`None`, and collection values all decline without creating a temporary
+directory, downloading, or executing.
+
+### Resolved: silent cleanup failure
+
+Cleanup now restores directory permissions, retries removal, and returns the
+stable `dependency_cleanup_failed` result if the directory still exists.
+Both the restrictive-directory probe and mocked persistent-removal failure are
+covered by focused tests.
+
+## New findings
 
 ### Critical
 
-1. **The official-source allowlist is bypassable through attacker-controlled equality.**
-
-   `installer.py:146-153` validates a supplied plan using
-   `plan == github_plan or plan == gitee_plan`. The left operand is the
-   caller-supplied object, so its `__eq__` implementation controls the answer.
-   A non-`DwsInstallPlan` object can return `True` from `__eq__` while exposing
-   an arbitrary URL, filename, command, and environment. The executor then
-   downloads and runs that untrusted payload while returning
-   `dependency_ready` with source `official-github`.
-
-   Read-only adversarial probe result:
-
-   ```text
-   DwsInstallResult(status='ready', reason='dependency_ready', source='official-github')
-   download_url= https://evil.invalid/payload.sh
-   ran= True
-   ```
-
-   This defeats Task 2's central security boundary: only the exact official
-   GitHub plan or explicitly selected official Gitee plan may execute. Require
-   the exact trusted plan type and compare canonical field values from trusted
-   operands; do not invoke equality supplied by the candidate object. Add a
-   regression test with a deceptive `__eq__` implementation.
+None.
 
 ### Important
 
-1. **The approval gate accepts arbitrary truthy values instead of explicit Boolean approval.**
+1. **Malformed exact-type plans can still escape the stable failure contract.**
 
-   `installer.py:76-80` uses `if not approved`. Values such as the string
-   `"false"` and integer `1` therefore authorize download and execution. A
-   serialization or continuation-layer type mistake can silently turn a
-   negative-looking value into software-execution approval.
+   `installer.py:163-169` calls `plan_dws_install(plan.platform, ...)` and
+   catches only `TypeError` and `ValueError`. An exact `DwsInstallPlan` can
+   contain a non-string platform value; `_platform_key()` then calls `.strip()`
+   and raises `AttributeError`. The exception escapes
+   `execute_dws_install()` instead of returning
+   `dependency_install_failed`.
 
-   Probe result:
+   Reproduction:
 
-   ```text
-   'false' dependency_ready 1 1
-   1 dependency_ready 1 1
+   ```python
+   plan = DwsInstallPlan(1, "official-github", "x", "x", (), ())
+   execute_dws_install(plan, True, downloader, runner, temp_root)
+   # AttributeError: 'int' object has no attribute 'strip'
    ```
 
-   The security contract says installation proceeds only after explicit user
-   approval. Fail closed unless `approved is True`, and cover string, integer,
-   `None`, and collection inputs.
+   This does not permit execution, but it breaks the installer boundary's
+   fail-closed, stable-result behavior and can propagate through the future
+   non-blocking setup workflow. Validate the platform field type before plan
+   construction/comparison or contain all expected malformed-plan exceptions.
+   Add exact-type malformed-field tests, not only deceptive-object tests.
 
-2. **Cleanup failures are ignored while the result still reports success.**
+2. **Checksum I/O failures leak raw exceptions instead of producing the stable integrity result.**
 
-   `installer.py:140-142` calls `shutil.rmtree(..., ignore_errors=True)` and
-   cannot observe or report that the downloaded installer remains on disk.
-   A runner that changes the private directory mode to `000` causes the
-   function to return `dependency_ready` while leaving `dws-install-*` and the
-   payload behind. This violates the design requirement that temporary
-   installer files and directories are removed after success or failure.
+   `installer.py:113-120` calls `_file_sha256()` outside an exception boundary.
+   If the downloaded file cannot be opened or read, `OSError` escapes with its
+   original text. The temporary directory is cleaned, but callers receive no
+   `DwsInstallResult`, and sensitive path/error text may propagate into upper
+   layer logs.
 
-   Probe result:
+   Read-only probe with `_file_sha256` raising
+   `OSError("secret path")` produced:
 
    ```text
-   DwsInstallResult(status='ready', reason='dependency_ready', source='official-github')
-   ['dws-install-wghjenz_']
+   RAISED OSError secret path
+   remaining=[]
    ```
 
-   Make cleanup observable and fail closed with a stable result when cleanup
-   cannot complete. A defensive permission restoration before removal may be
-   needed because the executed installer controls its working directory.
-   Add success-path and failure-path regression tests that deliberately make
-   the directory initially non-removable.
+   Convert checksum-read failures to `dependency_integrity_failed` without
+   copying exception text, and add a regression test. This is required by the
+   Task 2 contract for distinct stable download/integrity/execution outcomes.
 
 ### Minor
 
@@ -81,23 +91,22 @@ None.
 
 ## Positive observations
 
-- Canonical plans use fixed official GitHub/Gitee URLs and explicit Gitee
-  selection; there is no automatic mirror fallback in the plan contract.
-- macOS/Linux use a downloaded local script, and Windows uses PowerShell
-  `-File`; all runner calls explicitly pass `shell=False`.
-- The public result excludes subprocess stdout/stderr and exception text.
-- Existing tests cover private mode `0700`, symbolic-link rejection, optional
-  checksum mismatch/malformed metadata, stable failure codes, and normal
-  cleanup paths.
+- The exact official GitHub/Gitee URLs, explicit mirror selection, local-file
+  execution, PowerShell `-File`, and `shell=False` behavior remain intact.
+- The allowlist fix avoids candidate-defined equality at nested field levels,
+  including string and tuple subclasses.
+- Cleanup failures can no longer silently coexist with `dependency_ready`.
+- Results continue to exclude installer stdout/stderr and caught exception
+  text.
 
 ## Verification evidence
 
-- Focused installer suite: **16 passed**.
-- Full Bridge suite: **187 passed, 1 skipped**.
-- `git diff --check bef321b..9356902`: **passed**.
-- Three read-only adversarial probes reproduced the allowlist bypass, weak
-  approval typing, and silent cleanup failure described above.
+- Focused installer suite: **20 passed**.
+- Full Bridge suite: **191 passed, 1 skipped**.
+- `git diff --check b3470ca..32db606`: **passed**.
+- Original adversarial probes: all three original findings are fixed.
+- Adjacent malformed-plan and checksum-I/O probes reproduced the two Important
+  findings above.
 
-The passing suite does not make Task 2 acceptable because the critical
-allowlist bypass permits arbitrary remote code execution through the exact
-interface intended to enforce official-source installation.
+Task 2 is not ready to proceed until public installer inputs and integrity I/O
+failures consistently return stable, non-leaking results.
