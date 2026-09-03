@@ -235,7 +235,7 @@ class DwsVerificationTests(unittest.TestCase):
         self.assertEqual(status.status, "unavailable")
         self.assertEqual(status.reason, "dependency_version_unsupported")
 
-    def test_version_output_must_be_a_json_object(self):
+    def test_nonofficial_text_version_output_is_rejected(self):
         executable = sys.executable
         runner = FakeRunner({
             (executable, "--version", "--format", "json"):
@@ -246,6 +246,45 @@ class DwsVerificationTests(unittest.TestCase):
 
         self.assertEqual(status.status, "unavailable")
         self.assertEqual(status.reason, "dependency_version_unsupported")
+
+    def test_official_dws_text_version_output_is_accepted(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "--version", "--format", "json")] = (
+            CommandResult(
+                "dws version v1.0.60 "
+                "(fcc3dbf1, 2026-08-27T08:19:33Z)\n"
+            )
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "ready")
+        self.assertEqual(status.reason, "dependency_ready")
+        self.assertEqual(status.version, "1.0.60")
+
+    def test_text_version_requires_the_complete_official_shape(self):
+        executable = sys.executable
+        invalid_outputs = (
+            "dws version v1.0.60",
+            "version v1.0.60 (fcc3dbf1, 2026-08-27T08:19:33Z)",
+            "dws v1.0.60 (fcc3dbf1, 2026-08-27T08:19:33Z)",
+            "dws version v1.0.060 (fcc3dbf1, 2026-08-27T08:19:33Z)",
+            "warning\ndws version v1.0.60 "
+            "(fcc3dbf1, 2026-08-27T08:19:33Z)",
+        )
+
+        for output in invalid_outputs:
+            runner = FakeRunner({
+                (executable, "--version", "--format", "json"):
+                    CommandResult(output),
+            })
+
+            status = verify_dws(executable, runner)
+
+            self.assertEqual(
+                status.reason, "dependency_version_unsupported", output
+            )
 
     def test_version_must_be_parseable_semver(self):
         executable = sys.executable
@@ -493,6 +532,19 @@ class DwsVerificationTests(unittest.TestCase):
         runner = verified_runner(executable)
         runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
             '  --format string  Output format: json|table|raw (default "json")'
+        )
+
+        status = verify_dws(executable, runner)
+
+        self.assertEqual(status.status, "ready")
+        self.assertEqual(status.reason, "dependency_ready")
+
+    def test_leaf_help_accepts_current_dws_chinese_cobra_format_values(self):
+        executable = sys.executable
+        runner = verified_runner(executable)
+        runner.responses[(executable, "auth", "status", "--help")] = CommandResult(
+            "  -f, --format string          "
+            '输出格式: json|table|raw|pretty|ndjson|csv (default "json")'
         )
 
         status = verify_dws(executable, runner)

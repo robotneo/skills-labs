@@ -11,8 +11,11 @@ native DingTalk Provider.
    supplies one. Codex, Claude Code, WorkBuddy, OpenClaw, and company-specific
    Agents use the same semantic capability contract.
 2. If native DingTalk is declared, use it and do not discover or install DWS.
-3. If native is unavailable, inspect DWS. Version 1.0.15 or newer must pass the
-   JSON version check and the per-leaf JSON-format help gates.
+3. If native is unavailable, inspect DWS. Version 1.0.15 or newer must pass
+   either the JSON version response or DWS's complete official text version
+   banner (`dws version v<SemVer> (<commit>, <UTC build time>)`), followed by
+   the per-leaf JSON-format help gates. Arbitrary text containing a version
+   number is not accepted.
 4. Missing or outdated DWS returns `dependency_install_required` or
    `dws_upgrade_required`. This is a proposal, not approval.
 

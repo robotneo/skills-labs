@@ -9,10 +9,17 @@ from collections import namedtuple
 
 MINIMUM_DWS_VERSION = "1.0.15"
 
-_SEMVER = re.compile(
-    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+_SEMVER_BODY = (
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+_SEMVER = re.compile(r"^" + _SEMVER_BODY + r"$")
+_DWS_TEXT_VERSION = re.compile(
+    r"^dws version v(" + _SEMVER_BODY + r") "
+    r"\([0-9a-fA-F]{7,40}, "
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)\n?$"
 )
 
 
@@ -191,7 +198,7 @@ def _format_value_lists(option_block):
     field_pattern = re.compile(
         r"\b(?:allowed\s+values?|choices?|one\s+of|values?|default)\s*[:=]\s*"
     )
-    cobra_pattern = re.compile(r"\boutput\s+format\s*:\s*")
+    cobra_pattern = re.compile(r"(?:\boutput\s+format|输出格式)\s*:\s*")
 
     for block_line in option_block:
         for parenthetical in re.finditer(r"\(([^()]*)\)", block_line):
@@ -281,16 +288,21 @@ def _status_for(executable, version, status, reason):
 
 
 def _parse_version(stdout):
+    output = _text(stdout)
     try:
-        payload = json.loads(_text(stdout))
+        payload = json.loads(output)
     except (TypeError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        version = payload.get("version")
+        if isinstance(version, str) and _is_strict_semver(version):
+            return version
+
+    text_match = _DWS_TEXT_VERSION.match(output)
+    if text_match is None:
         return None
-    if not isinstance(payload, dict):
-        return None
-    version = payload.get("version")
-    if not isinstance(version, str) or not _is_strict_semver(version):
-        return None
-    return version
+    version = text_match.group(1)
+    return version if _is_strict_semver(version) else None
 
 
 def _is_strict_semver(version):
