@@ -1,15 +1,28 @@
 ---
 name: wifi-health-detector
-description: Use when diagnosing Wi-Fi quality, wireless status, signal, interference, link speed, addressing, latency, loss, security, or connection health on macOS 10.12+ or Windows 10/11.
+description: 检测 macOS 10.12+ 和 Windows 10/11 的 Wi-Fi 健康状况，分析信号、干扰、连接速率、信道频宽、IP 配置及本地和国内公网质量，输出固定格式的中文报告与优化建议。内置可选企业通知组件，可通过宿主原生能力或钉钉 DWS CLI 将报告发送给已配置人员，默认关闭通知。
 ---
 
-# Wi-Fi Health Detector
+# Wi-Fi 无线网络健康检测
 
-Collect the complete client, radio, IP, local-network, and public-network report. Missing OS fields remain visible with their availability reason and never reduce the score.
+## 功能概览
 
-Use local execution when possible. Sandboxes can hide SSID/radio fields or block network tests. Do not describe a runtime, command, permission, or sandbox error as a disconnected Wi-Fi diagnosis.
+一键检测当前电脑的无线网络质量，生成包含健康评分、数据置信度、核心参数、本地网络质量、国内公网质量和优化建议的标准报告。适用于办公网络自检、无线网络排障和技术支持。
 
-## Commands
+- **完整检测**：采集 Wi-Fi 名称、网卡信息、信号强度、信噪比、频段、信道、信道频宽、收发速率、IP 配置及安全类型。
+- **国内多目标测试**：检查本地网关、阿里和腾讯公共 DNS，以及百度、淘宝网站的可达性、延迟与丢包。
+- **固定格式报告**：默认中文输出，支持英文和 JSON/CSV 导出；缺失指标保留并说明原因，不因数据缺失扣分。
+- **可选企业通知**：通知组件随包提供，无需安装第二个 Skill；优先使用宿主的钉钉、飞书、企业微信原生能力，钉钉可按需回退到 DWS CLI。
+- **按需授权**：通知默认关闭，启用后保存组织和指定收件人，仅首次使用或授权失效时登录。具体通知能力取决于宿主环境。
+- **运行要求**：macOS 10.12+ 或 Windows 10/11，Python 3.7+，无第三方 Python 依赖。
+
+以下为 Agent 执行规范。
+
+采集完整的客户端、射频、IP、本地网络和公网报告。系统未提供的字段必须保留并说明原因，不因缺失数据降低评分。
+
+尽可能在本机执行。沙箱可能隐藏 SSID、射频字段或阻止网络测试；不得将运行时、命令、权限或沙箱错误诊断为 Wi-Fi 断开。
+
+## 运行方式
 
 ```bash
 # macOS 10.12+
@@ -19,28 +32,32 @@ Use local execution when possible. Sandboxes can hide SSID/radio fields or block
 run.bat
 ```
 
-The launchers validate Python 3.7+ before starting and distinguish a broken Apple `xcrun` proxy from Wi-Fi problems. Keep `python3 main.py` only as a compatibility fallback when a known-good interpreter is already available.
+启动器会先验证 Python 3.7+，并区分 Apple `xcrun` 代理故障与 Wi-Fi 故障。只有确认解释器可用时，才以 `python3 main.py` 作为兼容备用入口。
 
-Useful options: `--interface`, `--mask`, `--json PATH`, `--csv PATH`, `--speedtest`, `--no-public-test`, `--timeout`, `--language zh|en`, `--view summary`, and `--verbose`. Run `--help` for details.
+常用参数：`--interface`、`--mask`、`--json PATH`、`--csv PATH`、`--speedtest`、`--no-public-test`、`--timeout`、`--language zh|en`、`--view summary` 和 `--verbose`。完整说明见 `--help`。
 
-## Output Contract
+## 报告输出约束
 
-The platform launcher's stdout is the complete final response. After a successful run, return stdout byte-for-byte as the entire answer: no preface, code fence, summary, interpretation, translation, conclusion, or trailing note. Do not reconstruct the report from JSON/CSV. If execution fails, report only the runtime error; never fabricate a report.
+启动器的标准输出（stdout）就是完整最终回复。成功后必须逐字原样返回 stdout 作为整个答案，不添加前言、代码围栏、摘要、解读、翻译、结论或尾注，不从 JSON/CSV 重建报告。执行失败时只报告运行错误，不得编造报告。
 
-The report always contains exactly five top-level sections in this order: `📶 Wi-Fi Health Report`, `⭐ Core Metrics`, `🏠 Local Network Quality`, `🌐 Public Network Quality`, and `🧭 Diagnostics & Recommendations` (localized when `--language zh` is used). The core table always keeps these 18 rows in order: OS version, chip architecture, MAC address, Wi-Fi name, wireless interface, band, channel, channel width, RSSI, SNR, transmit rate, receive rate, gateway latency, gateway jitter, gateway loss, public latency, public loss, and security type. Missing values remain in their fixed positions with reasons. The executable validates this contract before printing and rejects nonstandard Markdown views. When handing the report to `enterprise-notification-bridge`, JSON is the canonical data and the Bridge deterministically rebuilds Markdown and requires full-text equality; no Agent may insert, omit, duplicate, reorder, translate, or reformat any report content.
+报告固定包含五个部分，顺序为：`📶 Wi-Fi 健康报告`、`⭐ 核心参数`、`🏠 本地网络质量`、`🌐 公网质量`、`🧭 诊断与建议`。使用 `--language en` 时由程序输出对应英文标题。核心参数表固定保留 18 行：操作系统版本、芯片架构、MAC 地址、Wi-Fi 名称、无线接口、Wi-Fi 工作频段、无线信道、信道频宽、信号强度 RSSI、信噪比 SNR、发送速率、接收速率、网关延迟、网关抖动、网关丢包、公网延迟、公网丢包、安全类型。缺失值保留在原位置并说明原因。程序在打印前验证约束并拒绝非标准 Markdown 视图。向 `enterprise-notification-bridge` 交付报告时，以 JSON 为规范数据源，组件确定性重建 Markdown 并要求全文一致；任何 Agent 均不得插入、省略、重复、重排、翻译或重新排版报告内容。
 
-JSON and CSV are explicit machine-data exports and retain all eight raw data sections. They never change or extend the Markdown report.
+JSON 和 CSV 是显式请求的机器数据导出，保留全部八个原始数据分区，不改变或扩展 Markdown 报告。
 
-Enterprise notification is bundled as an optional component at `integrations/enterprise-notification-bridge`; no second Skill installation is needed. Notification is disabled by default. The detector hands off the validated report to the component, which skips delivery unless a channel is enabled. Its diagnostics remain outside the fixed report and never change detector stdout or exit status. The detector must never install, upgrade, authorize, or uninstall DWS.
+## 可选企业通知
 
-For notification setup or a pending notification action, read [the Bridge operations guide](integrations/enterprise-notification-bridge/OPERATIONS.md). After the first report, offer optional notification setup through a separate follow-up interaction, keeping the final report response unchanged. Remember the user's choice: use Bridge `enable` or `disable`, persist the platform, Provider-returned organization and explicit recipients, and honor a saved disabled preference. Do not enable notification just because the component or a chat client is present. Reuse valid authorization; request login only on first use or expiry.
+组件位于 `integrations/enterprise-notification-bridge`，无需安装第二个 Skill。通知默认关闭。检测器将通过验证的报告交给组件，仅渠道已启用时才进入发送流程。通知诊断位于固定报告之外，不改变检测器 stdout 或退出状态。检测器本身不得安装、升级、授权或卸载 DWS。
 
-Use capabilities explicitly advertised and callable by the host, never the Agent's name as evidence. Prefer a complete native Provider; for DingTalk only, fall back to a verified local DWS CLI when native capability is unavailable. Install DWS only during requested notification setup with applicable user authorization. Feishu/WeCom without supported host capabilities require an integration, not DWS. Preserve the report when setup or delivery cannot complete.
+配置通知或处理待办通知动作时，阅读 [通知组件操作指引](integrations/enterprise-notification-bridge/OPERATIONS.md)。首次报告后，通过独立的后续交互提供可选通知设置，保持报告最终回复原样不变。使用组件的 `enable` 或 `disable` 保存用户选择，持久化平台、Provider 返回的组织及明确指定的收件人，并尊重已保存的关闭选择。不得因为组件或聊天客户端存在就自动启用通知。复用有效授权，仅在首次使用或授权失效时请求登录。
 
-Discovery order is the explicit `ENTERPRISE_NOTIFICATION_BRIDGE` JSON command vector, then the bundled component, then the legacy adjacent Bridge directory. Existing external overrides remain supported. `--no-notify` skips notification for one run without changing saved preferences.
+依据宿主明确声明且实际可调用的能力判断可用性，不得依据 Agent 名称猜测。优先使用能力完整的原生 Provider；仅钉钉在原生能力不可用时回退到已验证的本地 DWS CLI。只有在用户要求的通知设置流程中获得适用授权后，才安装 DWS。飞书、企业微信缺少宿主能力时需要对应接入，不能以 DWS 代替。设置或发送无法完成时，保留检测报告。
 
-Run without `--mask` so the standard report shows the Wi-Fi name. Add `--mask` only when the user explicitly requests redaction or says the report will be shared publicly; never hide the SSID by default. Throughput testing is opt-in with `--speedtest`. Default public checks aggregate mainland-China targets: AliDNS `223.5.5.5` and `223.6.6.6`, Tencent Public DNS `119.29.29.29`, Baidu `www.baidu.com`, and Taobao `www.taobao.com`.
+组件发现顺序：显式 `ENTERPRISE_NOTIFICATION_BRIDGE` JSON 命令数组、内置组件、旧版相邻 Bridge 目录。继续支持已有外部路径覆盖。`--no-notify` 仅跳过本次通知，不改变已保存的偏好。
 
-Keep both transmit and receive rate rows. Windows reports independent association Rx/Tx PHY rates. Current macOS tools normally expose only the transmit PHY rate, so the receive row must remain visible with its specific unavailable reason; never infer it from transmit rate or replace it with zero. Channel width comes from full `system_profiler SPAirPortDataType` on macOS. On Windows, use the direct `netsh` field when present and otherwise derive current width from Native Wi-Fi BSS operation information elements; never substitute the adapter's configured maximum width.
+## 检测规则
 
-The skill has no third-party Python dependencies. For the schema and field semantics, read [references/OUTPUT-SCHEMA.md](references/OUTPUT-SCHEMA.md) only when integrating JSON/CSV output.
+默认不使用 `--mask`，应显示真实 Wi-Fi 名称。仅当用户明确要求脱敏或说明报告将公开分享时才启用，不得默认隐藏 SSID。吞吐量测试仅在使用 `--speedtest` 时执行。默认公网检查汇总多个国内目标：阿里公共 DNS `223.5.5.5`、`223.6.6.6`，腾讯公共 DNS `119.29.29.29`，百度 `www.baidu.com` 和淘宝 `www.taobao.com`。
+
+发送速率和接收速率两行均必须保留。Windows 可提供独立的接收/发送 PHY 协商速率；当前 macOS 工具通常仅提供发送 PHY 速率，因此接收行必须说明具体不可用原因，不得根据发送速率推测或以零替代。macOS 信道频宽取自完整的 `system_profiler SPAirPortDataType`。Windows 优先使用 `netsh` 直接提供的字段，否则从 Native Wi-Fi BSS 操作信息元素推导当前频宽；不得以网卡配置的最大频宽代替实际值。
+
+本 Skill 无第三方 Python 依赖。仅在对接 JSON/CSV 输出时，按需阅读 [输出结构与字段说明](references/OUTPUT-SCHEMA.md)。
