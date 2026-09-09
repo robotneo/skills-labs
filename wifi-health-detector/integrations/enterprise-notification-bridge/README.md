@@ -147,5 +147,5 @@ Release CI should also run the suite with Python 3.7 and on Windows with
 PowerShell available; the local PowerShell launcher test is skipped when that
 runtime is absent.
 
-See [SKILL.md](SKILL.md) for the complete cross-agent handoff recipe for Codex,
+See [OPERATIONS.md](OPERATIONS.md) for the complete cross-agent handoff recipe for Codex,
 Claude Code, WorkBuddy, OpenClaw, and generic compatible Agents.

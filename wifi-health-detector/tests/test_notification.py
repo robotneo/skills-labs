@@ -4,6 +4,8 @@ import contextlib
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -24,10 +26,50 @@ from wifi_health.output import render_json, render_text
 
 
 class NotificationIntegrationTests(unittest.TestCase):
+    def test_discovery_prefers_bundle_and_preserves_legacy_fallback(self):
+        bundled = os.path.join(ROOT, "integrations", "enterprise-notification-bridge",
+                               "run.bat" if os.name == "nt" else "run.sh")
+        legacy = os.path.join(REPOSITORY_ROOT, "enterprise-notification-bridge",
+                              "run.bat" if os.name == "nt" else "run.sh")
+        for available, expected in (([bundled, legacy], bundled), ([legacy], legacy)):
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "wifi_health.notification.os.path.isfile", side_effect=lambda path: path in available
+            ):
+                self.assertEqual(notification_module._discover_bridge_command(), ([expected], False))
+
+    def test_standalone_copy_delivers_disabled_without_dws(self):
+        installed = os.path.join(self.directory.name, "installed-skill")
+        shutil.copytree(ROOT, installed, ignore=shutil.ignore_patterns("__pycache__"))
+        environment = dict(os.environ)
+        environment.pop("ENTERPRISE_NOTIFICATION_BRIDGE", None)
+        environment.update({
+            "ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG": os.path.join(self.directory.name, "config.json"),
+            "ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER": os.path.join(self.directory.name, "ledger.sqlite3"),
+            "ENTERPRISE_NOTIFICATION_BRIDGE_STATE": os.path.join(self.directory.name, "state"),
+            "ENTERPRISE_NOTIFICATION_BRIDGE_PYTHON": sys.executable,
+            "DWS_EXE": os.path.join(self.directory.name, "missing-dws"),
+        })
+        script = (
+            "import json; from wifi_health.notification import trigger_notification; "
+            "p='integrations/enterprise-notification-bridge/tests/fixtures/'; "
+            "m=open(p+'standard-report.md',encoding='utf-8').read(); "
+            "j=json.load(open(p+'standard-report.json',encoding='utf-8')); "
+            "r=trigger_notification(m,j); print(r.status)"
+        )
+        result = subprocess.run([sys.executable, "-c", script], cwd=installed,
+                                env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "notification_disabled")
+        entries = []
+        for directory, _, files in os.walk(installed):
+            if "SKILL.md" in files:
+                entries.append(os.path.join(directory, "SKILL.md"))
+        self.assertEqual(entries, [os.path.join(installed, "SKILL.md")])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         fixture_directory = os.path.join(
-            REPOSITORY_ROOT, "enterprise-notification-bridge", "tests", "fixtures"
+            ROOT, "integrations", "enterprise-notification-bridge", "tests", "fixtures"
         )
         with open(os.path.join(fixture_directory, "standard-report.md"), encoding="utf-8") as handle:
             self.markdown = handle.read()
@@ -478,7 +520,7 @@ class NotificationIntegrationTests(unittest.TestCase):
         report = self._sample_report()
         expected = render_text(report, language="en")
         adjacent_launcher = os.path.join(
-            REPOSITORY_ROOT, "enterprise-notification-bridge", "run.sh"
+            ROOT, "integrations", "enterprise-notification-bridge", "run.sh"
         )
         observed = []
         real_run = notification_module.subprocess.run

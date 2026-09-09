@@ -10,5 +10,6 @@
   "entry": {"macos": "run.sh", "windows": "run.bat", "compatibility": "main.py"},
   "output_type": ["text", "json", "csv"],
   "optional_integrations": ["enterprise-notification-bridge"],
+  "bundled_components": {"enterprise-notification-bridge": {"path": "integrations/enterprise-notification-bridge", "enabled_by_default": false, "conditional_external_dependency": "dws (DingTalk CLI fallback only)"}},
   "repository": "https://github.com/robotneo/skills-labs/tree/main/wifi-health-detector"
 }

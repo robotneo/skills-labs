@@ -9,7 +9,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST_PATH = os.path.join(ROOT, "manifest.json")
-SKILL_YAML_PATH = os.path.join(ROOT, "skill.yaml")
+SKILL_YAML_PATH = os.path.join(ROOT, "component.yaml")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 

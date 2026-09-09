@@ -1,11 +1,8 @@
----
-name: enterprise-notification-bridge
-description: Use when a validated Wi-Fi health report must be routed to configured enterprise notification channels through native host capabilities or the adjacent Bridge launcher.
----
-
 # Enterprise Notification Bridge
 
-Use this Skill only after the detector has produced and validated its standard
+This is an internal optional component of wifi-health-detector, not a separately
+installed Skill. Run the commands below from this component directory.
+Use this component only after the detector has produced and validated its standard
 Markdown report and machine-readable JSON report. The report is the source of
 truth; an AI-generated summary is a separate envelope field.
 
@@ -58,6 +55,7 @@ delegates to `run.ps1`). The launcher forwards the explicit Bridge commands:
 
 ```text
 run.sh status
+run.sh disable
 run.sh setup --platform dingtalk --provider auto [--capabilities <capabilities.json>]
 run.sh bind --platform <configured-platform>
 run.sh recipients --platform <configured-platform> --profile corpId:userId --recipient <configured-selector>
@@ -81,6 +79,8 @@ run.sh deliver --envelope <validated-envelope.json>
 ```
 
 `enable` only persists an enabled channel and performs no login or delivery.
+`disable` persists the user's choice to turn notifications off while retaining
+organization and recipient configuration. It performs no Provider operations.
 `setup` prefers a host-native Provider only when it declares the complete setup
 operation set: `auth_status`, `login`, and `list_profiles`. Send-only or partial
 native capability is unavailable for setup; `auto` falls back to DWS and an
@@ -111,8 +111,8 @@ MCP surface contains six tools including `notification_status`.
 
 The CLI emits exactly one JSON document on stdout and diagnostics on stderr.
 `deliver` and `retry` remain process-successful when delivery itself fails;
-malformed envelopes and internal errors are nonzero. The adjacent detector
-launcher discovers this `run.sh`/`run.bat` path explicitly and never searches
+malformed envelopes and internal errors are nonzero. The containing detector
+launcher discovers this bundled `run.sh`/`run.bat` path explicitly and never searches
 arbitrary similarly named commands.
 
 The detector's `--no-notify` flag suppresses the optional trigger for one run

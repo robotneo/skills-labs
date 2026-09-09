@@ -21,7 +21,7 @@ from .service import BridgeService, DeliveryBatchResult
 
 
 COMMAND_NAMES = (
-    "status", "enable", "bind", "recipients", "deliver", "retry",
+    "status", "enable", "disable", "bind", "recipients", "deliver", "retry",
     "continue", "setup",
 )
 REPORT_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -103,6 +103,11 @@ class BridgeCommands(object):
             "status": "enabled",
             "channel": channel.to_dict(),
         }
+
+    def disable(self):
+        self.config.enabled = False
+        save_config(self.config, self.config_path)
+        return {"status": "disabled"}
 
     def bind(self, platform, capabilities=None):
         if not isinstance(platform, str) or not platform:
@@ -348,6 +353,8 @@ def _execute(arguments, commands):
         return commands.status()
     if arguments.command == "enable":
         return commands.enable(arguments.platform, arguments.provider)
+    if arguments.command == "disable":
+        return commands.disable()
     if arguments.command == "bind":
         return commands.bind(arguments.platform, arguments.capabilities)
     if arguments.command == "recipients":
@@ -379,6 +386,7 @@ def _parser():
     parser.add_argument("--state")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("status")
+    subparsers.add_parser("disable")
 
     setup = subparsers.add_parser("setup")
     setup.add_argument("--platform", required=True,

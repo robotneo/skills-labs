@@ -13,5 +13,6 @@
   "entry": {"macos": "run.sh", "windows": "run.bat", "powershell": "run.ps1", "compatibility": "main.py"},
   "output_type": ["json", "mcp-json-rpc"],
   "optional": true,
-  "repository": "https://github.com/robotneo/skills-labs/tree/main/enterprise-notification-bridge"
+  "type": "internal-component",
+  "repository": "https://github.com/robotneo/skills-labs/tree/main/wifi-health-detector/integrations/enterprise-notification-bridge"
 }

@@ -10,9 +10,9 @@ import unittest
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKILL_PATH = os.path.join(ROOT, "SKILL.md")
+SKILL_PATH = os.path.join(ROOT, "OPERATIONS.md")
 README_PATH = os.path.join(ROOT, "README.md")
-DETECTOR_ROOT = os.path.join(os.path.dirname(ROOT), "wifi-health-detector")
+DETECTOR_ROOT = os.path.dirname(os.path.dirname(ROOT))
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 if ROOT not in sys.path:
@@ -239,16 +239,10 @@ class AgentInstructionContractTests(unittest.TestCase):
         self.assertIn("empty", text.lower())
         self.assertIn("non-blocking", text.lower())
 
-    def test_skill_frontmatter_and_workflow_are_structured_and_ordered(self):
+    def test_internal_component_has_one_skill_entry_and_ordered_workflow(self):
         text = _read(SKILL_PATH)
-        match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-        self.assertIsNotNone(match)
-        fields = dict(
-            line.split(":", 1) for line in match.group(1).splitlines()
-            if ":" in line
-        )
-        self.assertEqual(fields["name"].strip(), "enterprise-notification-bridge")
-        self.assertTrue(fields["description"].strip().startswith("Use when"))
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "SKILL.md")))
+        self.assertTrue(os.path.isfile(os.path.join(DETECTOR_ROOT, "SKILL.md")))
         workflow = (
             "Validate both report representations",
             "Read the Bridge configuration",

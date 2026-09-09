@@ -108,6 +108,17 @@ class ActivationProvider(Provider):
 
 
 class CliTests(unittest.TestCase):
+    def test_disable_persists_choice_and_keeps_binding_without_provider_calls(self):
+        config = load_config(self.config_path)
+        before = [channel.to_dict() for channel in config.channels]
+        commands = BridgeCommands(object(), config, self.config_path)
+        output = io.StringIO()
+        self.assertEqual(main(["disable"], commands=commands, stdout=output), 0)
+        self.assertEqual(json.loads(output.getvalue()), {"status": "disabled"})
+        saved = load_config(self.config_path)
+        self.assertFalse(saved.enabled)
+        self.assertEqual([channel.to_dict() for channel in saved.channels], before)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.config_path = os.path.join(self.directory.name, "config.json")

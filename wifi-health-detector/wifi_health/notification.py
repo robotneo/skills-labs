@@ -208,13 +208,14 @@ def _discover_bridge_command():
     if "ENTERPRISE_NOTIFICATION_BRIDGE" in os.environ:
         return os.environ["ENTERPRISE_NOTIFICATION_BRIDGE"], True
     skill_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bridge_directory = os.path.join(
-        os.path.dirname(skill_directory), "enterprise-notification-bridge"
-    )
     launcher_name = "run.bat" if os.name == "nt" else "run.sh"
-    launcher = os.path.join(bridge_directory, launcher_name)
-    if os.path.isfile(launcher):
-        return [launcher], False
+    for bridge_directory in (
+        os.path.join(skill_directory, "integrations", "enterprise-notification-bridge"),
+        os.path.join(os.path.dirname(skill_directory), "enterprise-notification-bridge"),
+    ):
+        launcher = os.path.join(bridge_directory, launcher_name)
+        if os.path.isfile(launcher):
+            return [launcher], False
     return None, False
 
 
