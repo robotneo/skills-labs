@@ -1,4 +1,5 @@
 ---
+version: 2.5.0
 name: wifi-health-detector
 description: 检测 macOS 10.12+ 和 Windows 10/11 的 Wi-Fi 健康状况，分析信号、干扰、连接速率、信道频宽、IP 配置及本地和国内公网质量，输出固定格式的中文报告与优化建议。内置可选企业通知组件，可通过宿主原生能力或钉钉 DWS CLI 将报告发送给已配置人员，默认关闭通知。
 ---
