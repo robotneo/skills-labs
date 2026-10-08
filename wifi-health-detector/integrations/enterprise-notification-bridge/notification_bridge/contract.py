@@ -73,7 +73,7 @@ RECOMMENDATION_IDS = ISSUE_IDS | frozenset(("prefer_higher_band", "no_action"))
 RFC3339_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
-DETECTOR_VERSION_PATTERN = re.compile(r"^2\.(?:4|5)\.\d+(?:[+-][0-9A-Za-z.-]+)?$")
+DETECTOR_VERSION_PATTERN = re.compile(r"^2\.(?:4|5|6)\.\d+(?:[+-][0-9A-Za-z.-]+)?$")
 REPORT_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -118,8 +118,19 @@ def validate_envelope(envelope):
     validate_markdown_contract(report["markdown"])
     validate_json_contract(report["json"])
     language = detect_language(report["markdown"])
-    if (language is None
-            or render_standard_markdown(report["json"], language) != report["markdown"]):
+    canonical = render_standard_markdown(report["json"], language) if language else None
+    legacy = None
+    if language and re.match(r"^2\.[45]\.", envelope.detector["version"]):
+        # Older producers printed integral floats as 0.0. Preserve their exact,
+        # deterministic representation without weakening schema-2.6 validation.
+        legacy_json = copy.deepcopy(report["json"])
+        for fields in legacy_json["sections"].values():
+            for item in fields.values():
+                value = item["value"]
+                if isinstance(value, float) and value.is_integer():
+                    item["value"] = str(value)
+        legacy = render_standard_markdown(legacy_json, language)
+    if language is None or report["markdown"] not in (canonical, legacy):
         raise ContractError("standard report canonical Markdown contract violated")
     checked_at = report["json"]["sections"]["system"]["checked_at"]["value"]
     if checked_at != envelope.generated_at:

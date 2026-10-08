@@ -8,6 +8,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
+@unittest.skipIf(os.name == "nt", "macOS launcher integration tests")
 class LauncherTests(unittest.TestCase):
     def test_macos_launcher_skips_broken_python_and_uses_override(self):
         real_python = os.environ.get("TEST_PYTHON")
@@ -31,7 +32,7 @@ class LauncherTests(unittest.TestCase):
             os.chmod(broken, stat.S_IRWXU)
             env = dict(os.environ, PATH=directory, WIFI_HEALTH_PYTHON=broken)
             result = subprocess.run(
-                ["/bin/sh", os.path.join(ROOT, "run.sh"), "--help"],
+                ["/bin/sh", os.path.join(ROOT, "run.sh"), "--engine", "python", "--help"],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

@@ -203,8 +203,9 @@ def render_csv(report, mask=False):
 
 
 def _escape(value):
+    if isinstance(value, float) and value.is_integer(): value = int(value)
     if isinstance(value, (list, tuple)): value = ", ".join(str(part) for part in value)
-    return str(value).replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>")
+    return str(value).replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
 
 
 def _reason(reason, language):

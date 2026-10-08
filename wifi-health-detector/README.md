@@ -1,11 +1,12 @@
 # Wi-Fi Health Detector Skill
 
-无线网络健康检测 Skill 2.5，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。采用原生启动器和统一 Python 核心，能够区分 Python/权限/系统命令问题与真实 Wi-Fi 故障。
+无线网络健康检测 Skill 2.6，支持 macOS 10.12+（Intel/Apple Silicon）和 Windows 10/11（中英文系统）。启动器按 Python → 系统原生 → Node 顺序选择引擎，无需为检测专门安装 Python，能够区分运行时/权限/命令问题与真实 Wi-Fi 故障。
 
 ## 特性
 
 - 支持 macOS 10.12+、Windows 10/11
-- 仅依赖 Python 3.7+，无第三方库
+- 优先 Python 3.7+；macOS 自带 JXA/Foundation、Windows PowerShell 5.1 可独立兜底；Node 16+ 为最后备用，无第三方库
+- 网关、公网和 DNS 测试并发执行，支持单项超时、总采集预算和跳过周边扫描的快速模式
 - 完整输出系统、适配器、连接、射频、链路、IP、本地质量、公网质量和诊断字段
 - 不可获取字段保留原因，不用“未知”或虚假默认值扣分
 - 分项评分、数据置信度和基于证据的优先级建议
@@ -78,4 +79,12 @@ run.bat --view summary
 
 Wi-Fi 参数、网关 ping、丢包率和周边热点扫描需要读取真实网络接口。沙箱或普通权限可能隐藏部分字段；报告会明确显示“不可用”和原因。终端默认展示完整 SSID、BSSID、MAC 和地址；仅在用户明确要求脱敏或公开分享时使用 `--mask`。
 
-macOS 若系统 `python3` 报 `invalid active developer path`，请直接运行 `run.sh`。启动器会优先寻找独立 Python；若仍不可用，会提示安装 Python，而不会误报 Wi-Fi 未连接。
+macOS 若系统 `python3` 报 `invalid active developer path`，请直接运行 `run.sh`。找不到可用 Python 时使用原生引擎，最后尝试 Node，不会误报 Wi-Fi 未连接。
+
+```bash
+./run.sh --engine native --fast --budget 15 --no-notify
+./run.sh --engine node --json report.json --no-notify
+# Windows: run.bat --engine native --fast --budget 15 --no-notify
+```
+
+`WIFI_HEALTH_PYTHON` / `WIFI_HEALTH_NODE` 可指定宿主提供的解释器路径。`--engine` 默认 `auto`；显式指定后不可用就失败，不静默回退。原生/Node 引擎本版本不调用 Python 通知组件；Windows 频宽缺少 `netsh` 数据时保留不可用。部署和测试见 [运行环境说明](references/RUNTIMES.md)。

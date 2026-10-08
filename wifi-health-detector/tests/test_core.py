@@ -213,7 +213,7 @@ class PublicQualityTests(unittest.TestCase):
         }
 
         with patch("wifi_health.cli.ping_target", side_effect=lambda runner, target: ping_results[target]), patch(
-            "wifi_health.cli.dns_test", side_effect=lambda host: dns_results[host]
+            "wifi_health.cli.dns_test", side_effect=lambda host, timeout=10: dns_results[host]
         ):
             apply_quality(report, object())
 

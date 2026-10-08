@@ -1,6 +1,6 @@
 # Output schema 2.0
 
-The package version is 2.5; the machine-readable schema remains 2.0. Markdown
+The package version is 2.6; the machine-readable schema remains 2.0. Markdown
 has one validated standard view with five fixed top-level sections; JSON and
 CSV are explicit machine-data exports that retain every field.
 

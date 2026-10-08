@@ -1,5 +1,5 @@
 ---
-version: 2.5.0
+version: 2.6.0
 name: wifi-health-detector
 description: 检测 macOS 10.12+ 和 Windows 10/11 的 Wi-Fi 健康状况，分析信号、干扰、连接速率、信道频宽、IP 配置及本地和国内公网质量，输出固定格式的中文报告与优化建议。内置可选企业通知组件，可通过宿主原生能力或钉钉 DWS CLI 将报告发送给已配置人员，默认关闭通知。
 ---
@@ -15,7 +15,7 @@ description: 检测 macOS 10.12+ 和 Windows 10/11 的 Wi-Fi 健康状况，分�
 - **固定格式报告**：默认中文输出，支持英文和 JSON/CSV 导出；缺失指标保留并说明原因，不因数据缺失扣分。
 - **可选企业通知**：通知组件随包提供，无需安装第二个 Skill；优先使用宿主的钉钉、飞书、企业微信原生能力，钉钉可按需回退到 DWS CLI。
 - **按需授权**：通知默认关闭，启用后保存组织和指定收件人，仅首次使用或授权失效时登录。具体通知能力取决于宿主环境。
-- **运行要求**：macOS 10.12+ 或 Windows 10/11，Python 3.7+，无第三方 Python 依赖。
+- **运行要求**：macOS 10.12+ 或 Windows 10/11。优先本机 Python 3.7+，没有可用 Python 时使用系统原生引擎，最后尝试已提供的 Node.js 16+；不自动安装运行时或第三方包。
 
 以下为 Agent 执行规范。
 
@@ -33,9 +33,11 @@ description: 检测 macOS 10.12+ 和 Windows 10/11 的 Wi-Fi 健康状况，分�
 run.bat
 ```
 
-启动器会先验证 Python 3.7+，并区分 Apple `xcrun` 代理故障与 Wi-Fi 故障。只有确认解释器可用时，才以 `python3 main.py` 作为兼容备用入口。
+必须从启动器进入，不要因为 Agent 没有自带 Python 就要求安装 Python 或直接执行 `main.py`。启动器按 Python → 系统原生 → Node 顺序检查能力，只选择一次。macOS 原生引擎使用系统 JXA/Foundation（不操作 GUI），Windows 使用 PowerShell 5.1。`--engine auto|python|native|node` 可指定引擎；强制指定时不可用就报错，不静默改用其他引擎。
 
-常用参数：`--interface`、`--mask`、`--json PATH`、`--csv PATH`、`--speedtest`、`--no-public-test`、`--timeout`、`--language zh|en`、`--view summary` 和 `--verbose`。完整说明见 `--help`。
+`WIFI_HEALTH_PYTHON` 和 `WIFI_HEALTH_NODE` 可指定宿主提供的可执行文件路径，不接受命令字符串。不要根据 Agent 名称猜测路径。Python 发现覆盖虚拟环境、Conda、PATH、常见 macOS 安装位置和 Windows 注册表；每个候选有短时验证，不全盘扫描。执行位置必须是被检测电脑，不能用远程容器的网络代替用户电脑。权限拒绝、字段隐藏、网络失败不是切换引擎的理由，不得借 Node 绕过企业策略或重复发送通知。
+
+常用参数：`--interface`、`--mask`、`--json PATH`、`--csv PATH`、`--speedtest`、`--no-public-test`、`--timeout`、`--budget`、`--fast`、`--language zh|en`、`--view summary` 和 `--verbose`。单项超时默认 10 秒，总采集预算默认 35 秒（不含启动发现、导出与通知）。`--fast` 跳过周边热点扫描，保留对应字段并说明未执行。完整说明见 `--help`。
 
 ## 报告输出约束
 
@@ -61,4 +63,4 @@ JSON 和 CSV 是显式请求的机器数据导出，保留全部八个原始数�
 
 发送速率和接收速率两行均必须保留。Windows 可提供独立的接收/发送 PHY 协商速率；当前 macOS 工具通常仅提供发送 PHY 速率，因此接收行必须说明具体不可用原因，不得根据发送速率推测或以零替代。macOS 信道频宽取自完整的 `system_profiler SPAirPortDataType`。Windows 优先使用 `netsh` 直接提供的字段，否则从 Native Wi-Fi BSS 操作信息元素推导当前频宽；不得以网卡配置的最大频宽代替实际值。
 
-本 Skill 无第三方 Python 依赖。仅在对接 JSON/CSV 输出时，按需阅读 [输出结构与字段说明](references/OUTPUT-SCHEMA.md)。
+原生/Node 引擎本版本不调用依赖 Python 的通知 Bridge，stderr 会明确提示通知不可用；`--no-notify` 跳过提示，不能声称已经发送。上述企业通知流程仅适用于 Python 引擎。Windows 原生/Node 模式下，`netsh` 未提供频宽时保留不可用，本版本不执行 Python Native WLAN 补充。不得以配置最大频宽代替实测。各引擎均无第三方包依赖。部署与能力边界见 [运行环境说明](references/RUNTIMES.md)。仅对接 JSON/CSV 时按需阅读 [输出结构与字段说明](references/OUTPUT-SCHEMA.md)。

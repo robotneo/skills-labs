@@ -269,7 +269,7 @@ class AgentInstructionContractTests(unittest.TestCase):
     def test_detector_declares_bridge_as_optional_integration(self):
         with open(os.path.join(DETECTOR_ROOT, "manifest.json")) as handle:
             manifest = json.load(handle)
-        self.assertEqual(manifest["version"], "2.5.0")
+        self.assertEqual(manifest["version"], "2.6.0")
         self.assertIn("enterprise-notification-bridge", manifest["optional_integrations"])
         skill = _read(os.path.join(DETECTOR_ROOT, "SKILL.md"))
         self.assertIn("enterprise-notification-bridge", skill)

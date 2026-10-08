@@ -1,0 +1,33 @@
+name: Wi-Fi runtime contracts
+on:
+  push:
+    paths: ['wifi-health-detector/**', '.github/workflows/wifi-runtime-tests.yml']
+  pull_request:
+    paths: ['wifi-health-detector/**', '.github/workflows/wifi-runtime-tests.yml']
+jobs:
+  contracts:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Detector and portable engine contracts
+        if: runner.os == 'macOS'
+        run: python -m unittest discover -s wifi-health-detector/tests -v
+      - name: Windows portable contracts (PowerShell 5.1 and Node)
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s wifi-health-detector/tests -p test_portable.py -v
+      - name: Notification contracts
+        if: runner.os == 'macOS'
+        run: python -m unittest discover -s wifi-health-detector/integrations/enterprise-notification-bridge/tests -v
+      - name: Native Windows smoke (PowerShell 5.1, no Python entry)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: wifi-health-detector\run.bat --engine native --fast --no-public-test --no-notify --timeout 2 --budget 5

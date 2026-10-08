@@ -9,7 +9,6 @@ import sys
 
 from .models import Report
 from .parsers import band_for_channel, parse_macos_airport, parse_macos_default_route, parse_windows_ipconfig, parse_windows_netsh
-from .windows_wlan import current_channel_width
 
 
 AIRPORT = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
@@ -100,11 +99,12 @@ class MacCollector(object):
             airport = self.runner.run([AIRPORT, "-I"])
             if airport.stdout:
                 values.update(parse_macos_airport(airport.stdout)); sources.append("airport -I")
-            scan = self.runner.run([AIRPORT, "-s"], timeout=15)
-            if scan.stdout and values.get("channel"):
-                same, adjacent = _count_macos_channels(scan.stdout, values["channel"])
-                values["same_channel_networks"] = same
-                values["adjacent_channel_networks"] = adjacent
+            if not getattr(self.runner, "fast", False):
+                scan = self.runner.run([AIRPORT, "-s"], timeout=15)
+                if scan.stdout and values.get("channel"):
+                    same, adjacent = _count_macos_channels(scan.stdout, values["channel"])
+                    values["same_channel_networks"] = same
+                    values["adjacent_channel_networks"] = adjacent
         if not values:
             wdutil = self.runner.run(["/usr/bin/wdutil", "info"])
             reason = wdutil.stderr or wdutil.stdout or "wireless details unavailable"
@@ -146,7 +146,14 @@ class WindowsCollector(object):
         netsh = self.runner.run(["netsh", "wlan", "show", "interfaces"])
         values = parse_windows_netsh(netsh.stdout)
         if values and values.get("channel_width") is None:
-            width = current_channel_width(values.get("ssid"), values.get("bssid"))
+            # Native WLAN calls have no Python-level cancellation. Isolate them
+            # under the same command deadline as all other collectors.
+            script = "import sys,json; sys.path.insert(0,sys.argv[1]); from wifi_health.windows_wlan import current_channel_width; print(json.dumps(current_channel_width(sys.argv[2] or None,sys.argv[3] or None)))"
+            result = self.runner.run([sys.executable, "-c", script, os.path.dirname(os.path.dirname(__file__)), values.get("ssid") or "", values.get("bssid") or ""])
+            try:
+                width = json.loads(result.stdout) if result.ok else None
+            except ValueError:
+                width = None
             if width is not None:
                 values["channel_width"] = width
         if not values:
@@ -175,7 +182,8 @@ class WindowsCollector(object):
             source = "ipconfig"
         for name in ("ipv4", "ipv6", "subnet", "gateway", "dns_servers", "dhcp_enabled", "dhcp_lease"):
             if name in ip_values: report.set("ip", name, ip_values[name], source=source)
-        self._nearby(report, values.get("channel"))
+        if not getattr(self.runner, "fast", False):
+            self._nearby(report, values.get("channel"))
 
     def _powershell_ip(self, interface):
         if not interface: return {}
@@ -249,4 +257,7 @@ def collect_report(runner, interface=None):
     if system == "darwin": MacCollector(runner, interface).collect(report)
     elif system == "windows": WindowsCollector(runner, interface).collect(report)
     else: raise RuntimeError("Unsupported operating system: %s" % platform.system())
+    if getattr(runner, "fast", False):
+        for name in ("same_channel_networks", "adjacent_channel_networks"):
+            report.mark_unavailable("radio", name, "disabled by --fast")
     return report

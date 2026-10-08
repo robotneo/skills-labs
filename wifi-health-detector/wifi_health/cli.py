@@ -4,6 +4,7 @@ import argparse
 import json
 import statistics
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from .collectors import collect_report
 from .command import CommandRunner
@@ -26,6 +27,9 @@ PUBLIC_TARGET_LABEL = " / ".join(PUBLIC_PING_TARGETS + PUBLIC_DNS_HOSTS)
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Cross-platform Wi-Fi health detector")
+    parser.add_argument("--engine", choices=("auto", "python", "native", "node"), default="auto", help="engine selected by the platform launcher")
+    parser.add_argument("--budget", type=int, default=35, help="total collection/network time budget in seconds")
+    parser.add_argument("--fast", action="store_true", help="skip nearby network scan")
     parser.add_argument("--interface", help="override the automatically detected Wi-Fi interface")
     parser.add_argument("--speedtest", action="store_true", help="run an optional 1 MB throughput test")
     parser.add_argument("--no-public-test", action="store_true", help="skip DNS and public connectivity tests")
@@ -42,21 +46,32 @@ def build_parser():
 
 def apply_quality(report, runner, public_test=True, run_speed=False, timeout=10):
     gateway = report.get("ip", "gateway")
+    # All independent probes start together; merge only on the caller thread.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        local_future = pool.submit(ping_target, runner, str(gateway.value)) if gateway.available else None
+        dns_futures = [pool.submit(dns_test, host, min(timeout, runner.remaining()) if hasattr(runner, "remaining") else timeout) for host in PUBLIC_DNS_HOSTS] if public_test else []
+        public_futures = [pool.submit(ping_target, runner, target) for target in PUBLIC_PING_TARGETS] if public_test else []
+        local_result = local_future.result() if local_future else None
+        dns_results = [future.result() for future in dns_futures]
+        ping_results = [future.result() for future in public_futures]
     if gateway.available:
-        result = ping_target(runner, str(gateway.value))
+        result = local_result
+        report.set("local_quality", "target", gateway.value, source="default gateway")
         if result:
             report.set("local_quality", "target", gateway.value, source="default gateway")
             report.set("local_quality", "reachable", result["reachable"], source="ping")
             report.set("local_quality", "packet_loss", result["packet_loss_percent"], "%", "ping")
             if result["latency_ms"] is not None: report.set("local_quality", "latency", result["latency_ms"], "ms", "ping")
             if result["jitter_ms"] is not None: report.set("local_quality", "jitter", result["jitter_ms"], "ms", "ping")
+        else:
+            for name in ("reachable", "packet_loss", "latency", "jitter"):
+                report.mark_unavailable("local_quality", name, "ping did not produce a valid measurement", "ping")
     else:
         report.mark_unavailable("local_quality", "target", "default gateway not available")
     if not public_test:
         for name in report.sections["public_quality"]: report.mark_unavailable("public_quality", name, "disabled by --no-public-test")
         return
     report.set("public_quality", "target", PUBLIC_TARGET_LABEL, source="mainland China defaults")
-    dns_results = [dns_test(host) for host in PUBLIC_DNS_HOSTS]
     dns_latencies = [item["latency_ms"] for item in dns_results if item.get("latency_ms") is not None]
     if dns_latencies:
         report.set("public_quality", "dns_latency", _median(dns_latencies), "ms", "socket.getaddrinfo: Baidu/Taobao")
@@ -64,18 +79,21 @@ def apply_quality(report, runner, public_test=True, run_speed=False, timeout=10)
         reasons = [item.get("reason") for item in dns_results if item.get("reason")]
         report.mark_unavailable("public_quality", "dns_latency", "; ".join(reasons) or "DNS failed", "socket.getaddrinfo")
 
-    ping_results = [ping_target(runner, target) for target in PUBLIC_PING_TARGETS]
     ping_results = [item for item in ping_results if item]
     reachable_results = [item for item in ping_results if item.get("reachable")]
-    report.set("public_quality", "reachable", bool(reachable_results), source="multi-target ping")
     if ping_results:
+        report.set("public_quality", "reachable", bool(reachable_results), source="multi-target ping")
         report.set("public_quality", "packet_loss", _median([item["packet_loss_percent"] for item in ping_results]), "%", "multi-target ping median")
+    else:
+        for name in ("reachable", "packet_loss", "latency", "jitter"):
+            report.mark_unavailable("public_quality", name, "ping did not produce a valid measurement", "ping")
     latencies = [item["latency_ms"] for item in reachable_results if item.get("latency_ms") is not None]
     jitters = [item["jitter_ms"] for item in reachable_results if item.get("jitter_ms") is not None]
     if latencies: report.set("public_quality", "latency", _median(latencies), "ms", "multi-target ping median")
     if jitters: report.set("public_quality", "jitter", _median(jitters), "ms", "multi-target ping median")
     if run_speed:
-        speed = speed_test(timeout)
+        remaining = min(timeout, runner.remaining()) if hasattr(runner, "remaining") else timeout
+        speed = speed_test(remaining) if remaining > 0 else None
         if speed is None: report.mark_unavailable("public_quality", "download_speed", "download test failed", "Cloudflare 1 MB")
         else: report.set("public_quality", "download_speed", speed, "Mbps", "Cloudflare 1 MB")
     else: report.mark_unavailable("public_quality", "download_speed", "enable with --speedtest")
@@ -83,8 +101,11 @@ def apply_quality(report, runner, public_test=True, run_speed=False, timeout=10)
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.timeout < 1 or args.budget < 1:
+        build_parser().error("--timeout and --budget must be positive")
     try:
-        runner = CommandRunner(timeout=max(1, args.timeout), verbose=args.verbose)
+        runner = CommandRunner(timeout=args.timeout, verbose=args.verbose, budget=args.budget)
+        runner.fast = args.fast
         report = collect_report(runner, args.interface)
         apply_quality(report, runner, not args.no_public_test, args.speedtest, args.timeout)
         report.diagnosis = diagnose(report)

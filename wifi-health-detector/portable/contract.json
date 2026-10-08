@@ -1,0 +1,215 @@
+{
+  "ZH_RECOMMENDATIONS": {
+    "weak_signal": "靠近接入点、减少遮挡，或增加更近的 Mesh/AP 节点。",
+    "moderate_signal": "优化 AP 位置或减少遮挡，以改善视频会议和游戏体验。",
+    "channel_congestion": "启用自动信道选择，或选择较空闲的不重叠信道。",
+    "prefer_higher_band": "覆盖足够时优先使用 5 GHz 或 6 GHz；2.4 GHz 留给远距离和旧设备。",
+    "gateway_loss": "先靠近路由器复测，再检查干扰、AP 负载、固件和 Mesh 回程。",
+    "upstream_loss": "优先检查运营商或上游链路，不要先修改 Wi-Fi 设置。",
+    "slow_dns": "重复测试 DNS，并比较路由器/运营商 DNS 与可信公共 DNS。",
+    "weak_security": "启用 WPA2-AES 或 WPA3，并设置高强度密码。",
+    "no_action": "当前无需调整 Wi-Fi。"
+  },
+  "ZH_ISSUES": {
+    "weak_signal": "Wi-Fi 信号较弱",
+    "moderate_signal": "Wi-Fi 信号需要关注",
+    "channel_congestion": "当前信道较拥挤",
+    "gateway_loss": "本地网关存在丢包",
+    "upstream_loss": "公网链路存在丢包",
+    "slow_dns": "DNS 解析较慢",
+    "weak_security": "无线安全配置较弱"
+  },
+  "EN_ISSUES": {
+    "weak_signal": "Weak Wi-Fi signal",
+    "moderate_signal": "Wi-Fi signal needs attention",
+    "channel_congestion": "Channel congestion",
+    "gateway_loss": "Packet loss to the gateway",
+    "upstream_loss": "Packet loss on the public path",
+    "slow_dns": "Slow DNS resolution",
+    "weak_security": "Weak wireless security"
+  },
+  "BADGES": {
+    "zh": {
+      "healthy": "✅ 健康",
+      "warning": "⚠️ 一般/需关注",
+      "poor": "❌ 较差",
+      "insufficient_data": "❔ 数据不足"
+    },
+    "en": {
+      "healthy": "✅ Healthy",
+      "warning": "⚠️ Warning",
+      "poor": "❌ Poor",
+      "insufficient_data": "❔ Insufficient data"
+    }
+  },
+  "REASON_ZH": {
+    "not provided by operating system": "操作系统未提供",
+    "not found": "未找到",
+    "permission denied": "权限不足",
+    "unsupported": "当前系统不支持",
+    "default gateway not available": "默认网关不可用",
+    "disabled by --no-public-test": "已通过 --no-public-test 禁用",
+    "enable with --speedtest": "使用 --speedtest 开启",
+    "download test failed": "下载测速失败",
+    "macOS does not expose the current receive PHY rate": "macOS 未提供当前接收 PHY 速率"
+  },
+  "ZH_CORE_ROW_LABELS": [
+    "操作系统版本",
+    "芯片架构",
+    "MAC 地址",
+    "Wi-Fi 名称",
+    "无线接口",
+    "Wi-Fi 工作频段",
+    "无线信道",
+    "信道频宽",
+    "信号强度 RSSI",
+    "信噪比 SNR",
+    "发送速率",
+    "接收速率",
+    "网关延迟",
+    "网关抖动",
+    "网关丢包",
+    "公网延迟",
+    "公网丢包",
+    "安全类型"
+  ],
+  "EN_CORE_ROW_LABELS": [
+    "Operating System Version",
+    "Chip Architecture",
+    "MAC Address",
+    "Wi-Fi Name",
+    "Wireless Interface",
+    "Wi-Fi Band",
+    "Wireless Channel",
+    "Channel Width",
+    "Signal Strength (RSSI)",
+    "Signal-to-Noise Ratio (SNR)",
+    "Transmit Rate",
+    "Receive Rate",
+    "Gateway Latency",
+    "Gateway Jitter",
+    "Gateway Packet Loss",
+    "Public Latency",
+    "Public Packet Loss",
+    "Security Type"
+  ],
+  "ZH_LOCAL_ROW_LABELS": [
+    "测试目标",
+    "可达状态",
+    "平均延迟",
+    "网络抖动",
+    "丢包率"
+  ],
+  "EN_LOCAL_ROW_LABELS": [
+    "Target",
+    "Reachable",
+    "Latency",
+    "Jitter",
+    "Packet Loss"
+  ],
+  "ZH_PUBLIC_ROW_LABELS": [
+    "测试目标",
+    "可达状态",
+    "DNS 解析延迟",
+    "平均延迟",
+    "网络抖动",
+    "丢包率",
+    "下载速度"
+  ],
+  "EN_PUBLIC_ROW_LABELS": [
+    "Target",
+    "Reachable",
+    "DNS Latency",
+    "Latency",
+    "Jitter",
+    "Packet Loss",
+    "Download Speed"
+  ],
+  "fields": {
+    "system": [
+      "os",
+      "os_version",
+      "build",
+      "architecture",
+      "checked_at",
+      "privilege",
+      "python_version"
+    ],
+    "adapter": [
+      "interface",
+      "description",
+      "status",
+      "mac",
+      "driver",
+      "firmware",
+      "country_code",
+      "supported_phy",
+      "current_phy"
+    ],
+    "connection": [
+      "ssid",
+      "bssid",
+      "state",
+      "security",
+      "authentication",
+      "cipher",
+      "band",
+      "channel",
+      "center_channel",
+      "channel_width"
+    ],
+    "radio": [
+      "rssi",
+      "noise",
+      "snr",
+      "signal_percent",
+      "signal_level",
+      "same_channel_networks",
+      "adjacent_channel_networks"
+    ],
+    "link": [
+      "tx_rate",
+      "rx_rate",
+      "max_rate",
+      "mcs",
+      "nss",
+      "guard_interval"
+    ],
+    "ip": [
+      "ipv4",
+      "ipv6",
+      "subnet",
+      "gateway",
+      "dns_servers",
+      "dhcp_enabled",
+      "dhcp_lease"
+    ],
+    "local_quality": [
+      "target",
+      "reachable",
+      "latency",
+      "jitter",
+      "packet_loss"
+    ],
+    "public_quality": [
+      "target",
+      "reachable",
+      "dns_latency",
+      "latency",
+      "jitter",
+      "packet_loss",
+      "download_speed"
+    ]
+  },
+  "actions": {
+    "no_action": "No Wi-Fi change is currently recommended.",
+    "weak_signal": "Move closer to the access point, reduce obstructions, or add a nearer mesh/AP node.",
+    "channel_congestion": "Use automatic channel selection or choose a less congested non-overlapping channel.",
+    "prefer_higher_band": "Prefer 5 GHz or 6 GHz when coverage is adequate; keep 2.4 GHz for range and legacy devices.",
+    "gateway_loss": "Test near the router; then check interference, AP load, firmware, and mesh backhaul.",
+    "upstream_loss": "Check the ISP/upstream path rather than changing Wi-Fi settings first.",
+    "slow_dns": "Retest DNS and compare the router/ISP resolver with a trusted public resolver.",
+    "weak_security": "Enable WPA2-AES or WPA3 and use a strong passphrase.",
+    "moderate_signal": "Improve AP placement or reduce obstructions for real-time traffic."
+  }
+}

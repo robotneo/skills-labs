@@ -33,6 +33,15 @@ def valid_envelope(markdown=MARKDOWN, report_json=REPORT):
 
 
 class ContractTests(unittest.TestCase):
+    def test_legacy_detector_float_rendering_remains_accepted(self):
+        from notification_bridge.standard_report import render_standard_markdown
+        payload=copy.deepcopy(REPORT)
+        field=payload['sections']['local_quality']['jitter']
+        field.update(value=0.0,unit='ms',availability='available',reason='')
+        markdown=render_standard_markdown(payload,'zh').replace('| 0 ms |','| 0.0 ms |')
+        self.assertIn('0.0 ms',markdown)
+        build_envelope(markdown,payload,'','deterministic','2.5.0')
+
     def test_build_envelope_is_stable_for_the_same_report(self):
         first = build_envelope(MARKDOWN, REPORT, "摘要", "host_agent", "2.4.0")
         second = build_envelope(MARKDOWN, REPORT, "另一摘要", "host_agent", "2.4.0")

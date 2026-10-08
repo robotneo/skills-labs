@@ -57,7 +57,7 @@ python3 vcenter-ops/scripts/handler.py --action batch \
 - **Skill 名称**：`wifi-health-detector`
 - **入口**：`main.py`
 - **平台支持**：macOS / Windows
-- **依赖**：零第三方依赖，Python 3.7+
+- **依赖**：零第三方依赖；Python 优先，macOS/Windows 系统原生兜底，Node.js 最后备用
 - **核心定位**：一键采集当前 Wi-Fi 硬件参数与本地网络质量，输出健康评分与优化建议
 - **可选通知**：内置 `integrations/enterprise-notification-bridge`，安装一个 Skill 即可。默认关闭通知；优先使用宿主原生能力，仅钉钉 CLI 回退需要按需安装 DWS。配置方法见 [通知组件操作指引](wifi-health-detector/integrations/enterprise-notification-bridge/OPERATIONS.md)。
 
