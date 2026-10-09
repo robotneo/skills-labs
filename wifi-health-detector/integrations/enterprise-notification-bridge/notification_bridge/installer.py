@@ -259,9 +259,15 @@ def _download(downloader, url, destination):
 
 
 def _run(process_runner, command, cwd, environment):
-    process_environment = os.environ.copy()
-    process_environment.pop("DWS_GITEE_REPO", None)
-    process_environment.pop("DWS_GITEE_FALLBACK_REPO", None)
+    # The installer needs OS paths and explicit proxy settings, not agent tokens.
+    inherited_names = (
+        "PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "WINDIR",
+        "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR", "APPDATA", "LOCALAPPDATA",
+        "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    )
+    process_environment = {name: os.environ[name] for name in inherited_names
+                           if name in os.environ}
     process_environment.update(dict(environment))
     method = getattr(process_runner, "run", None)
     if method is not None:

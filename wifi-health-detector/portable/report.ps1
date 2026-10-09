@@ -107,7 +107,11 @@ function Assert-WifiReport($r){
     if($r.schema_version -ne '2.0'){throw 'Invalid report schema'}
     foreach($s in $Contract.fields.PSObject.Properties){foreach($k in $s.Value){$f=$r.sections[$s.Name][$k];if(-not $f -or $f.availability -notin 'available','unavailable' -or ($f.availability -eq 'unavailable' -and ($null -ne $f.value -or -not $f.reason)) -or ($f.availability -eq 'available' -and $null -eq $f.value)){throw "Invalid report field $($s.Name).$k"}}}
 }
+function ConvertTo-WifiCsvLiteral($value){
+    if($value -is [string] -and $value -match '^\s*[=+@-]'){return "'"+$value}
+    return $value
+}
 function Export-WifiCsv($r){
-    $rows=@(foreach($s in $Contract.fields.PSObject.Properties){foreach($k in $s.Value){$f=$r.sections[$s.Name][$k];$v=$f.value;if($v -is [array]){$v=ConvertTo-Json -InputObject $v -Compress};[pscustomobject][ordered]@{section=$s.Name;field=$k;value=$v;unit=$f.unit;availability=$f.availability;source=$f.source;reason=$f.reason}}})
+    $rows=@(foreach($s in $Contract.fields.PSObject.Properties){foreach($k in $s.Value){$f=$r.sections[$s.Name][$k];$v=$f.value;if($v -is [array]){$v=ConvertTo-Json -InputObject $v -Compress};[pscustomobject][ordered]@{section=$s.Name;field=$k;value=(ConvertTo-WifiCsvLiteral $v);unit=(ConvertTo-WifiCsvLiteral $f.unit);availability=$f.availability;source=(ConvertTo-WifiCsvLiteral $f.source);reason=(ConvertTo-WifiCsvLiteral $f.reason)}}})
     return (($rows|ConvertTo-Csv -NoTypeInformation) -join "`r`n")+"`r`n"
 }

@@ -138,8 +138,8 @@ class PortableTests(unittest.TestCase):
         self.assertIsNone(ping_target(BrokenRunner(),'192.0.2.1'))
         node=os.environ.get('TEST_NODE') or shutil.which('node')
         if node:
-            code='const p=require(process.argv[1]);if(p.ping({status:1,stdout:process.argv[2]})!==null)process.exit(1)'
-            result=subprocess.run([node,'-e',code,str(ROOT/'portable/parse.js'),text],capture_output=True,text=True)
+            code='const p=require(process.argv[1]).parser;if(p.ping({status:1,stdout:process.argv[2]})!==null)process.exit(1)'
+            result=subprocess.run([node,'-e',code,str(ROOT/'portable/macos.js'),text],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
 
     def test_windows_capture_parity(self):

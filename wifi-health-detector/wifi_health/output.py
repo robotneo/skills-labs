@@ -198,8 +198,19 @@ def _validate_recommendation(value):
 
 def render_csv(report, mask=False):
     stream = io.StringIO(); names = ["section", "field", "value", "unit", "availability", "source", "reason"]
-    writer = csv.DictWriter(stream, fieldnames=names); writer.writeheader(); writer.writerows(flatten_report(report, mask))
+    writer = csv.DictWriter(stream, fieldnames=names)
+    writer.writeheader()
+    for row in flatten_report(report, mask):
+        writer.writerow({key: _csv_literal(value) for key, value in row.items()})
     return stream.getvalue()
+
+
+def _csv_literal(value):
+    # Network names and command diagnostics are untrusted spreadsheet cells.
+    # Preserve numeric measurements such as negative RSSI as numbers.
+    if isinstance(value, str) and value.lstrip().startswith(('=', '+', '-', '@')):
+        return "'" + value
+    return value
 
 
 def _escape(value):

@@ -168,6 +168,17 @@ class DwsInstallPlanningTests(unittest.TestCase):
 
 
 class DwsInstallExecutionTests(unittest.TestCase):
+    def test_installer_does_not_inherit_unrelated_agent_credentials(self):
+        from unittest.mock import patch
+        runner = RecordingRunner()
+        with patch.dict(os.environ, {'AGENT_API_TOKEN': 'test-marker', 'PATH': '/usr/bin:/bin'}, clear=True):
+            result = execute_dws_install(plan_dws_install('linux'), True,
+                                         RecordingDownloader(), runner, self.temp_root)
+        self.assertEqual(result.status, 'ready')
+        environment = runner.calls[0][3]
+        self.assertNotIn('AGENT_API_TOKEN', environment)
+        self.assertEqual(environment['PATH'], '/usr/bin:/bin')
+
     def setUp(self):
         self.temp_root = tempfile.mkdtemp(prefix="dws-install-test-")
 

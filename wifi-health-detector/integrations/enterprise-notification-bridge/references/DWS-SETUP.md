@@ -48,7 +48,7 @@ success or failure, and verifies the installed binary again. SHA-256 is checked
 before execution only when the download receipt supplies `expected_sha256`; the
 default URL download does not provide or claim an unconditional artifact
 checksum. Never replace these sources with a package-manager guess, an
-unofficial mirror, `curl | sh`, or `irm | iex`.
+unofficial mirror, or a download-and-execute shell pipeline.
 
 ## Authorization, organization, and recipients
 

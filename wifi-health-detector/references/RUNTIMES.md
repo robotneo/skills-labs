@@ -37,7 +37,7 @@ Node 的 Windows IP 采集仍使用系统 PowerShell；如果 PowerShell 完全�
 
 ## 维护与验证
 
-`portable/contract.json` 保存字段顺序、标签和建议文案；`core.js` 是 JXA/Node 共享的纯报告核心；`report.ps1` 是 Windows 原生实现；`parse.js` / `windows-collect.ps1` 解析采集结果。任何评分/文案修改都必须运行差异测试，不能只改其中一套。
+`portable/contract.json` 保存字段顺序、标签和建议文案；`macos.js` 包含 JXA/Node 共享的报告核心、解析器及 macOS 入口，无动态源码求值；`report.ps1` 是 Windows 原生实现；`macos.js` / `windows-collect.ps1` 解析采集结果。任何评分/文案修改都必须运行差异测试，不能只改其中一套。
 
 ```text
 python -m unittest discover -s wifi-health-detector/tests -v

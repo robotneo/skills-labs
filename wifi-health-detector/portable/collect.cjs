@@ -1,11 +1,11 @@
 'use strict';
-const {execFile}=require('child_process');
-const os=require('os'),parser=require('./parse.js'),core=require('./core.js'),contract=require('./contract.json');
+const {execFile}=require('node:child_process');
+const os=require('node:os'),parser=require('./macos.js').parser,core=require('./macos.js').core,contract=require('./contract.json');
 function decode(buffer){try{return new TextDecoder('utf-8',{fatal:true}).decode(buffer);}catch(_){return new TextDecoder('gb18030').decode(buffer);}}
 function runCommand(args,timeout){return new Promise(resolve=>{
     const start=Date.now();let settled=false,timer;
     function done(result){if(settled)return;settled=true;clearTimeout(timer);resolve({...result,elapsed_ms:Date.now()-start});}
-    const child=execFile(args[0],args.slice(1),{detached:process.platform!=='win32',maxBuffer:4*1024*1024,windowsHide:true,encoding:'buffer'},(err,stdout,stderr)=>{
+    const child=execFile(args[0],args.slice(1),{shell:false,detached:process.platform!=='win32',maxBuffer:4*1024*1024,windowsHide:true,encoding:'buffer'},(err,stdout,stderr)=>{
         done({stdout:decode(stdout||Buffer.alloc(0)),stderr:decode(stderr||Buffer.alloc(0)),status:err?(typeof err.code==='number'?err.code:127):0});
     });
     timer=setTimeout(()=>{
