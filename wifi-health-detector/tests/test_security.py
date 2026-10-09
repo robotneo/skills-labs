@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -16,6 +17,18 @@ from wifi_health.output import render_csv
 
 
 class SecurityTests(unittest.TestCase):
+    def test_windows_dns_helper_returns_ip_addresses(self):
+        import ipaddress
+        powershell = os.environ.get('TEST_POWERSHELL') or shutil.which('powershell.exe')
+        if not powershell:
+            self.skipTest('PowerShell required')
+        result = subprocess.run([powershell, '-NoProfile', '-File', str(ROOT / 'portable/dns.ps1'), 'localhost'],
+                                capture_output=True, text=True, encoding='utf-8', timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        addresses = [ipaddress.ip_address(value) for value in result.stdout.split()]
+        self.assertTrue(addresses)
+        self.assertTrue(all(address.is_loopback for address in addresses))
+
     def test_dns_uses_native_resolver_and_rejects_empty_success(self):
         from unittest.mock import patch
         from wifi_health.network import dns_test
@@ -41,14 +54,24 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(value, "'" + ssid)
             self.assertEqual(next(row['value'] for row in rows if row['field'] == 'rssi'), '-60')
 
+    def test_windows_dns_uses_language_independent_addresses(self):
+        from unittest.mock import patch
+        from wifi_health.network import dns_test
+        with patch('wifi_health.network.platform.system', return_value='Windows'):
+            for output in ('192.0.2.1\n', '2001:db8::1\n'):
+                answer = subprocess.CompletedProcess([], 0, stdout=output, stderr='')
+                with patch('wifi_health.network.subprocess.run', return_value=answer) as run:
+                    self.assertTrue(dns_test('www.baidu.com')['reachable'])
+                    self.assertIn('-File', run.call_args[0][0])
+
     def test_portable_csv_network_names_are_literal_cells(self):
         engines = []
         node = os.environ.get('TEST_NODE')
         if node:
-            engines.append([node, str(ROOT / 'portable/node.cjs')])
+            engines.append([node, str(ROOT / 'tests/render_capture.cjs')])
         if sys.platform == 'darwin':
             engines.append(['/usr/bin/osascript', '-l', 'JavaScript', str(ROOT / 'portable/macos.js')])
-        powershell = os.environ.get('TEST_POWERSHELL')
+        powershell = os.environ.get('TEST_POWERSHELL') or shutil.which('powershell.exe')
         if powershell:
             engines.append([powershell, '-NoProfile', '-File', str(ROOT / 'portable/windows.ps1')])
         if not engines:
@@ -62,7 +85,7 @@ class SecurityTests(unittest.TestCase):
             source.write_text(json.dumps(report.to_dict()), encoding='utf-8')
             for engine in engines:
                 with self.subTest(engine=engine[0]):
-                    result = subprocess.run(engine + ['--report-input', str(source), '--csv', str(target), '--no-notify'], capture_output=True, text=True, timeout=20)
+                    result = subprocess.run(engine + ['--report-input', str(source), '--csv', str(target), '--no-notify'], capture_output=True, text=True, encoding="utf-8", timeout=20)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     rows = list(csv.DictReader(io.StringIO(target.read_text(encoding='utf-8-sig'))))
                     self.assertEqual(next(row['value'] for row in rows if row['field'] == 'ssid'), "'=1+1")
@@ -70,11 +93,11 @@ class SecurityTests(unittest.TestCase):
 
     def test_windows_entries_preserve_execution_policy(self):
         for path in ROOT.rglob('*.bat'):
-            self.assertNotIn('-executionpolicy', path.read_text().lower(), str(path))
+            self.assertNotIn('-executionpolicy', path.read_text(encoding='utf-8').lower(), str(path))
 
     def test_jxa_has_no_dynamic_source_evaluation(self):
         import re
-        source = (ROOT / 'portable/macos.js').read_text()
+        source = (ROOT / 'portable/macos.js').read_text(encoding='utf-8')
         self.assertIsNone(re.search(r'\beval\s*\(', source))
 
 

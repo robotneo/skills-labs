@@ -7,6 +7,7 @@ on:
 jobs:
   contracts:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -21,9 +22,12 @@ jobs:
       - name: Detector and portable engine contracts
         if: runner.os == 'macOS'
         run: python -m unittest discover -s wifi-health-detector/tests -v
-      - name: Windows portable contracts (PowerShell 5.1 and Node)
+      - name: Windows native contracts (PowerShell 5.1 and offline JS reference)
         if: runner.os == 'Windows'
         run: python -m unittest discover -s wifi-health-detector/tests -p test_portable.py -v
+      - name: Windows security regressions
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s wifi-health-detector/tests -p test_security.py -v
       - name: Notification contracts
         if: runner.os == 'macOS'
         run: python -m unittest discover -s wifi-health-detector/integrations/enterprise-notification-bridge/tests -v

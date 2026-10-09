@@ -4,13 +4,44 @@
   "version": "2.6.1",
   "author": "hua",
   "description": "检测 macOS 10.12+ 与 Windows 10/11 的完整 Wi-Fi、射频、IP、本地及公网质量，并输出带置信度的诊断建议。",
-  "platforms": ["codex", "claude", "openclaw", "qclaw", "hermes", "opencode", "generic"],
-  "support_os": ["macos>=10.12", "windows-10", "windows-11"],
+  "platforms": [
+    "codex",
+    "claude",
+    "openclaw",
+    "qclaw",
+    "hermes",
+    "opencode",
+    "generic"
+  ],
+  "support_os": [
+    "macos>=10.12",
+    "windows-10",
+    "windows-11"
+  ],
   "requirements": [],
-  "runtime_fallback": ["python>=3.7", "macos-native-jxa-or-windows-powershell>=5.1", "node>=16"],
-  "entry": {"macos": "run.sh", "windows": "run.bat", "compatibility": "main.py"},
-  "output_type": ["text", "json", "csv"],
-  "optional_integrations": ["enterprise-notification-bridge"],
-  "bundled_components": {"enterprise-notification-bridge": {"path": "integrations/enterprise-notification-bridge", "enabled_by_default": false, "conditional_external_dependency": "dws (DingTalk CLI fallback only)"}},
+  "runtime_fallback": [
+    "python>=3.7",
+    "macos-native-jxa-or-windows-powershell>=5.1"
+  ],
+  "entry": {
+    "macos": "run.sh",
+    "windows": "run.bat",
+    "compatibility": "main.py"
+  },
+  "output_type": [
+    "text",
+    "json",
+    "csv"
+  ],
+  "optional_integrations": [
+    "enterprise-notification-bridge"
+  ],
+  "bundled_components": {
+    "enterprise-notification-bridge": {
+      "path": "integrations/enterprise-notification-bridge",
+      "enabled_by_default": false,
+      "conditional_external_dependency": "dws (DingTalk CLI fallback only)"
+    }
+  },
   "repository": "https://github.com/robotneo/skills-labs/tree/main/wifi-health-detector"
 }

@@ -9,7 +9,7 @@ for argument in "$@"; do
   case "$argument" in --engine=*) ENGINE=${argument#--engine=} ;; esac
   previous=$argument
 done
-case "$ENGINE" in auto|python|native|node) ;; *) echo 'Invalid --engine; use auto, python, native, or node.' >&2; exit 2 ;; esac
+case "$ENGINE" in auto|python|native) ;; *) echo 'Invalid --engine; use auto, python, or native.' >&2; exit 2 ;; esac
 probe() {
   "$@" >/dev/null 2>&1 & probe_pid=$!
   ( /bin/sleep 2; /bin/kill -TERM "$probe_pid" 2>/dev/null; /bin/sleep 1; /bin/kill -KILL "$probe_pid" 2>/dev/null ) & watchdog=$!
@@ -36,16 +36,7 @@ if [ "$ENGINE" = auto ] || [ "$ENGINE" = native ]; then
     exec /usr/bin/osascript -l JavaScript "$SCRIPT_DIR/portable/macos.js" "$@"
   fi
 fi
-if [ "$ENGINE" = auto ] || [ "$ENGINE" = node ]; then
-  for candidate in "${WIFI_HEALTH_NODE:-}" node /opt/homebrew/bin/node /usr/local/bin/node; do
-    [ -n "$candidate" ] || continue
-    if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
-      if probe "$candidate" -e 'if(Number(process.versions.node.split(".")[0])<16)process.exit(3);require("child_process");require("fs");'; then
-        exec "$candidate" "$SCRIPT_DIR/portable/node.cjs" "$@"
-      fi
-    fi
-  done
-fi
-echo "Wi-Fi Health Detector cannot start: no usable $ENGINE engine (Python 3.7+, macOS native JXA, or Node.js 16+)." >&2
-echo 'This is a runtime/capability problem, not a Wi-Fi disconnected diagnosis. Set WIFI_HEALTH_PYTHON or WIFI_HEALTH_NODE to an executable path.' >&2
+
+echo "Wi-Fi Health Detector cannot start: no usable $ENGINE engine (Python 3.7+, macOS native JXA)." >&2
+echo 'This is a runtime/capability problem, not a Wi-Fi disconnected diagnosis. Set WIFI_HEALTH_PYTHON to an executable path.' >&2
 exit 3

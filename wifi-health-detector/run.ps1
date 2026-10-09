@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine=if($env:WIFI_HEALTH_ENGINE){$env:WIFI_HEALTH_ENGINE}else{'auto'}
 for($i=0;$i -lt $args.Count;$i++){if($args[$i] -eq '--engine' -and $i+1 -lt $args.Count){$Engine=$args[$i+1]}}
-if($Engine -notin 'auto','python','native','node'){[Console]::Error.WriteLine('Invalid --engine');exit 2}
+if($Engine -notin 'auto','python','native'){[Console]::Error.WriteLine('Invalid --engine');exit 2}
 . (Join-Path $ScriptDir 'portable/process.ps1')
 if($Engine -in 'auto','python'){
     $Candidates=@($env:WIFI_HEALTH_PYTHON)
@@ -27,11 +27,5 @@ if($Engine -in 'auto','native'){
         exit $LASTEXITCODE
     }
 }
-if($Engine -in 'auto','node'){
-    foreach($Candidate in @($env:WIFI_HEALTH_NODE,'node')|Where-Object {$_}){
-        $probe=Invoke-WifiBatch @{node=@($Candidate,'-e','if(Number(process.versions.node.split(".")[0])<16)process.exit(3);require("child_process");require("fs");')} 2 ([datetime]::UtcNow.AddSeconds(2))
-        if($probe.node.status -eq 0){& $Candidate (Join-Path $ScriptDir 'portable/node.cjs') @args;exit $LASTEXITCODE}
-    }
-}
-[Console]::Error.WriteLine('No usable Python, native PowerShell, or Node engine. This is a runtime/capability problem, not a Wi-Fi disconnected diagnosis.')
+[Console]::Error.WriteLine('No usable Python or native PowerShell engine. This is a runtime/capability problem, not a Wi-Fi disconnected diagnosis.')
 exit 3

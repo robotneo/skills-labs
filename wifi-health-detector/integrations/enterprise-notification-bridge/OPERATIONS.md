@@ -89,13 +89,13 @@ unavailable and DingTalk resolves to `dws-cli` may it inspect the conditional
 DWS dependency. Missing or outdated DWS returns a correlated install action; it
 never installs at detector startup. Show the source and command to the user,
 then rerun with `--install-dws --yes` only after explicit approval. GitHub is
-the default official repository source at the fixed allowlisted `main/scripts`
-installer URL; `--china-mirror` explicitly selects the matching official Gitee
-China mirror plan. The installer enforces those fixed official source, plan,
-and downloaded-file boundaries. It verifies SHA-256 only when the download
-receipt supplies `expected_sha256`; do not claim unconditional artifact
-verification. Never substitute an unofficial mirror or pipe a download directly
-into a shell.
+the default official repository source. The installer is pinned to a reviewed
+commit and checked against bundled SHA-256 values before execution.
+`--china-mirror` explicitly selects the matching official Gitee plan; a missing
+revision or checksum mismatch stops installation. It installs the CLI only,
+without additional agent skills. See [DWS setup](references/DWS-SETUP.md) for
+source, integrity checks, and time limits. Never substitute an unofficial
+mirror or pipe a download directly into a shell.
 
 After dependency verification, setup performs the authorization/Profile
 handshake. Request a DingTalk login window or device/QR flow only on first use

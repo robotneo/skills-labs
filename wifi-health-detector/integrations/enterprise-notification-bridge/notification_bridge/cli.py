@@ -56,13 +56,19 @@ class InstallerProcessRunner(object):
     def run(self, command, shell=False, cwd=None, env=None):
         return subprocess.run(
             list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, check=False, shell=shell, cwd=cwd, env=env,
+            stderr=subprocess.PIPE, check=False, shell=False, cwd=cwd, env=env,
+            timeout=180,
         )
 
 
 class UrlDownloader(object):
     def download(self, url, destination):
-        urllib.request.urlretrieve(url, destination)
+        with urllib.request.urlopen(url, timeout=20) as response:
+            content = response.read(2 * 1024 * 1024 + 1)
+        if len(content) > 2 * 1024 * 1024:
+            raise ValueError("installer exceeds size limit")
+        with open(destination, "wb") as handle:
+            handle.write(content)
         return None
 
 

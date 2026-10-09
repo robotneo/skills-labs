@@ -27,7 +27,7 @@ PUBLIC_TARGET_LABEL = " / ".join(PUBLIC_PING_TARGETS + PUBLIC_DNS_HOSTS)
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Cross-platform Wi-Fi health detector")
-    parser.add_argument("--engine", choices=("auto", "python", "native", "node"), default="auto", help="engine selected by the platform launcher")
+    parser.add_argument("--engine", choices=("auto", "python", "native"), default="auto", help="engine selected by the platform launcher")
     parser.add_argument("--budget", type=int, default=35, help="total collection/network time budget in seconds")
     parser.add_argument("--fast", action="store_true", help="skip nearby network scan")
     parser.add_argument("--interface", help="override the automatically detected Wi-Fi interface")

@@ -8,13 +8,18 @@ import tempfile
 from collections import namedtuple
 
 
+INSTALLER_REVISION = "251ae0d71f1a047b62af8425cec9374ccef42df2"
+_INSTALLER_SHA256 = {
+    "install.sh": "5592301524aab972025988c313bced2a8d10e6355a5fc5725dfabee126a7963c",
+    "install.ps1": "2308cdfc16c873b03777d636e8335d7027f967996917057fdd6eb625c7a0b719",
+}
 _GITHUB_ROOT = (
     "https://raw.githubusercontent.com/"
-    "DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/"
+    "DingTalk-Real-AI/dingtalk-workspace-cli/" + INSTALLER_REVISION + "/scripts/"
 )
 _GITEE_ROOT = (
     "https://gitee.com/dingtalk-real-ai/"
-    "dingtalk-workspace-cli/raw/main/scripts/"
+    "dingtalk-workspace-cli/raw/" + INSTALLER_REVISION + "/scripts/"
 )
 _INSTALLER_TOKEN = "{installer}"
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -51,9 +56,10 @@ def plan_dws_install(platform_name, china_mirror=False):
         environment = (
             ("DWS_GITEE_REPO", "DingTalk-Real-AI/dingtalk-workspace-cli"),
             ("DWS_NO_FALLBACK", "1"),
+            ("DWS_NO_SKILLS", "1"),
         )
     else:
-        environment = (("DWS_NO_FALLBACK", "1"),)
+        environment = (("DWS_NO_FALLBACK", "1"), ("DWS_NO_SKILLS", "1"))
 
     if platform_key == "windows":
         filename = "install.ps1"
@@ -111,6 +117,8 @@ def execute_dws_install(
             )
 
         try:
+            if _file_sha256(installer_path) != _INSTALLER_SHA256[plan.filename]:
+                return DwsInstallResult("failed", "dependency_integrity_failed", plan.source)
             expected_sha256 = getattr(receipt, "expected_sha256", None)
         except Exception:
             return DwsInstallResult(

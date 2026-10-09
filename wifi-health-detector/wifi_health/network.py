@@ -5,6 +5,8 @@ import re
 import subprocess
 import sys
 import time
+import os
+import ipaddress
 
 from .parsers import parse_ping
 
@@ -35,14 +37,17 @@ def dns_test(host, timeout=10):
         return {"reachable": False, "latency_ms": None, "reason": "invalid DNS name"}
     try:
         macos = platform.system() == "Darwin"
-        command = ["/usr/bin/dscacheutil", "-q", "host", "-a", "name", host] if macos else ["nslookup.exe", host]
+        helper = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portable", "dns.ps1")
+        command = (["/usr/bin/dscacheutil", "-q", "host", "-a", "name", host] if macos else
+                   ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", helper, host])
         start = time.monotonic()
         result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, universal_newlines=True,
                                 errors="replace", timeout=timeout, shell=False)
         answer = result.stdout or ""
         # A zero exit code alone does not prove the resolver found a record.
-        resolved = bool(re.search(r"(?:ip_address|ipv6_address):\s*\S+", answer)) if macos else bool(re.search(r"(?:Name|名称)\s*:", answer, re.I))
+        addresses = re.findall(r"(?:ip_address|ipv6_address):\s*(\S+)", answer) if macos else answer.split()
+        resolved = bool(addresses) and all(ipaddress.ip_address(address) for address in addresses)
         if result.returncode or not resolved:
             return {"reachable": False, "latency_ms": None, "reason": "DNS lookup failed"}
         return {"reachable": True, "latency_ms": round((time.monotonic() - start) * 1000, 2)}

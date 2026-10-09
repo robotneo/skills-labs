@@ -1,6 +1,6 @@
 # Wi-Fi Health Detector
 
-在 macOS / Windows 本机检测 Wi-Fi，按 Python → 系统原生 → Node.js 选择可用引擎。企业通知组件随包提供，默认关闭。
+在 macOS / Windows 本机检测 Wi-Fi，按 Python → 系统原生 选择可用引擎。企业通知组件随包提供，默认关闭。
 
 下载发布 ZIP，解压后将整个 `wifi-health-detector` 目录交给 Agent 的技能管理器，或放入它支持的技能目录。无需在线安装脚本，不要只复制 `SKILL.md`。
 

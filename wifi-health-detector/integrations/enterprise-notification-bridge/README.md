@@ -59,14 +59,11 @@ action without executing it. Review that action, then approve explicitly with:
 run.sh setup --platform dingtalk --provider dws-cli --install-dws --yes
 ```
 
-The default source is the official DingTalk GitHub repository installer script
-at the fixed allowlisted `main/scripts` URL. Add `--china-mirror` only to select
-the matching official Gitee China mirror plan. Installation accepts only those
-fixed official source, plan, and downloaded-file boundaries, downloads to a
-private temporary location, and executes locally; it never pipes a download
-into a shell. SHA-256 is verified before execution only when the downloader's
-receipt supplies `expected_sha256`; the default URL download does not claim an
-unconditional artifact checksum. Setup requests DingTalk login or QR/device
+The official installer is pinned to a reviewed commit and checked against
+bundled SHA-256 values before execution. `--china-mirror` selects its official
+Gitee mirror; unavailable revisions and checksum mismatches fail closed.
+Installation is limited to the CLI, not additional agent skills. See
+[setup details](references/DWS-SETUP.md). Setup requests DingTalk login or QR/device
 authorization only on first use or after authorization expires. `--device-login`
 (MCP: `deviceLogin`) uses the documented `dws auth login --device` flow when a
 DWS login is actually required; it has no effect when authorization is already

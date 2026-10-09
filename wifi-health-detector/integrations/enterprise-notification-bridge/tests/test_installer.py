@@ -15,6 +15,7 @@ if ROOT not in sys.path:
 
 from notification_bridge.installer import (  # noqa: E402
     DownloadReceipt,
+    INSTALLER_REVISION,
     DwsInstallPlan,
     execute_dws_install,
     plan_dws_install,
@@ -97,7 +98,7 @@ class DeceptivePlan(object):
     url = "https://evil.invalid/payload.sh"
     filename = "payload.sh"
     command = ("sh", "{installer}")
-    environment = (("DWS_NO_FALLBACK", "1"),)
+    environment = (("DWS_NO_FALLBACK", "1"), ("DWS_NO_SKILLS", "1"))
 
     def __eq__(self, unused_other):
         return True
@@ -124,9 +125,9 @@ class DwsInstallPlanningTests(unittest.TestCase):
                 "https://raw.githubusercontent.com/"
                 "DingTalk-Real-AI/dingtalk-workspace-cli/"
             ))
-            self.assertTrue(plan.url.endswith("/main/scripts/install.sh"))
+            self.assertTrue(plan.url.endswith("/" + INSTALLER_REVISION + "/scripts/install.sh"))
             self.assertNotIn("|", " ".join(plan.command))
-            self.assertEqual(plan.environment, (("DWS_NO_FALLBACK", "1"),))
+            self.assertEqual(plan.environment, (("DWS_NO_FALLBACK", "1"), ("DWS_NO_SKILLS", "1")))
 
     def test_windows_uses_powershell_file_without_expression_execution(self):
         plan = plan_dws_install("windows", china_mirror=False)
@@ -139,8 +140,8 @@ class DwsInstallPlanningTests(unittest.TestCase):
         ))
         self.assertNotIn("iex", " ".join(plan.command).lower())
         self.assertNotIn("invoke-expression", " ".join(plan.command).lower())
-        self.assertTrue(plan.url.endswith("/main/scripts/install.ps1"))
-        self.assertEqual(plan.environment, (("DWS_NO_FALLBACK", "1"),))
+        self.assertTrue(plan.url.endswith("/" + INSTALLER_REVISION + "/scripts/install.ps1"))
+        self.assertEqual(plan.environment, (("DWS_NO_FALLBACK", "1"), ("DWS_NO_SKILLS", "1")))
 
     def test_china_mirror_is_an_explicit_gitee_plan_for_each_platform(self):
         for platform_name, filename in (
@@ -155,11 +156,12 @@ class DwsInstallPlanningTests(unittest.TestCase):
                 "https://gitee.com/dingtalk-real-ai/"
                 "dingtalk-workspace-cli/raw/"
             ))
-            self.assertTrue(plan.url.endswith("/main/scripts/" + filename))
+            self.assertTrue(plan.url.endswith("/" + INSTALLER_REVISION + "/scripts/" + filename))
             self.assertEqual(plan.environment, (
                 ("DWS_GITEE_REPO",
                  "DingTalk-Real-AI/dingtalk-workspace-cli"),
                 ("DWS_NO_FALLBACK", "1"),
+                ("DWS_NO_SKILLS", "1"),
             ))
 
     def test_unknown_platform_is_rejected_instead_of_guessing_installer(self):
@@ -168,6 +170,15 @@ class DwsInstallPlanningTests(unittest.TestCase):
 
 
 class DwsInstallExecutionTests(unittest.TestCase):
+    def test_missing_receipt_cannot_execute_tampered_installer(self):
+        from unittest.mock import patch
+        runner = RecordingRunner()
+        with patch('notification_bridge.installer._file_sha256', return_value='0' * 64):
+            result = execute_dws_install(plan_dws_install('linux'), True,
+                                         RecordingDownloader(), runner, self.temp_root)
+        self.assertEqual(result.reason, 'dependency_integrity_failed')
+        self.assertEqual(runner.calls, [])
+
     def test_installer_does_not_inherit_unrelated_agent_credentials(self):
         from unittest.mock import patch
         runner = RecordingRunner()
@@ -181,6 +192,12 @@ class DwsInstallExecutionTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_root = tempfile.mkdtemp(prefix="dws-install-test-")
+        from unittest.mock import patch
+        digest = hashlib.sha256(INSTALLER_BYTES).hexdigest()
+        release = patch.dict('notification_bridge.installer._INSTALLER_SHA256',
+                             {'install.sh': digest, 'install.ps1': digest})
+        release.start()
+        self.addCleanup(release.stop)
 
     def tearDown(self):
         for root, directories, unused_files in os.walk(

@@ -10,7 +10,7 @@ try{
     for($i=0;$i -lt $args.Count;$i++){$a=$args[$i];if($flags[$a]){$Options[$flags[$a]]=$true}elseif($values[$a]){if($i+1 -ge $args.Count){throw "Missing value for $a"};$i++;$Options[$values[$a]]=$args[$i]}else{throw "Unknown argument $a"}}
     foreach($k in 'timeout','budget'){if("$($Options[$k])" -notmatch '^[1-9]\d*$'){throw "$k must be a positive integer"};$Options[$k]=[int]$Options[$k]}
     if($Options.language -notin 'zh','en' -or $Options.view -ne 'summary'){throw 'Invalid language/view'}
-    if($Options.help){[Console]::Write("Wi-Fi Health Detector`n--engine auto|python|native|node --interface NAME --language zh|en`n--timeout SECONDS --budget SECONDS --fast --no-public-test --speedtest`n--mask --json PATH --csv PATH --no-notify --verbose --view summary`n");exit 0}
+    if($Options.help){[Console]::Write("Wi-Fi Health Detector`n--engine auto|python|native --interface NAME --language zh|en`n--timeout SECONDS --budget SECONDS --fast --no-public-test --speedtest`n--mask --json PATH --csv PATH --no-notify --verbose --view summary`n");exit 0}
     $Contract=Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot 'contract.json')|ConvertFrom-Json
     . (Join-Path $PSScriptRoot 'report.ps1')
     . (Join-Path $PSScriptRoot 'process.ps1')

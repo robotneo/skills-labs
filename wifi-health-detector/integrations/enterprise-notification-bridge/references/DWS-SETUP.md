@@ -39,16 +39,21 @@ setup command with both `--install-dws` and `--yes`:
 run.bat setup --platform dingtalk --provider dws-cli --install-dws --yes
 ```
 
-The installer accepts only the official DingTalk GitHub repository installer
-script at the fixed allowlisted `main/scripts` URL or the matching explicit
-official Gitee China mirror plan. It validates the fixed official source, plan,
-and downloaded-file boundaries, downloads into a private temporary directory,
-executes locally without a shell pipeline, removes temporary material on
-success or failure, and verifies the installed binary again. SHA-256 is checked
-before execution only when the download receipt supplies `expected_sha256`; the
-default URL download does not provide or claim an unconditional artifact
-checksum. Never replace these sources with a package-manager guess, an
-unofficial mirror, or a download-and-execute shell pipeline.
+The installer accepts only official DingTalk scripts pinned to commit
+`251ae0d71f1a047b62af8425cec9374ccef42df2`. Both the GitHub source and the
+explicitly selected Gitee mirror must match the SHA-256 values shipped in
+`notification_bridge/installer.py`. Missing content or a mismatch stops before
+execution; there is no fallback to the mutable branch. Updating the pinned
+installer requires reviewing a new revision and updating its digests.
+
+Installation uses a private temporary directory, a 20-second download timeout,
+a 2 MiB script limit, a 180-second process timeout, and explicit OS/proxy
+environment variables. `DWS_NO_SKILLS=1` limits the official installer to the
+CLI; it does not add unrelated agent skills. The pinned upstream installer
+verifies the CLI release archive against its published checksum before use.
+The installer still has the user's filesystem permissions: approval is required,
+and the environment allowlist is not a sandbox. Temporary material is removed
+on success and failure; the installed CLI is verified again before use.
 
 ## Authorization, organization, and recipients
 

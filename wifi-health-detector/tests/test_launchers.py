@@ -1,4 +1,5 @@
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -30,16 +31,24 @@ class LauncherTests(unittest.TestCase):
             with open(broken, "w") as handle:
                 handle.write("#!/bin/sh\necho 'xcrun: invalid active developer path' >&2\nexit 1\n")
             os.chmod(broken, stat.S_IRWXU)
+            launcher = os.path.join(directory, 'run.sh')
+            with open(os.path.join(ROOT, 'run.sh')) as handle:
+                source = handle.read()
+            source, replacements = re.subn(r'^  for candidate in .*; do$',
+                '  for candidate in "$WIFI_HEALTH_PYTHON"; do', source, flags=re.M)
+            self.assertEqual(replacements, 1)
+            with open(launcher, 'w') as handle:
+                handle.write(source)
             env = dict(os.environ, PATH=directory, WIFI_HEALTH_PYTHON=broken)
             result = subprocess.run(
-                ["/bin/sh", os.path.join(ROOT, "run.sh"), "--engine", "python", "--help"],
+                ["/bin/sh", launcher, "--engine", "python", "--help"],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
             )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Python", result.stdout)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("runtime/capability", result.stdout)
         self.assertNotIn("Wi-Fi is disconnected", result.stdout)
 
 

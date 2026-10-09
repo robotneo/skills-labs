@@ -20,7 +20,7 @@ class PortableTests(unittest.TestCase):
         node = os.environ.get('TEST_NODE') or shutil.which('node')
         engines = []
         if node:
-            engines.append([node, str(ROOT / 'portable' / 'node.cjs')])
+            engines.append([node, str(ROOT / 'tests' / 'render_capture.cjs')])
         if sys.platform == 'darwin':
             engines.append(['/usr/bin/osascript', '-l', 'JavaScript', str(ROOT / 'portable' / 'macos.js')])
         powershell = os.environ.get('TEST_POWERSHELL') or ('powershell.exe' if sys.platform == 'win32' else shutil.which('pwsh'))
@@ -44,17 +44,17 @@ class PortableTests(unittest.TestCase):
                     for language, mask in [('zh',False), ('en',True)]:
                         target = pathlib.Path(directory) / 'out.json'
                         args = engine + ['--report-input', str(source), '--language', language, '--json', str(target), '--no-notify'] + (['--mask'] if mask else [])
-                        result = subprocess.run(args, capture_output=True, text=True, timeout=20)
+                        result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", timeout=20)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertEqual(result.stdout, render_text(report, language, mask))
-                        payload = json.loads(target.read_text())
+                        payload = json.loads(target.read_text(encoding="utf-8"))
                         validate_standard_json(payload)
                         self.assertEqual(payload['diagnosis'], report.diagnosis)
 
     def test_launcher_explicit_native_help(self):
         if sys.platform == 'win32':
             self.skipTest('macOS launcher')
-        result = subprocess.run(['/bin/sh', str(ROOT / 'run.sh'), '--engine', 'native', '--help'], capture_output=True, text=True, timeout=15)
+        result = subprocess.run(['/bin/sh', str(ROOT / 'run.sh'), '--engine', 'native', '--help'], capture_output=True, text=True, encoding="utf-8", timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('--engine', result.stdout)
 
@@ -64,7 +64,7 @@ class PortableTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='wifi test ') as directory:
             candidate = pathlib.Path(directory) / 'python interpreter'
             candidate.symlink_to(sys.executable)
-            result = subprocess.run(['/bin/sh', str(ROOT / 'run.sh'), '--help'], env=dict(os.environ, WIFI_HEALTH_PYTHON=str(candidate)), capture_output=True, text=True, timeout=15)
+            result = subprocess.run(['/bin/sh', str(ROOT / 'run.sh'), '--help'], env=dict(os.environ, WIFI_HEALTH_PYTHON=str(candidate)), capture_output=True, text=True, encoding="utf-8", timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_native_collection_without_python(self):
@@ -72,9 +72,9 @@ class PortableTests(unittest.TestCase):
             self.skipTest('macOS native runtime')
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / 'report.json'
-            result = subprocess.run(['/bin/sh', str(ROOT / 'run.sh'), '--engine', 'native', '--budget', '3', '--timeout', '1', '--fast', '--no-public-test', '--no-notify', '--json', str(target)], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(['/bin/sh', str(ROOT / 'run.sh'), '--engine', 'native', '--budget', '3', '--timeout', '1', '--fast', '--no-public-test', '--no-notify', '--json', str(target)], capture_output=True, text=True, encoding="utf-8", timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-            payload = json.loads(target.read_text())
+            payload = json.loads(target.read_text(encoding="utf-8"))
             validate_standard_json(payload)
             self.assertEqual(payload['sections']['system']['python_version']['availability'], 'unavailable')
 
@@ -85,9 +85,9 @@ class PortableTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source=pathlib.Path(directory)/'capture.json';source.write_text(json.dumps(capture))
             target=pathlib.Path(directory)/'out.json'
-            result=subprocess.run([node,str(ROOT/'portable/node.cjs'),'--capture-input',str(source),'--json',str(target),'--no-notify'],capture_output=True,text=True,timeout=10)
+            result=subprocess.run([node,str(ROOT/'tests/render_capture.cjs'),'--capture-input',str(source),'--json',str(target),'--no-notify'],capture_output=True,text=True,encoding="utf-8",timeout=10)
             self.assertEqual(result.returncode,0,result.stderr)
-            payload=json.loads(target.read_text());validate_standard_json(payload)
+            payload=json.loads(target.read_text(encoding="utf-8"));validate_standard_json(payload)
             self.assertEqual(payload['sections']['public_quality']['packet_loss']['availability'],'unavailable')
 
     def test_python_failed_command_is_not_packet_loss(self):
@@ -139,7 +139,7 @@ class PortableTests(unittest.TestCase):
         node=os.environ.get('TEST_NODE') or shutil.which('node')
         if node:
             code='const p=require(process.argv[1]).parser;if(p.ping({status:1,stdout:process.argv[2]})!==null)process.exit(1)'
-            result=subprocess.run([node,'-e',code,str(ROOT/'portable/macos.js'),text],capture_output=True,text=True)
+            result=subprocess.run([node,'-e',code,str(ROOT/'portable/macos.js'),text],capture_output=True,text=True,encoding="utf-8")
             self.assertEqual(result.returncode,0,result.stderr)
 
     def test_windows_capture_parity(self):
@@ -157,24 +157,13 @@ class PortableTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source=pathlib.Path(directory)/'capture.json';source.write_text(json.dumps(capture),encoding='utf-8')
             outputs=[]
-            for engine in [[node,str(ROOT/'portable/node.cjs')],[powershell,'-NoProfile','-File',str(ROOT/'portable/windows.ps1')]]:
+            for engine in [[node,str(ROOT/'tests/render_capture.cjs')],[powershell,'-NoProfile','-File',str(ROOT/'portable/windows.ps1')]]:
                 target=pathlib.Path(directory)/'out.json'
-                result=subprocess.run(engine+['--capture-input',str(source),'--json',str(target),'--mask','--no-notify'],capture_output=True,text=True,timeout=20)
+                result=subprocess.run(engine+['--capture-input',str(source),'--json',str(target),'--mask','--no-notify'],capture_output=True,text=True,encoding="utf-8",timeout=20)
                 self.assertEqual(result.returncode,0,result.stderr)
                 payload=json.loads(target.read_text(encoding='utf-8'));validate_standard_json(payload)
                 outputs.append((result.stdout,payload['diagnosis']))
             self.assertEqual(outputs[0],outputs[1])
-
-    def test_node_timeout_cleans_up_descendants(self):
-        import time
-        node=os.environ.get('TEST_NODE') or shutil.which('node')
-        if not node:self.skipTest('Node required')
-        child='import subprocess,sys,time;subprocess.Popen([sys.executable,"-c","import time;time.sleep(3)"]);time.sleep(3)'
-        code='require(process.argv[1]).runCommand([process.argv[2],"-c",process.argv[3]],100).then(x=>{if(x.status!==124)process.exitCode=1})'
-        start=time.monotonic()
-        result=subprocess.run([node,'-e',code,str(ROOT/'portable/collect.cjs'),sys.executable,child],capture_output=True,text=True,timeout=5)
-        self.assertEqual(result.returncode,0,result.stderr)
-        self.assertLess(time.monotonic()-start,1.5)
 
     def test_shared_contract_does_not_drift_from_python(self):
         from wifi_health import output
@@ -196,7 +185,7 @@ $jobs=@{text=@($Python,'-c','import sys;print(sys.argv[1])','space "quote" \\ pa
 $result=Invoke-WifiBatch $jobs 1 ([datetime]::UtcNow.AddSeconds(2))
 $result|ConvertTo-Json -Depth 5 -Compress
 ''',encoding='utf-8-sig')
-            result=subprocess.run([powershell,'-NoProfile','-File',str(source),str(ROOT),sys.executable],capture_output=True,text=True,timeout=6)
+            result=subprocess.run([powershell,'-NoProfile','-File',str(source),str(ROOT),sys.executable],capture_output=True,text=True,encoding="utf-8",timeout=6)
             self.assertEqual(result.returncode,0,result.stderr)
             payload=json.loads(result.stdout)
             self.assertEqual(payload['text']['status'],0)
