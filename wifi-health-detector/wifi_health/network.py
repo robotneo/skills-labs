@@ -7,6 +7,8 @@ import sys
 import time
 import os
 import ipaddress
+import json
+import math
 
 from .parsers import parse_ping
 
@@ -46,12 +48,16 @@ def dns_test(host, timeout=10):
                                 errors="replace", timeout=timeout, shell=False)
         answer = result.stdout or ""
         # A zero exit code alone does not prove the resolver found a record.
-        addresses = re.findall(r"(?:ip_address|ipv6_address):\s*(\S+)", answer) if macos else answer.split()
+        payload = {} if macos else json.loads(answer)
+        addresses = re.findall(r"(?:ip_address|ipv6_address):\s*(\S+)", answer) if macos else payload.get('addresses', [])
         resolved = bool(addresses) and all(ipaddress.ip_address(address) for address in addresses)
         if result.returncode or not resolved:
             return {"reachable": False, "latency_ms": None, "reason": "DNS lookup failed"}
-        return {"reachable": True, "latency_ms": round((time.monotonic() - start) * 1000, 2)}
-    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        latency = round((time.monotonic() - start) * 1000, 2) if macos else float(payload['latency_ms'])
+        if not math.isfinite(latency) or latency < 0:
+            raise ValueError('invalid DNS duration')
+        return {"reachable": True, "latency_ms": latency}
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError, AttributeError) as exc:
         return {"reachable": False, "latency_ms": None, "reason": str(exc)}
 
 

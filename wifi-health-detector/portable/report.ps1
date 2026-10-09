@@ -64,7 +64,13 @@ function Protect-WifiReport($r){
         }
     }}
 }
-function Escape-WifiText($v){if($v -is [array]){$v=$v -join ', '};return ([string]$v).Replace('|','\|').Replace("`r`n",'<br>').Replace("`n",'<br>').Replace("`r",'<br>')}
+function Escape-WifiText($v){
+    if(($v -is [double] -or $v -is [single] -or $v -is [decimal]) -and $v -eq [math]::Truncate($v)){
+        $v=$v.ToString('0',[Globalization.CultureInfo]::InvariantCulture)
+    }
+    if($v -is [array]){$v=$v -join ', '}
+    return ([string]$v).Replace('|','\|').Replace("`r`n",'<br>').Replace("`n",'<br>').Replace("`r",'<br>')
+}
 function Format-WifiField($r,$s,$k,$zh){
     $f=$r.sections[$s][$k]
     if($f.availability -ne 'available' -or $null -eq $f.value){$reason=$f.reason;if($zh -and $Contract.REASON_ZH.$reason){$reason=$Contract.REASON_ZH.$reason};if($zh){return "—（系统未提供：$reason）"};return "— (Unavailable: $reason)"}

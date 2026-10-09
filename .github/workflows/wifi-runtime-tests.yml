@@ -28,6 +28,9 @@ jobs:
       - name: Windows security regressions
         if: runner.os == 'Windows'
         run: python -m unittest discover -s wifi-health-detector/tests -p test_security.py -v
+      - name: Windows installer process cleanup
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s wifi-health-detector/integrations/enterprise-notification-bridge/tests -p test_install_process.py -v
       - name: Notification contracts
         if: runner.os == 'macOS'
         run: python -m unittest discover -s wifi-health-detector/integrations/enterprise-notification-bridge/tests -v

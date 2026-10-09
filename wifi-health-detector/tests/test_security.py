@@ -25,7 +25,9 @@ class SecurityTests(unittest.TestCase):
         result = subprocess.run([powershell, '-NoProfile', '-File', str(ROOT / 'portable/dns.ps1'), 'localhost'],
                                 capture_output=True, text=True, encoding='utf-8', timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
-        addresses = [ipaddress.ip_address(value) for value in result.stdout.split()]
+        payload = json.loads(result.stdout)
+        addresses = [ipaddress.ip_address(value) for value in payload['addresses']]
+        self.assertGreaterEqual(payload['latency_ms'], 0)
         self.assertTrue(addresses)
         self.assertTrue(all(address.is_loopback for address in addresses))
 
@@ -59,9 +61,11 @@ class SecurityTests(unittest.TestCase):
         from wifi_health.network import dns_test
         with patch('wifi_health.network.platform.system', return_value='Windows'):
             for output in ('192.0.2.1\n', '2001:db8::1\n'):
-                answer = subprocess.CompletedProcess([], 0, stdout=output, stderr='')
+                answer = subprocess.CompletedProcess([], 0, stdout=json.dumps({'addresses': output.split(), 'latency_ms': 1.5}), stderr='')
                 with patch('wifi_health.network.subprocess.run', return_value=answer) as run:
-                    self.assertTrue(dns_test('www.baidu.com')['reachable'])
+                    result = dns_test('www.baidu.com')
+                    self.assertTrue(result['reachable'])
+                    self.assertEqual(result['latency_ms'], 1.5)
                     self.assertIn('-File', run.call_args[0][0])
 
     def test_portable_csv_network_names_are_literal_cells(self):

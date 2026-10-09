@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import signal
 import sys
 import urllib.request
 
@@ -53,12 +54,35 @@ class SubprocessRunner(object):
 
 
 class InstallerProcessRunner(object):
+    def __init__(self, timeout=180):
+        self.timeout = timeout
+
     def run(self, command, shell=False, cwd=None, env=None):
-        return subprocess.run(
-            list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, check=False, shell=False, cwd=cwd, env=env,
-            timeout=180,
+        # Only the exit status is part of the installer protocol. Discarding
+        # output also avoids inherited pipes keeping a timed-out install alive.
+        process = subprocess.Popen(
+            list(command), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, shell=False, cwd=cwd, env=env,
+            start_new_session=(os.name != 'nt'),
         )
+        try:
+            return subprocess.CompletedProcess(command, process.wait(timeout=self.timeout))
+        except subprocess.TimeoutExpired:
+            if os.name == 'nt':
+                try:
+                    subprocess.run(['taskkill.exe', '/PID', str(process.pid), '/T', '/F'],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=1)
+            return subprocess.CompletedProcess(command, 124)
 
 
 class UrlDownloader(object):
