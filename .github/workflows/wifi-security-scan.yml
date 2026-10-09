@@ -1,0 +1,29 @@
+name: Wi-Fi skill security
+on:
+  push:
+    paths: ['wifi-health-detector/**', '.github/workflows/wifi-security-scan.yml']
+  pull_request:
+    paths: ['wifi-health-detector/**', '.github/workflows/wifi-security-scan.yml']
+permissions:
+  contents: read
+jobs:
+  nacos-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install scanner
+        run: python -m pip install cisco-ai-skill-scanner==2.2.1
+      - name: Scan with Nacos default options
+        run: |
+          set -o pipefail
+          skill-scanner --version
+          skill-scanner scan wifi-health-detector --fail-on-severity high --lenient --format markdown --detailed | tee scan-report.md
+      - name: Save scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wifi-security-report
+          path: scan-report.md
