@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from .models import Report
 from .parsers import band_for_channel, parse_macos_airport, parse_macos_default_route, parse_windows_ipconfig, parse_windows_netsh
@@ -91,16 +92,36 @@ class MacCollector(object):
     def _collect_wireless(self, report):
         values = {}
         sources = []
-        profiler = self.runner.run(["/usr/sbin/system_profiler", "SPAirPortDataType"], timeout=20)
-        if profiler.stdout:
-            parsed = _parse_macos_profiler(profiler.stdout)
-            if parsed: values.update(parsed); sources.append("system_profiler")
-        if os.path.exists(AIRPORT):
-            airport = self.runner.run([AIRPORT, "-I"])
-            if airport.stdout:
-                values.update(parse_macos_airport(airport.stdout)); sources.append("airport -I")
-            if not getattr(self.runner, "fast", False):
-                scan = self.runner.run([AIRPORT, "-s"], timeout=15)
+        # system_profiler (~4.5s) and the airport scan (~3.2s) are the two slow
+        # probes and have no data dependency on each other (the scan only needs the
+        # channel from the instant `airport -I` call), so overlap them on threads.
+        # CommandRunner.run is reentrant across threads (only reads its budget).
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            profiler_future = pool.submit(self.runner.run, ["/usr/sbin/system_profiler", "SPAirPortDataType"], timeout=20)
+            airport_text = ""
+            if os.path.exists(AIRPORT):
+                airport = self.runner.run([AIRPORT, "-I"])
+                airport_text = airport.stdout or ""
+                if airport_text:
+                    values.update(parse_macos_airport(airport_text))
+                    sources.append("airport -I")
+                scan_future = None
+                if not getattr(self.runner, "fast", False):
+                    scan_future = pool.submit(self.runner.run, [AIRPORT, "-s"], timeout=15)
+            else:
+                scan_future = None
+
+            profiler = profiler_future.result()
+            if profiler.stdout:
+                parsed = _parse_macos_profiler(profiler.stdout)
+                if parsed:
+                    # Live airport association values win over profiler wording.
+                    parsed.update(values)
+                    values = parsed
+                    sources.insert(0, "system_profiler")
+
+            if scan_future is not None:
+                scan = scan_future.result()
                 if scan.stdout and values.get("channel"):
                     same, adjacent = _count_macos_channels(scan.stdout, values["channel"])
                     values["same_channel_networks"] = same

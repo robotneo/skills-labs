@@ -196,14 +196,18 @@ class SetupWorkflowTests(unittest.TestCase):
         self.assertEqual(result.reason, "configured_provider_unavailable")
         self.assertEqual(self.calls, [])
 
-    def test_install_requires_both_request_and_approval(self):
+    def test_install_requires_approval_before_running_installer(self):
         missing = DependencyStatus(
             "action_required", "dependency_install_required", None
         )
         result = self.service(discovery=missing).setup_dependency(
             "dingtalk", "dws-cli", install_dws=True, approved=False
         )
-        self.assertEqual(result.reason, "dependency_install_declined")
+        # Requesting install without approval stays non-blocking: it returns
+        # the correlated install action but never executes the installer.
+        self.assertEqual(result.status, "action_required")
+        self.assertEqual(result.reason, "dependency_install_required")
+        self.assertEqual(result.data["action"]["operation"], "install_dependency")
         self.assertNotIn("install", self.calls)
 
     def test_approved_install_rediscovers_reverifies_then_binds(self):

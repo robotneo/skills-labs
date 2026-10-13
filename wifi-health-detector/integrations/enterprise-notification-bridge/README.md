@@ -75,10 +75,9 @@ clients, use `bind_notification_profile`,
 
 The CLI writes one JSON result to stdout. Configure state and the metadata-only
 delivery ledger with `ENTERPRISE_NOTIFICATION_BRIDGE_CONFIG` and
-`ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER`; durable pending actions, retry
-envelopes, and first-send confirmations use
-`ENTERPRISE_NOTIFICATION_BRIDGE_STATE`. Files are UTF-8 and created with
-user-only permissions where the operating system supports them.
+`ENTERPRISE_NOTIFICATION_BRIDGE_LEDGER`; durable pending actions and retry
+envelopes use `ENTERPRISE_NOTIFICATION_BRIDGE_STATE`. Files are UTF-8 and
+created with user-only permissions where the operating system supports them.
 
 ## Native and host continuation
 

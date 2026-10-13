@@ -64,7 +64,7 @@ OPERATION_RESULT_SCHEMA = {
         "operation": {
             "type": "string", "enum": [
                 "auth_status", "login", "list_profiles", "select_profile",
-                "resolve_recipient", "confirm_delivery", "send_report",
+                "resolve_recipient", "send_report",
                 "delivery_status", "summarize_report",
                 "install_dependency",
             ],

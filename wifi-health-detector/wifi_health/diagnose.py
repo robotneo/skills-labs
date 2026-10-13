@@ -16,6 +16,47 @@ def _text(report, section, name):
     return str(item.value) if item.available else ""
 
 
+_WEP_MARKERS = ("wep",)
+_OPEN_MARKERS = ("open", "none", "打开", "开放")
+
+
+def _has_marker(text, markers):
+    return any(marker in text for marker in markers)
+
+
+def assess_security(report, platform_name):
+    """Classify Wi-Fi authentication without cross-platform false positives.
+
+    Returns "secure", "weak", or None when the platform exposes no usable value.
+
+    macOS ``airport -I`` prints a constant ``802.11 auth: open`` (802.11
+    open-system authentication) even for WPA2/WPA3 personal networks; the real
+    decision is ``link auth`` / the system_profiler Security string, both stored
+    in ``connection.security``. Windows netsh instead exposes the meaningful
+    decision as ``Authentication`` (mirrored into security by the native engine).
+    """
+    platform_name = (platform_name or "").lower()
+    security = _text(report, "connection", "security").lower()
+    authentication = _text(report, "connection", "authentication").lower()
+
+    # Any WPA/WPA2/WPA3 (PSK/Personal or Enterprise) association is strong.
+    # On macOS only connection.security is trustworthy; ignore 802.11 auth.
+    if "wpa" in security or (platform_name != "darwin" and "wpa" in authentication):
+        return "secure"
+
+    if platform_name == "darwin":
+        if _has_marker(security, _WEP_MARKERS) or _has_marker(security, _OPEN_MARKERS):
+            return "weak"
+        # Unknown but present wording: count the observation without flagging.
+        return "secure" if security else None
+
+    if _has_marker(security, _WEP_MARKERS) or _has_marker(authentication, _WEP_MARKERS):
+        return "weak"
+    if _has_marker(security, _OPEN_MARKERS) or _has_marker(authentication, _OPEN_MARKERS):
+        return "weak"
+    return "secure" if (security or authentication) else None
+
+
 def diagnose(report):
     score = 100
     observed = 0
@@ -95,10 +136,10 @@ def diagnose(report):
             issues.append("slow_dns")
             recommendations.append({"id": "slow_dns", "priority": "medium", "reason": "DNS lookup took %.0f ms" % dns_latency, "action": "Retest DNS and compare the router/ISP resolver with a trusted public resolver."})
 
-    security = (_text(report, "connection", "security") + " " + _text(report, "connection", "authentication")).lower()
-    if security:
+    security_state = assess_security(report, _text(report, "system", "os"))
+    if security_state is not None:
         observed += 1
-        if any(token in security for token in ("open", "wep", "开放")):
+        if security_state == "weak":
             score -= 20; categories["security"] -= 70
             issues.append("weak_security")
             recommendations.append({"id": "weak_security", "priority": "high", "reason": "Open or obsolete Wi-Fi security was detected", "action": "Enable WPA2-AES or WPA3 and use a strong passphrase."})

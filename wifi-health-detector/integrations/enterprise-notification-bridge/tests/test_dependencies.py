@@ -40,7 +40,7 @@ class FakeRunner(object):
         return response
 
 
-def verified_runner(executable, version="1.0.15"):
+def verified_runner(executable, version="1.0.63"):
     json_format_help = (
         'Options:\n  --format <format>  Output format '
         '[allowed values: "text", "json"]'
@@ -174,7 +174,7 @@ class DwsDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(status.status, "action_required")
         self.assertEqual(status.reason, "dependency_install_required")
-        self.assertEqual(status.minimum_version, "1.0.15")
+        self.assertEqual(status.minimum_version, "1.0.63")
 
 
 class DwsVerificationTests(unittest.TestCase):
@@ -203,8 +203,8 @@ class DwsVerificationTests(unittest.TestCase):
             [executable, "--version", "--format", "json"],
         ])
 
-    def test_minimum_version_is_exactly_1_0_15(self):
-        self.assertEqual(MINIMUM_DWS_VERSION, "1.0.15")
+    def test_minimum_version_is_exactly_1_0_63(self):
+        self.assertEqual(MINIMUM_DWS_VERSION, "1.0.63")
 
     def test_semantic_version_comparison_accepts_later_minor_version(self):
         executable = sys.executable
@@ -219,7 +219,7 @@ class DwsVerificationTests(unittest.TestCase):
         executable = sys.executable
 
         status = verify_dws(
-            executable, verified_runner(executable, "1.0.15-rc.1")
+            executable, verified_runner(executable, "1.0.63-rc.1")
         )
 
         self.assertEqual(status.status, "action_required")
@@ -252,8 +252,8 @@ class DwsVerificationTests(unittest.TestCase):
         runner = verified_runner(executable)
         runner.responses[(executable, "--version", "--format", "json")] = (
             CommandResult(
-                "dws version v1.0.60 "
-                "(fcc3dbf1, 2026-08-27T08:19:33Z)\n"
+                "dws version v1.0.63 "
+                "(fcc3dbf1, 2026-10-03T08:19:33Z)\n"
             )
         )
 
@@ -261,7 +261,7 @@ class DwsVerificationTests(unittest.TestCase):
 
         self.assertEqual(status.status, "ready")
         self.assertEqual(status.reason, "dependency_ready")
-        self.assertEqual(status.version, "1.0.60")
+        self.assertEqual(status.version, "1.0.63")
 
     def test_text_version_requires_the_complete_official_shape(self):
         executable = sys.executable
@@ -633,7 +633,7 @@ class DwsVerificationTests(unittest.TestCase):
         self.assertEqual(status.status, "ready")
         self.assertEqual(status.reason, "dependency_ready")
         self.assertEqual(status.executable, executable)
-        self.assertEqual(status.minimum_version, "1.0.15")
+        self.assertEqual(status.minimum_version, "1.0.63")
         self.assertEqual(runner.calls, [
             [executable, "--version", "--format", "json"],
             [executable, "auth", "status", "--help"],
@@ -656,7 +656,7 @@ class DependencyMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["requirements"], ["python>=3.7"])
         self.assertEqual(
             manifest["conditional_requirements"],
-            {"dingtalk:dws-cli": ["dws>=1.0.15"]},
+            {"dingtalk:dws-cli": ["dws>=1.0.63"]},
         )
 
     def test_skill_yaml_keeps_python_unconditional_and_dws_conditional(self):
@@ -666,7 +666,7 @@ class DependencyMetadataTests(unittest.TestCase):
         self.assertIn("requirements: [python>=3.7]", lines)
         section = lines.index("conditional_requirements:")
         self.assertEqual(
-            lines[section + 1], "  dingtalk:dws-cli: [dws>=1.0.15]"
+            lines[section + 1], "  dingtalk:dws-cli: [dws>=1.0.63]"
         )
 
 

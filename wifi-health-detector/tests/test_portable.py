@@ -51,6 +51,46 @@ class PortableTests(unittest.TestCase):
                         validate_standard_json(payload)
                         self.assertEqual(payload['diagnosis'], report.diagnosis)
 
+    def test_security_classification_matches_python_across_engines(self):
+        node = os.environ.get('TEST_NODE') or shutil.which('node')
+        engines = []
+        if node:
+            engines.append([node, str(ROOT / 'tests' / 'render_capture.cjs')])
+        if sys.platform == 'darwin':
+            engines.append(['/usr/bin/osascript', '-l', 'JavaScript', str(ROOT / 'portable' / 'macos.js')])
+        powershell = os.environ.get('TEST_POWERSHELL') or ('powershell.exe' if sys.platform == 'win32' else shutil.which('pwsh'))
+        if powershell:
+            engines.append([powershell, '-NoProfile', '-File', str(ROOT / 'portable' / 'windows.ps1')])
+        self.assertTrue(engines, 'Set TEST_NODE to run portable contract tests')
+        # (system.os, connection.security, connection.authentication, weak?)
+        matrix = [
+            ('Darwin', 'wpa2-psk', 'open', False),       # airport always prints 802.11 auth open
+            ('Darwin', 'WPA2 Personal', 'open', False),  # system_profiler wording
+            ('Darwin', 'WPA3 Personal', 'open', False),
+            ('Darwin', 'none', 'open', True),
+            ('Windows', 'WPA2-Personal', 'WPA2-Personal', False),
+            ('Windows', 'WPA3-Personal', 'WPA3-Personal', False),
+            ('Windows', 'Open', 'Open', True),
+        ]
+        for engine in engines:
+            for os_name, security, authentication, weak in matrix:
+                report = Report.empty()
+                report.set('system', 'os', os_name)
+                report.set('system', 'checked_at', '2026-10-08T12:00:00+08:00')
+                report.set('connection', 'security', security)
+                report.set('connection', 'authentication', authentication)
+                expected = diagnose(report)
+                self.assertEqual(('weak_security' in expected['issues']), weak, (os_name, security))
+                with tempfile.TemporaryDirectory() as directory:
+                    source = pathlib.Path(directory) / 'report.json'
+                    target = pathlib.Path(directory) / 'out.json'
+                    source.write_text(json.dumps(report.to_dict()), encoding='utf-8')
+                    args = engine + ['--report-input', str(source), '--json', str(target), '--no-notify']
+                    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    payload = json.loads(target.read_text(encoding="utf-8"))
+                    self.assertEqual(payload['diagnosis'], expected, (engine[0], os_name, security))
+
     def test_launcher_explicit_native_help(self):
         if sys.platform == 'win32':
             self.skipTest('macOS launcher')
@@ -112,7 +152,7 @@ class PortableTests(unittest.TestCase):
         def ping(runner,target):
             barrier.wait()
             return {'reachable':True,'packet_loss_percent':0,'latency_ms':2,'jitter_ms':1}
-        def dns(host,timeout=10):
+        def dns(host,timeout=10,runner=None):
             barrier.wait()
             return {'reachable':True,'latency_ms':2}
         report=Report.empty();report.set('ip','gateway','192.0.2.1')

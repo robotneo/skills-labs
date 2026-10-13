@@ -183,21 +183,6 @@ class ContinuationContractTests(unittest.TestCase):
                         0o600,
                     )
 
-    def test_first_delivery_confirmation_is_scoped_to_all_destination_fields(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = PendingStateStore(directory)
-            scope = {
-                "platform": "feishu", "provider": "native",
-                "profile": "tenant:user", "recipients": ["group:网络运维"],
-            }
-
-            self.assertFalse(store.is_confirmed(scope))
-            store.confirm(scope)
-
-            self.assertTrue(store.is_confirmed(scope))
-            changed = dict(scope, recipients=["group:安全运维"])
-            self.assertFalse(store.is_confirmed(changed))
-
 
 if __name__ == "__main__":
     unittest.main()

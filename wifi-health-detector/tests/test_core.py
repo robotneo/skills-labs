@@ -4,7 +4,6 @@ import io
 import json
 import os
 import sys
-import tempfile
 import unittest
 from collections import OrderedDict
 from unittest.mock import patch
@@ -21,7 +20,6 @@ from wifi_health.command import CommandResult
 from wifi_health.models import Field, Report, unavailable
 from wifi_health.output import (
     ReportContractError,
-    flatten_report,
     render_csv,
     render_json,
     render_text,
@@ -198,6 +196,47 @@ class DiagnosisTests(unittest.TestCase):
         self.assertIn("prefer_higher_band", ids)
         self.assertIn("slow_dns", ids)
 
+    def _security_report(self, os_name, security=None, authentication=None):
+        report = Report.empty()
+        report.sections["system"]["os"] = Field(os_name, source="fixture")
+        if security is not None:
+            report.sections["connection"]["security"] = Field(security, source="fixture")
+        if authentication is not None:
+            report.sections["connection"]["authentication"] = Field(authentication, source="fixture")
+        return report
+
+    def test_macos_wpa2_link_auth_is_secure_despite_open_80211_auth(self):
+        # airport -I always prints "802.11 auth: open" on WPA2 personal networks;
+        # the real decision lives in "link auth" (connection.security).
+        report = self._security_report("Darwin", security="wpa2-psk", authentication="open")
+        result = diagnose(report)
+        self.assertNotIn("weak_security", result["issues"])
+        self.assertEqual(result["category_scores"]["security"], 100)
+
+    def test_macos_profiler_wpa2_personal_is_secure(self):
+        report = self._security_report("Darwin", security="WPA2 Personal", authentication="open")
+        self.assertNotIn("weak_security", diagnose(report)["issues"])
+        report = self._security_report("Darwin", security="WPA3 Personal", authentication="open")
+        self.assertNotIn("weak_security", diagnose(report)["issues"])
+
+    def test_macos_open_and_wep_are_still_flagged(self):
+        for security in ("none", "open", "WEP"):
+            report = self._security_report("Darwin", security=security, authentication="open")
+            self.assertIn("weak_security", diagnose(report)["issues"], security)
+
+    def test_windows_authentication_values_are_classified(self):
+        for authentication in ("WPA2-Personal", "WPA3-Personal", "WPA2-Enterprise"):
+            report = self._security_report("Windows", security=authentication, authentication=authentication)
+            self.assertNotIn("weak_security", diagnose(report)["issues"], authentication)
+        for authentication in ("Open", "WEP"):
+            report = self._security_report("Windows", security=authentication, authentication=authentication)
+            self.assertIn("weak_security", diagnose(report)["issues"], authentication)
+
+    def test_security_observation_counts_once(self):
+        # A secure network still contributes the security observation to confidence.
+        report = self._security_report("Darwin", security="wpa2-psk", authentication="open")
+        self.assertEqual(diagnose(report)["confidence_percent"], 10)
+
 
 class PublicQualityTests(unittest.TestCase):
     def test_domestic_multi_target_results_are_aggregated_without_single_point_failure(self):
@@ -213,7 +252,7 @@ class PublicQualityTests(unittest.TestCase):
         }
 
         with patch("wifi_health.cli.ping_target", side_effect=lambda runner, target: ping_results[target]), patch(
-            "wifi_health.cli.dns_test", side_effect=lambda host, timeout=10: dns_results[host]
+            "wifi_health.cli.dns_test", side_effect=lambda host, timeout=10, runner=None: dns_results[host]
         ):
             apply_quality(report, object())
 

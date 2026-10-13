@@ -18,6 +18,7 @@ from .ledger import DeliveryLedger
 from .installer import execute_dws_install
 from .models import Envelope
 from .providers.dws import DwsProvider
+from .releases import LatestVersionResolver
 from .service import BridgeService, DeliveryBatchResult
 
 
@@ -155,11 +156,6 @@ class BridgeCommands(object):
     def setup(self, platform, provider="auto", capabilities=None,
               install_dws=False, china_mirror=False, device_login=False,
               approved=False):
-        if install_dws and not approved:
-            raise CommandError(
-                "dependency_install_declined",
-                "--install-dws requires explicit --yes approval",
-            )
         capability_bundle = load_capabilities(capabilities)
         try:
             result = self.service.setup_dependency(
@@ -343,6 +339,9 @@ def build_commands(config_path=None, ledger_path=None, state_path=None,
         config, provider_list, DeliveryLedger(ledger_path),
         state_store=PendingStateStore(state_path),
         persist_config=lambda: save_config(config, config_path),
+        # Resolve the newest-stable DWS release live from the official APIs
+        # (China-first) rather than trusting a version baked into this code.
+        version_resolver=LatestVersionResolver().latest_stable,
         dependency_installer=lambda plan, approved: execute_dws_install(
             plan, approved, UrlDownloader(), InstallerProcessRunner()
         ),

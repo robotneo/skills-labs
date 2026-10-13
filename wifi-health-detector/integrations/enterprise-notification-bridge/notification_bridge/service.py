@@ -59,7 +59,7 @@ class BridgeService(object):
                  persist_config=None, dependency_discoverer=None,
                  dependency_verifier=None, dependency_installer=None,
                  dependency_plan=None, environment=None, platform_name=None,
-                 which=None):
+                 which=None, version_resolver=None):
         self.config = config
         self.providers = list(providers)
         self.ledger = ledger
@@ -69,16 +69,40 @@ class BridgeService(object):
         self._dependency_verifier = dependency_verifier or verify_dws
         self._dependency_installer = dependency_installer
         self._dependency_plan = dependency_plan or plan_dws_install
+        # Default resolver stays offline (returns the trusted floor) so unit
+        # tests and embedded use never touch the network. The production CLI
+        # injects a live LatestVersionResolver here.
+        self._version_resolver = version_resolver or (
+            lambda: MINIMUM_DWS_VERSION
+        )
+        self._resolved_minimum_version = None
         self._dependency_environment = dict(
             os.environ if environment is None else environment
         )
         self._dependency_platform = platform_name or runtime_platform.system()
         self._dependency_which = which or shutil.which
 
+    def _minimum_version(self):
+        """Resolve (and memoize) the newest-stable DWS minimum version."""
+        if self._resolved_minimum_version is None:
+            try:
+                value = self._version_resolver()
+            except Exception:
+                value = MINIMUM_DWS_VERSION
+            if not isinstance(value, str) or not value:
+                value = MINIMUM_DWS_VERSION
+            self._resolved_minimum_version = value
+        return self._resolved_minimum_version
+
     def setup_dependency(self, platform, provider="auto", capabilities=None,
                          install_dws=False, china_mirror=False,
                          device_login=False, approved=False):
-        """Prepare one notification dependency without selecting a recipient."""
+        """Prepare one notification dependency without selecting a recipient.
+
+        A single explicit ``--yes`` approval is enough to install: the old
+        ``--install-dws`` + ``--yes`` double gate is kept only for backward
+        compatibility.
+        """
         capability_list = _capability_list(capabilities)
         if platform != "dingtalk":
             return ProviderResult("ready", "dws_dependency_not_applicable")
@@ -99,23 +123,21 @@ class BridgeService(object):
             self._delete_dependency_install_actions(platform, "auto")
             return ProviderResult("ready", "native_provider_selected")
 
+        minimum_version = self._minimum_version()
         discovered = self._dependency_discoverer(
             self._dependency_environment, self._dependency_platform,
-            self._dependency_which,
+            self._dependency_which, minimum_version,
         )
         if discovered.status == "discovered":
             verified = self._dependency_verifier(
-                discovered.executable, _runner_for_dependency(self.providers)
+                discovered.executable, _runner_for_dependency(self.providers),
+                minimum_version
             )
         else:
             verified = discovered
 
         if verified.reason in ("dependency_install_required", "dws_upgrade_required"):
-            if not install_dws or approved is not True:
-                if install_dws:
-                    return ProviderResult(
-                        "action_required", "dependency_install_declined"
-                    )
+            if approved is not True:
                 return self._dependency_install_action(
                     platform, provider, china_mirror, capability_list
                 )
@@ -129,12 +151,13 @@ class BridgeService(object):
                 return ProviderResult(installed.status, installed.reason)
             discovered = self._dependency_discoverer(
                 self._dependency_environment, self._dependency_platform,
-                self._dependency_which,
+                self._dependency_which, minimum_version
             )
             if discovered.status != "discovered":
                 return ProviderResult(discovered.status, discovered.reason)
             verified = self._dependency_verifier(
-                discovered.executable, _runner_for_dependency(self.providers)
+                discovered.executable, _runner_for_dependency(self.providers),
+                minimum_version
             )
 
         if verified.status != "ready":
@@ -153,7 +176,7 @@ class BridgeService(object):
     def _dependency_install_action(self, platform, requested_provider,
                                    china_mirror, capabilities):
         data = {
-            "minimum_version": MINIMUM_DWS_VERSION,
+            "minimum_version": self._minimum_version(),
             "china_mirror": bool(china_mirror),
             "requested_provider": requested_provider,
         }
@@ -352,22 +375,6 @@ class BridgeService(object):
                 self._provider_for_context(context, capabilities),
                 context["recipient_index"] + 1, recipients,
             )
-        elif stage == "confirm_delivery":
-            if not result["data"]["confirmed"]:
-                batch = DeliveryBatchResult([
-                    ProviderResult("skipped", "first_delivery_confirmation_required")
-                ])
-            else:
-                provider = self._provider_for_context(context, capabilities)
-                channel = self.config.channels[context["channel_index"]]
-                scope = _confirmation_scope(
-                    provider, channel.profile, context["resolved_recipients"]
-                )
-                self.state_store.confirm(scope)
-                batch = self._send_recipients(
-                    envelope, capabilities, context["channel_index"], provider,
-                    context["recipient_index"], context["resolved_recipients"],
-                )
         elif stage == "send_report":
             claim = _claim_from_context(context["claim"])
             if not self.ledger.mark_success(
@@ -568,9 +575,12 @@ class BridgeService(object):
                             provider, recipient_index, resolved_recipients):
         channel = self.config.channels[channel_index]
         if recipient_index >= len(channel.recipients):
-            return self._confirm_or_send(
+            # Authorization is validated and recipients were explicitly
+            # configured, so send immediately; the delivery ledger prevents
+            # duplicate sends.
+            return self._send_recipients(
                 envelope, capabilities, channel_index, provider,
-                resolved_recipients,
+                0, resolved_recipients,
             )
         selector = channel.recipients[recipient_index]
         try:
@@ -605,22 +615,6 @@ class BridgeService(object):
         return self._resolve_recipients(
             envelope, capabilities, channel_index, provider,
             recipient_index + 1, recipients,
-        )
-
-    def _confirm_or_send(self, envelope, capabilities, channel_index, provider,
-                         recipients):
-        channel = self.config.channels[channel_index]
-        scope = _confirmation_scope(provider, channel.profile, recipients)
-        if not self.state_store.is_confirmed(scope):
-            return DeliveryBatchResult([self._suspend(
-                envelope, capabilities, "deliver", channel_index, 0,
-                recipients, None, provider.platform, provider.name,
-                "confirm_delivery", {
-                    "profile": channel.profile, "recipients": list(recipients),
-                }, False,
-            )])
-        return self._send_recipients(
-            envelope, capabilities, channel_index, provider, 0, recipients
         )
 
     def _send_recipients(self, envelope, capabilities, channel_index, provider,
@@ -979,13 +973,6 @@ def _claim_from_context(value):
         value["profile"], value["recipient"],
     )
     return Claim(key, value["claim_id"], True, "")
-
-
-def _confirmation_scope(provider, profile, recipients):
-    return {
-        "platform": provider.platform, "provider": provider.name,
-        "profile": profile, "recipients": list(recipients),
-    }
 
 
 def _summary_value(value):

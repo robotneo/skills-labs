@@ -219,10 +219,6 @@ class NativeWorkflowTests(unittest.TestCase):
         action = action_from(service.continue_operation(success(
             action, {"recipient": "group:network"}
         )))
-        self.assertEqual(action["operation"], "confirm_delivery")
-        action = action_from(service.continue_operation(success(
-            action, {"confirmed": True}
-        )))
         self.assertEqual(action["operation"], "send_report")
         delivered = service.continue_operation(success(
             action, {"external_id": "native-message-1"}
@@ -252,10 +248,6 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertEqual(action["operation"], "resolve_recipient")
         action = action_from(service.continue_operation(success(
             action, {"recipient": "conversation:network"}
-        )))
-        self.assertEqual(action["operation"], "confirm_delivery")
-        action = action_from(service.continue_operation(success(
-            action, {"confirmed": True}
         )))
         self.assertEqual(action["operation"], "send_report")
         delivered = service.continue_operation(success(
@@ -325,11 +317,6 @@ class NativeWorkflowTests(unittest.TestCase):
             ProviderResult("failed", "timeout", retryable=True),
             ProviderResult("sent", data={"external_id": "message-2"}),
         ]
-        store = PendingStateStore(self.state_path)
-        store.confirm({
-            "platform": "dingtalk", "provider": "native",
-            "profile": "corp:user", "recipients": ["resolved:ops"],
-        })
         service = self.service([provider])
         current = make_envelope()
 
@@ -370,11 +357,6 @@ class NativeWorkflowTests(unittest.TestCase):
         )
         old_claim = ledger.claim(key)
         current_time[0] += timedelta(seconds=31)
-        store = PendingStateStore(self.state_path)
-        store.confirm({
-            "platform": "dingtalk", "provider": "native",
-            "profile": "corp:user", "recipients": ["resolved:ops"],
-        })
         service = self.service(ledger=ledger)
         capabilities = capability_bundle("dingtalk")
 

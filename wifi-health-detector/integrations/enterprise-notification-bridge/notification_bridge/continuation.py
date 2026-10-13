@@ -2,7 +2,6 @@ from __future__ import absolute_import
 
 import copy
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 import re
@@ -21,8 +20,7 @@ NATIVE_OPERATIONS = frozenset((
     "send_report", "delivery_status",
 ))
 HOST_OPERATIONS = frozenset((
-    "summarize_report", "select_profile", "confirm_delivery",
-    "install_dependency",
+    "summarize_report", "select_profile", "install_dependency",
 ))
 ALL_OPERATIONS = NATIVE_OPERATIONS | HOST_OPERATIONS
 ACTION_KEYS = frozenset((
@@ -150,7 +148,7 @@ class PendingStateStore(object):
     def __init__(self, directory):
         self.directory = os.path.abspath(directory)
         _ensure_private_directory(self.directory)
-        for name in ("pending", "retry", "confirmations"):
+        for name in ("pending", "retry"):
             _ensure_private_directory(os.path.join(self.directory, name))
 
     def save_pending(self, action, envelope, capabilities, context):
@@ -226,26 +224,6 @@ class PendingStateStore(object):
     def delete_retry(self, report_id):
         _unlink(self._retry_path(report_id))
 
-    def confirm(self, scope):
-        normalized = _normalize_scope(scope)
-        record = {
-            "schema_version": SCHEMA_VERSION,
-            "scope": normalized,
-            "confirmed_at": _timestamp(),
-        }
-        _write_json(self._confirmation_path(normalized), record)
-
-    def is_confirmed(self, scope):
-        normalized = _normalize_scope(scope)
-        path = self._confirmation_path(normalized)
-        if not os.path.exists(path):
-            return False
-        record = _read_json(path)
-        return (isinstance(record, dict)
-                and set(record) == set(("schema_version", "scope", "confirmed_at"))
-                and record.get("schema_version") == SCHEMA_VERSION
-                and record.get("scope") == normalized)
-
     def pending_actions(self):
         directory = os.path.join(self.directory, "pending")
         actions = []
@@ -264,13 +242,6 @@ class PendingStateStore(object):
     def _retry_path(self, report_id):
         return os.path.join(self.directory, "retry", report_id + ".json")
 
-    def _confirmation_path(self, scope):
-        payload = json.dumps(
-            scope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-        identifier = hashlib.sha256(payload).hexdigest()
-        return os.path.join(self.directory, "confirmations", identifier + ".json")
-
 
 class MemoryStateStore(object):
     """In-memory implementation used only by injected unit-test services."""
@@ -278,7 +249,6 @@ class MemoryStateStore(object):
     def __init__(self):
         self.pending = {}
         self.retries = {}
-        self.confirmations = {}
 
     def save_pending(self, action, envelope, capabilities, context):
         action = validate_action(action)
@@ -333,14 +303,6 @@ class MemoryStateStore(object):
     def delete_retry(self, report_id):
         self.retries.pop(report_id, None)
 
-    def confirm(self, scope):
-        normalized = _normalize_scope(scope)
-        self.confirmations[_scope_key(normalized)] = normalized
-
-    def is_confirmed(self, scope):
-        normalized = _normalize_scope(scope)
-        return self.confirmations.get(_scope_key(normalized)) == normalized
-
     def pending_actions(self):
         return [copy.deepcopy(item["action"]) for item in self.pending.values()]
 
@@ -371,11 +333,6 @@ def _validate_action_data(operation, data):
                 or not _non_empty_string(data["profile"])
                 or not _non_empty_string(data["selector"])):
             raise ContinuationError("resolve_recipient action data is invalid")
-    elif operation == "confirm_delivery":
-        if (set(data) != set(("profile", "recipients"))
-                or not _non_empty_string(data["profile"])):
-            raise ContinuationError("confirm_delivery action data is invalid")
-        _validate_identifiers(data["recipients"], "confirmation recipients")
     elif operation == "send_report":
         if (set(data) != set(("profile", "recipient", "envelope", "claim_id"))
                 or not _non_empty_string(data["profile"])
@@ -412,9 +369,6 @@ def _validate_success_data(operation, data):
     elif operation == "resolve_recipient":
         if set(data) != set(("recipient",)) or not _non_empty_string(data["recipient"]):
             raise ContinuationError("resolve_recipient result data is invalid")
-    elif operation == "confirm_delivery":
-        if set(data) != set(("confirmed",)) or not isinstance(data["confirmed"], bool):
-            raise ContinuationError("confirm_delivery result data is invalid")
     elif operation == "send_report":
         if (set(data) != set(("external_id",))
                 or not _non_empty_string(data["external_id"])):
@@ -517,33 +471,6 @@ def _validate_pending_consistency(action, envelope, capabilities, context):
         if (claim is None
                 or claim["claim_id"] != action["data"]["claim_id"]):
             raise ContinuationError("pending status claim is invalid")
-
-
-def _normalize_scope(scope):
-    expected = set(("platform", "provider", "profile", "recipients"))
-    if not isinstance(scope, dict) or set(scope) != expected:
-        raise ContinuationError("confirmation scope fields are invalid")
-    if (scope["platform"] not in PLATFORMS
-            or not _non_empty_string(scope["provider"])
-            or not _non_empty_string(scope["profile"])):
-        raise ContinuationError("confirmation scope identity is invalid")
-    _validate_identifiers(scope["recipients"], "confirmation recipients")
-    return {
-        "platform": scope["platform"], "provider": scope["provider"],
-        "profile": scope["profile"],
-        "recipients": sorted(scope["recipients"]),
-    }
-
-
-def _validate_identifiers(values, label):
-    if (not isinstance(values, list) or not values
-            or not all(_non_empty_string(item) for item in values)
-            or len(values) != len(set(values))):
-        raise ContinuationError("{0} are invalid".format(label))
-
-
-def _scope_key(scope):
-    return json.dumps(scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _non_empty_string(value):

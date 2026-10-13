@@ -29,9 +29,26 @@ var WifiCore = (function () {
         if(lat!==null){observed++;if(lat>50){score-=10;cats.local-=30;}}
         if(pub!==null){observed++;if(pub>3&&(loss===null||loss<=1)){score-=8;cats.public-=30;add('upstream_loss','medium','Public loss is elevated while the gateway is stable');}}
         if(dns!==null){observed++;if(dns>250){score-=5;cats.public-=15;add('slow_dns','medium','DNS lookup took '+Number(dns).toFixed(0)+' ms');}}
-        // Keep schema-2.0 scoring parity, including the existing security observation.
-        var security=((val(r,'connection','security')||'')+' '+(val(r,'connection','authentication')||'')).toLowerCase();
-        if(security){observed++;if(/open|wep|开放/.test(security)){score-=20;cats.security-=70;add('weak_security','high','Open or obsolete Wi-Fi security was detected');}}
+    function assessSecurity(r) {
+        // Keep parity with Python diagnose.assess_security: macOS airport always
+        // reports 802.11 auth "open" even on WPA2/WPA3 networks, so on Darwin only
+        // connection.security (link auth / profiler Security) is trustworthy.
+        var platform=String(val(r,'system','os')||'').toLowerCase();
+        var security=String(val(r,'connection','security')||'').toLowerCase();
+        var authentication=String(val(r,'connection','authentication')||'').toLowerCase();
+        function marker(s,tokens){for(var i=0;i<tokens.length;i++){if(s.indexOf(tokens[i])>=0)return true;}return false;}
+        if(security.indexOf('wpa')>=0||(platform!=='darwin'&&authentication.indexOf('wpa')>=0))return 'secure';
+        if(platform==='darwin'){
+            if(marker(security,['wep'])||marker(security,['open','none','打开','开放']))return 'weak';
+            return security?'secure':null;
+        }
+        if(marker(security,['wep'])||marker(authentication,['wep']))return 'weak';
+        if(marker(security,['open','none','打开','开放'])||marker(authentication,['open','none','打开','开放']))return 'weak';
+        return (security||authentication)?'secure':null;
+    }
+    // Keep schema-2.0 scoring parity, including the existing security observation.
+    var securityState=assessSecurity(r);
+    if(securityState!==null){observed++;if(securityState==='weak'){score-=20;cats.security-=70;add('weak_security','high','Open or obsolete Wi-Fi security was detected');}}
         score=Math.max(0,Math.min(100,score));var confidence=observed*10;
         if(!rec.length&&confidence>=25)add('no_action','low','No material issue was observed',false);
         return {score:score,confidence_percent:confidence,verdict:confidence<25?'insufficient_data':score>=85?'healthy':score>=65?'warning':'poor',category_scores:cats,issues:issues,recommendations:rec};

@@ -3,7 +3,6 @@ from __future__ import absolute_import
 import json
 import io
 import os
-import re
 import sys
 import tempfile
 import unittest
@@ -199,9 +198,14 @@ class AgentInstructionContractTests(unittest.TestCase):
                 "setup", "--platform", "dingtalk", "--provider", "dws-cli",
                 "--install-dws",
             ])
-        self.assertEqual(code, 2)
-        self.assertEqual(result["reason"], "dependency_install_declined")
-        self.assertEqual(calls, [])
+        # No hard error anymore: setup stays non-blocking and returns an
+        # install action; nothing is installed until rerun with --yes.
+        self.assertEqual(code, 0)
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(result["reason"], "dependency_install_required")
+        self.assertEqual(result["data"]["action"]["operation"],
+                         "install_dependency")
+        self.assertEqual(calls, ["discover"])
 
     def test_setup_cli_fake_install_rediscovers_verifies_and_binds(self):
         missing = DependencyStatus(
@@ -269,7 +273,7 @@ class AgentInstructionContractTests(unittest.TestCase):
     def test_detector_declares_bridge_as_optional_integration(self):
         with open(os.path.join(DETECTOR_ROOT, "manifest.json")) as handle:
             manifest = json.load(handle)
-        self.assertEqual(manifest["version"], "2.6.1")
+        self.assertEqual(manifest["version"], "2.6.2")
         self.assertIn("enterprise-notification-bridge", manifest["optional_integrations"])
         skill = _read(os.path.join(DETECTOR_ROOT, "SKILL.md"))
         self.assertIn("enterprise-notification-bridge", skill)
@@ -324,10 +328,6 @@ class AgentInstructionContractTests(unittest.TestCase):
             self.assertEqual(provider.sent, [])
 
             config.channels[0].recipients = ["ops"]
-            state_store.confirm({
-                "platform": "dingtalk", "provider": "native",
-                "profile": "corp:user", "recipients": ["ops"],
-            })
             delivered = service.deliver(envelope)
             repeated = service.deliver(envelope)
             self.assertEqual(delivered.status, "delivered")

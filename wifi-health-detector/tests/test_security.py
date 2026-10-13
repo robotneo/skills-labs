@@ -68,6 +68,48 @@ class SecurityTests(unittest.TestCase):
                     self.assertEqual(result['latency_ms'], 1.5)
                     self.assertIn('-File', run.call_args[0][0])
 
+    def test_dns_with_runner_is_governed_by_command_runner(self):
+        from unittest.mock import patch
+        from wifi_health.network import dns_test
+        from wifi_health.command import CommandResult
+
+        class RecordingRunner:
+            def __init__(self, result):
+                self.result = result
+                self.calls = []
+            def run(self, args, timeout=None):
+                self.calls.append((list(args), timeout))
+                return self.result
+
+        with patch('wifi_health.network.platform.system', return_value='Darwin'):
+            ok = CommandResult([], 0, stdout='name: www.baidu.com\nip_address: 192.0.2.1\n')
+            runner = RecordingRunner(ok)
+            result = dns_test('www.baidu.com', 6, runner)
+            self.assertTrue(result['reachable'])
+            self.assertEqual(runner.calls[0][0][0], '/usr/bin/dscacheutil')
+            self.assertEqual(runner.calls[0][1], 6)
+
+            timed_out = RecordingRunner(CommandResult([], 124, error='timeout'))
+            self.assertFalse(dns_test('www.baidu.com', 6, timed_out)['reachable'])
+
+    def test_speed_test_runs_in_process(self):
+        import io
+        from unittest.mock import patch
+        from wifi_health.network import speed_test
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        payload = b'x' * 1_000_000
+        with patch('urllib.request.urlopen', return_value=FakeResponse(payload)):
+            value = speed_test(5)
+        self.assertIsInstance(value, float)
+        self.assertGreater(value, 0)
+        self.assertIsNone(speed_test(0))
+
     def test_portable_csv_network_names_are_literal_cells(self):
         engines = []
         node = os.environ.get('TEST_NODE')

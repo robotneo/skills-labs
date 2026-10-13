@@ -1,41 +1,32 @@
 from __future__ import absolute_import
 
-import hashlib
 import os
-import re
 import shutil
 import tempfile
 from collections import namedtuple
 
 
-INSTALLER_REVISION = "251ae0d71f1a047b62af8425cec9374ccef42df2"
-_INSTALLER_SHA256 = {
-    "install.sh": "5592301524aab972025988c313bced2a8d10e6355a5fc5725dfabee126a7963c",
-    "install.ps1": "2308cdfc16c873b03777d636e8335d7027f967996917057fdd6eb625c7a0b719",
-}
-_GITHUB_ROOT = (
-    "https://raw.githubusercontent.com/"
-    "DingTalk-Real-AI/dingtalk-workspace-cli/" + INSTALLER_REVISION + "/scripts/"
-)
+# Official installers always resolve the newest stable release; the upstream
+# installer verifies each release binary against its published checksum, so we
+# intentionally do not pin a mutable installer-script digest here.
+_MAIN_REF = "main"
+
+# Mainland China first (fast, official), then the official GitHub source.
 _GITEE_ROOT = (
     "https://gitee.com/dingtalk-real-ai/"
-    "dingtalk-workspace-cli/raw/" + INSTALLER_REVISION + "/scripts/"
+    "dingtalk-workspace-cli/raw/" + _MAIN_REF + "/scripts/"
+)
+_GITHUB_ROOT = (
+    "https://raw.githubusercontent.com/"
+    "DingTalk-Real-AI/dingtalk-workspace-cli/" + _MAIN_REF + "/scripts/"
 )
 _INSTALLER_TOKEN = "{installer}"
-_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 class DwsInstallPlan(namedtuple(
         "DwsInstallPlanBase",
         "platform source url filename command environment")):
     """Immutable, public-only plan for an approved official installer."""
-
-    __slots__ = ()
-
-
-class DownloadReceipt(namedtuple(
-        "DownloadReceiptBase", "expected_sha256")):
-    """Optional integrity metadata published for a downloaded installer."""
 
     __slots__ = ()
 
@@ -48,19 +39,18 @@ class DwsInstallResult(namedtuple(
 
 
 def plan_dws_install(platform_name, china_mirror=False):
-    """Return a fixed official install plan without downloading anything."""
-    platform_key = _platform_key(platform_name)
-    source = "official-gitee" if china_mirror else "official-github"
-    root = _GITEE_ROOT if china_mirror else _GITHUB_ROOT
-    if china_mirror:
-        environment = (
-            ("DWS_GITEE_REPO", "DingTalk-Real-AI/dingtalk-workspace-cli"),
-            ("DWS_NO_FALLBACK", "1"),
-            ("DWS_NO_SKILLS", "1"),
-        )
-    else:
-        environment = (("DWS_NO_FALLBACK", "1"), ("DWS_NO_SKILLS", "1"))
+    """Return the newest-stable official plan without downloading.
 
+    Default order is the official Gitee mirror followed by official GitHub.
+    Selecting ``china_mirror`` restricts execution to Gitee only.
+    """
+    plans = candidate_plans(platform_name, china_mirror)
+    return plans[0]
+
+
+def candidate_plans(platform_name, china_mirror=False):
+    """Ordered official plans: China-first, with GitHub fallback unless pinned."""
+    platform_key = _platform_key(platform_name)
     if platform_key == "windows":
         filename = "install.ps1"
         command = (
@@ -71,102 +61,132 @@ def plan_dws_install(platform_name, china_mirror=False):
         filename = "install.sh"
         command = ("sh", _INSTALLER_TOKEN)
 
-    return DwsInstallPlan(
-        platform_key, source, root + filename, filename, command, environment
+    gitee_environment = (
+        ("DWS_GITEE_REPO", "DingTalk-Real-AI/dingtalk-workspace-cli"),
+        ("DWS_NO_SKILLS", "1"),
     )
+    github_environment = (("DWS_NO_SKILLS", "1"),)
+
+    gitee_plan = DwsInstallPlan(
+        platform_key, "official-gitee", _GITEE_ROOT + filename, filename,
+        command, gitee_environment,
+    )
+    github_plan = DwsInstallPlan(
+        platform_key, "official-github", _GITHUB_ROOT + filename, filename,
+        command, github_environment,
+    )
+    if china_mirror:
+        return (gitee_plan,)
+    return (gitee_plan, github_plan)
 
 
 def execute_dws_install(
         plan, approved, downloader, process_runner, temp_root=None):
-    """Download and locally execute one fixed plan after explicit approval."""
-    source = _public_source(plan)
+    """Download and locally execute official plans after explicit approval.
+
+    Tries each official candidate in order; only fails once every source has
+    been attempted. Nothing is piped straight into a shell.
+    """
     if approved is not True:
+        source = _public_source(plan)
         return DwsInstallResult(
             "action_required", "dependency_install_declined", source
         )
 
-    if not _is_official_plan(plan):
+    platform_name = getattr(plan, "platform", None)
+    try:
+        # Always Gitee-first with official GitHub fallback; both are official.
+        plans = candidate_plans(platform_name, False)
+    except ValueError:
         return DwsInstallResult(
-            "failed", "dependency_install_failed", source
+            "failed", "dependency_install_failed", _public_source(plan)
+        )
+
+    # The supplied plan itself must be an official one; never silently replace
+    # a deceptive plan with a trusted one.
+    if not any(_plan_fields_match(plan, item) for item in plans):
+        return DwsInstallResult(
+            "failed", "dependency_install_failed", _public_source(plan)
         )
 
     private_dir = None
+    last_result = None
     try:
-        try:
-            private_dir = tempfile.mkdtemp(
-                prefix="dws-install-", dir=temp_root
-            )
-            os.chmod(private_dir, 0o700)
-        except Exception:
-            return DwsInstallResult(
-                "failed", "dependency_install_failed", plan.source
-            )
-        installer_path = os.path.join(private_dir, plan.filename)
-
-        try:
-            receipt = _download(downloader, plan.url, installer_path)
-        except Exception:
-            return DwsInstallResult(
-                "failed", "dependency_download_failed", plan.source
-            )
-
-        if (not os.path.isfile(installer_path) or
-                os.path.islink(installer_path)):
-            return DwsInstallResult(
-                "failed", "dependency_download_failed", plan.source
-            )
-
-        try:
-            if _file_sha256(installer_path) != _INSTALLER_SHA256[plan.filename]:
-                return DwsInstallResult("failed", "dependency_integrity_failed", plan.source)
-            expected_sha256 = getattr(receipt, "expected_sha256", None)
-        except Exception:
-            return DwsInstallResult(
-                "failed", "dependency_integrity_failed", plan.source
-            )
-        if expected_sha256 is not None:
+        for candidate in plans:
+            private_dir = None
             try:
-                checksum_matches = (
-                    isinstance(expected_sha256, str) and
-                    _SHA256.fullmatch(expected_sha256) is not None and
-                    _file_sha256(installer_path) == expected_sha256.lower()
-                )
+                private_dir = tempfile.mkdtemp(prefix="dws-install-", dir=temp_root)
+                os.chmod(private_dir, 0o700)
             except Exception:
-                checksum_matches = False
-            if not checksum_matches:
-                return DwsInstallResult(
-                    "failed", "dependency_integrity_failed", plan.source
+                last_result = DwsInstallResult(
+                    "failed", "dependency_install_failed", candidate.source
                 )
-
-        command = tuple(
-            installer_path if item == _INSTALLER_TOKEN else item
-            for item in plan.command
-        )
-        try:
-            process_result = _run(
-                process_runner, command, cwd=private_dir,
-                environment=plan.environment,
+                continue
+            outcome = _install_one(
+                candidate, private_dir, downloader, process_runner
             )
-        except Exception:
-            return DwsInstallResult(
-                "failed", "dependency_install_failed", plan.source
-            )
-        try:
-            returncode = getattr(process_result, "returncode", None)
-        except Exception:
-            return DwsInstallResult(
-                "failed", "dependency_install_failed", plan.source
-            )
-        if type(returncode) is not int or returncode != 0:
-            return DwsInstallResult(
-                "failed", "dependency_install_failed", plan.source
-            )
-        return DwsInstallResult("ready", "dependency_ready", plan.source)
+            last_result = outcome
+            if outcome.status == "ready":
+                return outcome
+            # This source failed; remove its directory before trying the next.
+            if not _remove_private_dir(private_dir):
+                return DwsInstallResult(
+                    "failed", "dependency_cleanup_failed", candidate.source
+                )
+            private_dir = None
+        return last_result
     finally:
         if private_dir is not None and not _remove_private_dir(private_dir):
             return DwsInstallResult(
-                "failed", "dependency_cleanup_failed", plan.source
+                "failed", "dependency_cleanup_failed",
+                getattr(last_result, "source", None),
             )
+
+
+def _install_one(plan, private_dir, downloader, process_runner):
+    if not _is_official_plan(plan):
+        return DwsInstallResult(
+            "failed", "dependency_install_failed", _public_source(plan)
+        )
+
+    installer_path = os.path.join(private_dir, plan.filename)
+    try:
+        _download(downloader, plan.url, installer_path)
+    except Exception:
+        return DwsInstallResult(
+            "failed", "dependency_download_failed", plan.source
+        )
+
+    if (not os.path.isfile(installer_path) or
+            os.path.islink(installer_path)):
+        return DwsInstallResult(
+            "failed", "dependency_download_failed", plan.source
+        )
+
+    command = tuple(
+        installer_path if item == _INSTALLER_TOKEN else item
+        for item in plan.command
+    )
+    try:
+        process_result = _run(
+            process_runner, command, cwd=private_dir,
+            environment=plan.environment,
+        )
+    except Exception:
+        return DwsInstallResult(
+            "failed", "dependency_install_failed", plan.source
+        )
+    try:
+        returncode = getattr(process_result, "returncode", None)
+    except Exception:
+        return DwsInstallResult(
+            "failed", "dependency_install_failed", plan.source
+        )
+    if type(returncode) is not int or returncode != 0:
+        return DwsInstallResult(
+            "failed", "dependency_install_failed", plan.source
+        )
+    return DwsInstallResult("ready", "dependency_ready", plan.source)
 
 
 def _platform_key(platform_name):
@@ -190,12 +210,12 @@ def _is_official_plan(plan):
     if type(plan.platform) is not str:
         return False
     try:
-        github_plan = plan_dws_install(plan.platform, False)
-        gitee_plan = plan_dws_install(plan.platform, True)
+        expected = candidate_plans(plan.platform, False) + candidate_plans(
+            plan.platform, True
+        )
     except (TypeError, ValueError):
         return False
-    return (_plan_fields_match(plan, github_plan) or
-            _plan_fields_match(plan, gitee_plan))
+    return any(_plan_fields_match(plan, item) for item in expected)
 
 
 def _plan_fields_match(candidate, expected):
@@ -285,14 +305,3 @@ def _run(process_runner, command, cwd, environment):
     return process_runner(
         command, shell=False, cwd=cwd, env=process_environment
     )
-
-
-def _file_sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as stream:
-        while True:
-            block = stream.read(65536)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()

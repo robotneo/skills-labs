@@ -45,4 +45,4 @@ python -m unittest discover -s wifi-health-detector/integrations/enterprise-noti
 
 开发测试可用 `TEST_NODE`、`TEST_PYTHON` 和 `TEST_POWERSHELL` 指定解释器。Windows CI 使用系统 PowerShell 5.1；macOS CI 验证 JXA。测试包含 Unicode/引号/换行、报告差异、解释器空格路径、命令故障、进程树清理、并发屏障和无 Python 的 macOS 原生执行。此次开发在 macOS 完成实测，并使用临时 PowerShell 7.4.6 验证报告与进程控制逻辑；Windows 5.1、实际 WLAN 和企业权限策略仍需在部署机器或 Windows CI 验收。
 
-2.6.1 已移除 Node 检测入口；Node 仅用于仓库中的离线 JavaScript 对照测试，不进入发布包。发布包使用 `scripts/package_wifi_skill.py` 构建，企业通知组件完整保留。
+2.6.2 已移除 Node 检测入口；Node 仅用于仓库中的离线 JavaScript 对照测试，不进入技能目录分发。技能以目录形式整体交付，企业通知组件 `integrations/enterprise-notification-bridge` 随目录完整保留。

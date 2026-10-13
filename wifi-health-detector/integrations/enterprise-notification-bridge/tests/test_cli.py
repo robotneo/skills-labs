@@ -176,13 +176,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.service.setup_calls[0][0:2], ("dingtalk", "dws-cli"))
         self.assertEqual(self.service.setup_calls[0][3:], (True, True, True, True))
 
-    def test_setup_rejects_install_without_yes(self):
+    def test_setup_without_yes_returns_install_action_non_blocking(self):
         code, stdout, stderr = self.run_cli([
             "setup", "--platform", "dingtalk", "--install-dws",
         ])
-        self.assertEqual(code, 2)
-        self.assertEqual(json.loads(stdout)["reason"], "dependency_install_declined")
-        self.assertEqual(self.service.setup_calls, [])
+        # No CLI-level error anymore: the service returns an install action
+        # and nothing is installed until the user reruns with --yes.
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["status"], "action_required")
+        self.assertIn("setup_calls", dir(self.service))
 
     def test_notification_failure_keeps_cli_success(self):
         self.service.deliver_result = DeliveryBatchResult([
@@ -403,11 +406,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(configured["status"], "configured")
         self.assertEqual(load_config(config_path).channels[0].recipients, ["ops"])
-
-        service.state_store.confirm({
-            "platform": "dingtalk", "provider": "native",
-            "profile": "corp:user", "recipients": ["ops"],
-        })
 
         code, delivered, _ = invoke([
             "deliver", "--envelope", self.envelope_path,

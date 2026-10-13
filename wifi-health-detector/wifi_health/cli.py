@@ -49,7 +49,8 @@ def apply_quality(report, runner, public_test=True, run_speed=False, timeout=10)
     # All independent probes start together; merge only on the caller thread.
     with ThreadPoolExecutor(max_workers=6) as pool:
         local_future = pool.submit(ping_target, runner, str(gateway.value)) if gateway.available else None
-        dns_futures = [pool.submit(dns_test, host, min(timeout, runner.remaining()) if hasattr(runner, "remaining") else timeout) for host in PUBLIC_DNS_HOSTS] if public_test else []
+        dns_deadline = min(timeout, runner.remaining()) if hasattr(runner, "remaining") else timeout
+        dns_futures = [pool.submit(dns_test, host, dns_deadline, runner) for host in PUBLIC_DNS_HOSTS] if public_test else []
         public_futures = [pool.submit(ping_target, runner, target) for target in PUBLIC_PING_TARGETS] if public_test else []
         local_result = local_future.result() if local_future else None
         dns_results = [future.result() for future in dns_futures]
@@ -58,7 +59,6 @@ def apply_quality(report, runner, public_test=True, run_speed=False, timeout=10)
         result = local_result
         report.set("local_quality", "target", gateway.value, source="default gateway")
         if result:
-            report.set("local_quality", "target", gateway.value, source="default gateway")
             report.set("local_quality", "reachable", result["reachable"], source="ping")
             report.set("local_quality", "packet_loss", result["packet_loss_percent"], "%", "ping")
             if result["latency_ms"] is not None: report.set("local_quality", "latency", result["latency_ms"], "ms", "ping")

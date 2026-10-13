@@ -105,14 +105,6 @@ class BridgeServiceTests(unittest.TestCase):
 
     def service(self, config=None):
         config = config or make_config()
-        for channel in config.channels:
-            if channel.profile is not None and channel.recipients:
-                self.state_store.confirm({
-                    "platform": channel.platform,
-                    "provider": channel.provider,
-                    "profile": channel.profile,
-                    "recipients": list(channel.recipients),
-                })
         return BridgeService(
             config, [self.provider], self.ledger,
             state_store=self.state_store,

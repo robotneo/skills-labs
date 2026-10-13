@@ -7,7 +7,7 @@ import re
 from collections import namedtuple
 
 
-MINIMUM_DWS_VERSION = "1.0.15"
+MINIMUM_DWS_VERSION = "1.0.63"
 
 _SEMVER_BODY = (
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -56,41 +56,46 @@ class DependencyStatus(namedtuple(
         return self.dependency.install_source if self.dependency is not None else None
 
 
-def discover_dws(environment, platform_name, which):
+def discover_dws(environment, platform_name, which, minimum_version=None):
     """Discover DWS in the documented precedence order without executing it."""
+    minimum_version = minimum_version or MINIMUM_DWS_VERSION
     environment = environment or {}
     explicit = environment.get("DWS_EXE")
     if explicit:
         if not os.path.isabs(explicit):
             return DependencyStatus("unavailable", "dws_executable_invalid", None)
-        return _discovered(explicit, "environment")
+        return _discovered(explicit, "environment", minimum_version)
 
     resolved = which("dws")
     if resolved:
-        return _discovered(resolved, "path")
+        return _discovered(resolved, "path", minimum_version)
 
     for source, candidate in _candidate_paths(environment, platform_name):
         resolved = which(candidate)
         if resolved:
-            return _discovered(resolved, source)
+            return _discovered(resolved, source, minimum_version)
 
     return DependencyStatus("action_required", "dependency_install_required", None)
 
 
-def verify_dws(executable, runner):
+def verify_dws(executable, runner, minimum_version=None):
     """Verify DWS version and the JSON-capable setup leaves."""
+    minimum_version = minimum_version or MINIMUM_DWS_VERSION
     if not _is_executable_reference(executable):
         return DependencyStatus("unavailable", "dws_executable_invalid", None)
 
     version_result = _run(runner, [executable, "--version", "--format", "json"])
     if version_result is None or version_result[0] != 0:
-        return _status_for(executable, None, "unavailable", "dependency_verification_failed")
+        return _status_for(executable, None, "unavailable",
+                           "dependency_verification_failed", minimum_version)
 
     version = _parse_version(version_result[1])
     if version is None:
-        return _status_for(executable, None, "unavailable", "dependency_version_unsupported")
-    if _version_key(version) < _version_key(MINIMUM_DWS_VERSION):
-        return _status_for(executable, version, "action_required", "dws_upgrade_required")
+        return _status_for(executable, None, "unavailable",
+                           "dependency_version_unsupported", minimum_version)
+    if _version_key(version) < _version_key(minimum_version):
+        return _status_for(executable, version, "action_required",
+                           "dws_upgrade_required", minimum_version)
 
     required_leaves = (
         ("auth", "status"),
@@ -102,10 +107,12 @@ def verify_dws(executable, runner):
         if (result is None or result[0] != 0
                 or not _help_advertises_json_format(result[1])):
             return _status_for(
-                executable, version, "unavailable", "dependency_verification_failed"
+                executable, version, "unavailable",
+                "dependency_verification_failed", minimum_version
             )
 
-    return _status_for(executable, version, "ready", "dependency_ready")
+    return _status_for(executable, version, "ready",
+                       "dependency_ready", minimum_version)
 
 
 def _candidate_paths(environment, platform_name):
@@ -141,9 +148,9 @@ def _candidate_paths(environment, platform_name):
             )
 
 
-def _discovered(executable, source):
+def _discovered(executable, source, minimum_version=None):
     dependency = DwsDependency(
-        executable, None, MINIMUM_DWS_VERSION, source
+        executable, None, minimum_version or MINIMUM_DWS_VERSION, source
     )
     return DependencyStatus("discovered", "dependency_discovered", dependency)
 
@@ -280,9 +287,10 @@ def _enum_value_tokens(value):
     return set(re.findall(r"[0-9a-z][0-9a-z_-]*", value.lower()))
 
 
-def _status_for(executable, version, status, reason):
+def _status_for(executable, version, status, reason, minimum_version=None):
     dependency = DwsDependency(
-        executable, version, MINIMUM_DWS_VERSION, "discovered"
+        executable, version, minimum_version or MINIMUM_DWS_VERSION,
+        "discovered"
     )
     return DependencyStatus(status, reason, dependency)
 

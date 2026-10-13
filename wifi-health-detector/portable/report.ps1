@@ -31,6 +31,22 @@ function Read-WifiJson([string]$text){
     })
     return Convert-WifiHashtable ($safe|ConvertFrom-Json) $prefix
 }
+function Get-WifiSecurityState($r) {
+    # Keep parity with Python diagnose.assess_security: on Darwin only connection.security
+    # (link auth / profiler Security) is trustworthy because airport's 802.11 auth is
+    # constantly "open"; Windows netsh exposes the decision in Authentication.
+    $platform = ("$(Get-WifiValue $r system os)").ToLowerInvariant()
+    $security = ("$(Get-WifiValue $r connection security)").ToLowerInvariant()
+    $authentication = ("$(Get-WifiValue $r connection authentication)").ToLowerInvariant()
+    if($security.Contains('wpa') -or ($platform -ne 'darwin' -and $authentication.Contains('wpa'))){return 'secure'}
+    if($platform -eq 'darwin'){
+        if($security.Contains('wep') -or $security -match 'open|none|打开|开放'){return 'weak'}
+        if($security){return 'secure'};return $null
+    }
+    if($security.Contains('wep') -or $authentication.Contains('wep')){return 'weak'}
+    if($security -match 'open|none|打开|开放' -or $authentication -match 'open|none|打开|开放'){return 'weak'}
+    if($security -or $authentication){return 'secure'};return $null
+}
 function Get-WifiDiagnosis($r) {
     $score=100;$observed=0;$issues=New-Object 'System.Collections.Generic.List[string]';$recs=New-Object 'System.Collections.Generic.List[object]'
     $cats=[ordered]@{signal=100;interference=100;link=100;local=100;public=100;security=100}
@@ -46,8 +62,8 @@ function Get-WifiDiagnosis($r) {
     if($null -ne $lat){$observed++;if($lat -gt 50){$score-=10;$cats.local-=30}}
     if($null -ne $pub){$observed++;if($pub -gt 3 -and ($null -eq $loss -or $loss -le 1)){$score-=8;$cats.public-=30;Add-Advice upstream_loss medium 'Public loss is elevated while the gateway is stable'}}
     if($null -ne $dns){$observed++;if($dns -gt 250){$score-=5;$cats.public-=15;Add-Advice slow_dns medium ('DNS lookup took {0:F0} ms' -f $dns)}}
-    $security="$(Get-WifiValue $r connection security) $(Get-WifiValue $r connection authentication)"
-    if($security){$observed++;if($security -match 'open|wep|开放'){$score-=20;$cats.security-=70;Add-Advice weak_security high 'Open or obsolete Wi-Fi security was detected'}}
+    $securityState=Get-WifiSecurityState $r
+    if($null -ne $securityState){$observed++;if($securityState -eq 'weak'){$score-=20;$cats.security-=70;Add-Advice weak_security high 'Open or obsolete Wi-Fi security was detected'}}
     $score=[math]::Max(0,[math]::Min(100,$score));$confidence=$observed*10
     $verdict=if($confidence -lt 25){'insufficient_data'}elseif($score -ge 85){'healthy'}elseif($score -ge 65){'warning'}else{'poor'}
     if($recs.Count -eq 0 -and $confidence -ge 25){Add-Advice no_action low 'No material issue was observed' $false}
