@@ -1,8 +1,111 @@
 from __future__ import absolute_import
 
 import json
+import re
 
 from .base import Provider, ProviderResult
+
+
+# Maximum single-message length we hand to DWS. The fixed health report is
+# short; this only guards a pathological payload without truncating content
+# silently (an over-long report is reported as a send failure instead).
+_MAX_MESSAGE_CHARS = 12000
+
+
+def report_message_text(envelope):
+    """Return the validated report Markdown carried by an envelope/dict."""
+    if hasattr(envelope, "report"):
+        report = envelope.report
+    elif isinstance(envelope, dict):
+        report = envelope.get("report", {})
+    else:
+        report = {}
+    markdown = report.get("markdown", "") if isinstance(report, dict) else ""
+    return markdown if isinstance(markdown, str) else ""
+
+
+def clean_recipient_name(value):
+    if not isinstance(value, str):
+        return ""
+    name = value.strip()
+    # A stable id (corpId:userId / openDingTalkId) must never flow into the
+    # name-based auto path; only plain display names are accepted here.
+    if not name or any(ord(ch) < 32 for ch in name):
+        return ""
+    if ":" in name or re.match(r"^[A-Za-z0-9+/=_-]{20,}$", name):
+        return ""
+    return name
+
+
+def _parse_json_object(stdout):
+    try:
+        payload = json.loads(stdout)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _lookup_outcome(result):
+    # Newer ``contact +lookup`` JSON uses ok/outcome; tolerate simple shapes.
+    if result.status != "ok" or not isinstance(result.data, dict):
+        error = result.data.get("error", {}) if isinstance(result.data, dict) else {}
+        subtype = error.get("subtype") if isinstance(error, dict) else None
+        if subtype == "ambiguous_match":
+            return "ambiguous"
+        if subtype in ("not_found", "not_found_user"):
+            return "not_found"
+        return "error"
+    if result.data.get("ok") is False:
+        subtype = (result.data.get("error") or {}).get("subtype")
+        if subtype == "ambiguous_match":
+            return "ambiguous"
+        if subtype in ("not_found", "not_found_user"):
+            return "not_found"
+        return "error"
+    profile = (result.data.get("data") or {}).get("profile")
+    if isinstance(profile, dict) and profile.get("orgUserName"):
+        return "unique"
+    return "error"
+
+
+def _dm_ambiguity(payload):
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    details = error.get("details")
+    reason = error.get("reason")
+    subtype = details.get("subtype") if isinstance(details, dict) else None
+    if reason == "resolution_ambiguous" or subtype == "ambiguous":
+        return "recipient_ambiguous"
+    if subtype == "not_found" or reason == "resolution_not_found":
+        return "recipient_not_found"
+    return None
+
+
+def _dm_error_reason(payload):
+    error = payload.get("error") if isinstance(payload, dict) else None
+    category = error.get("category") if isinstance(error, dict) else None
+    if category in ("validation", "client"):
+        # Map client-side resolution problems to recipient reasons; the
+        # ambiguity case is already handled by _dm_ambiguity.
+        return "recipient_not_resolved"
+    return "provider_send_failed"
+
+
+def _external_id(payload):
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data")
+    if isinstance(data, dict):
+        for key in ("messageId", "message_id", "openDingTalkId", "id"):
+            value = data.get(key)
+            if isinstance(value, (str, int)) and str(value):
+                return str(value)
+    for key in ("messageId", "message_id", "id"):
+        value = payload.get(key)
+        if isinstance(value, (str, int)) and str(value):
+            return str(value)
+    return ""
 
 
 class DwsProvider(Provider):
@@ -54,6 +157,35 @@ class DwsProvider(Provider):
         return choose_profile(result.data["profiles"])
 
     def resolve_recipient(self, profile, selector):
+        """Resolve a display name to a unique contact (default auto path).
+
+        Uses the documented read-only ``contact +lookup`` leaf. A name that is
+        unknown or matches several people is reported as an unresolvable
+        selector so the caller can fall back to its default recipient instead
+        of guessing among candidates.
+        """
+        name = clean_recipient_name(selector)
+        if not name:
+            return ProviderResult("failed", "recipient_not_resolved")
+        result = self._json_command(
+            [self.executable, "contact", "+lookup", "--name", name,
+             "--format", "json"]
+        )
+        outcome = _lookup_outcome(result)
+        if outcome == "unique":
+            profile_data = result.data.get("data", {}).get("profile", {})
+            resolved = profile_data.get("orgUserName") or name
+            return ProviderResult(
+                "resolved", data={"recipient": resolved, "selector": name}
+            )
+        if outcome == "ambiguous":
+            return ProviderResult("failed", "recipient_ambiguous", retryable=False)
+        if outcome == "not_found":
+            return ProviderResult("failed", "recipient_not_found", retryable=False)
+        return ProviderResult("failed", "provider_recipient_resolution_failed")
+
+    def host_resolve_recipient(self, profile, selector):
+        """Legacy host-mediated resolution request (continuation path)."""
         return ProviderResult(
             "action_required",
             "recipient_selection_required",
@@ -64,9 +196,27 @@ class DwsProvider(Provider):
             },
         )
 
-    def send_report(self, profile, recipient, envelope):
-        # DWS has no documented send command in this bridge.  Do not guess one;
-        # request a correlated host-mediated continuation instead.
+    def send_report(self, profile, recipient, envelope, dry_run=False):
+        """Send the validated report Markdown to one resolved display name."""
+        name = clean_recipient_name(recipient)
+        if not name:
+            return ProviderResult("failed", "recipient_not_resolved")
+        content = report_message_text(envelope)
+        if not content or len(content) > _MAX_MESSAGE_CHARS:
+            return ProviderResult("failed", "provider_send_failed")
+        command = [
+            self.executable, "chat", "+dm", "--to", name,
+            "--content", content, "--format", "json",
+        ]
+        if dry_run:
+            command.append("--dry-run")
+        else:
+            command.append("--yes")
+        result = self._dm_command(command)
+        return result
+
+    def host_send_report(self, profile, recipient, envelope):
+        """Legacy host-mediated send request (continuation path)."""
         return ProviderResult(
             "action_required", "host_send_required", data={
                 "operation": "send_report",
@@ -74,6 +224,37 @@ class DwsProvider(Provider):
                 "recipient": recipient,
             },
         )
+
+    def _dm_command(self, command):
+        # ``chat +dm`` is not a stable JSON-formatted leaf; the binary still
+        # emits a JSON envelope for both execution and dry-run, plus a JSON
+        # resolution-error object for ambiguous names. Parse it explicitly and
+        # never trust the process exit code alone (dry-run ambiguity exits 0).
+        error, returncode, stdout, stderr = self._run(command)
+        if error is not None:
+            return ProviderResult("unavailable", "dws_unavailable", retryable=True)
+        payload = _parse_json_object(stdout)
+        if payload is None:
+            if returncode != 0:
+                return ProviderResult("unavailable", "dws_command_failed",
+                                      retryable=True)
+            return ProviderResult("unavailable", "dws_invalid_json")
+        ambiguity = _dm_ambiguity(payload)
+        if ambiguity is not None:
+            return ProviderResult("failed", ambiguity, retryable=False)
+        if payload.get("error") is not None:
+            reason = _dm_error_reason(payload)
+            retryable = reason not in ("recipient_not_found",
+                                       "recipient_ambiguous")
+            return ProviderResult("failed", reason, retryable=retryable)
+        if payload.get("dry_run") is True and payload.get("executed") is False:
+            # Preview path: prove name resolution and renderability without
+            # sending. Treated as a non-delivered, non-erroring dry run.
+            return ProviderResult("ok", "dry_run", data={"dry_run": True})
+        if returncode != 0:
+            return ProviderResult("failed", "provider_send_failed", retryable=True)
+        external_id = _external_id(payload)
+        return ProviderResult("sent", data={"external_id": external_id})
 
     def _json_command(self, command):
         confirmation = self._confirm_json_format(command)

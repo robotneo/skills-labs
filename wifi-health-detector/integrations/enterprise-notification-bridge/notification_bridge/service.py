@@ -32,6 +32,20 @@ NATIVE_SETUP_OPERATIONS = frozenset((
     "auth_status", "login", "list_profiles",
 ))
 
+# Default DingTalk recipient for unattended Wi-Fi report delivery. Only the
+# DingTalk/DWS channel gets a default; feishu and wecom never auto-send.
+DEFAULT_DINGTALK_RECIPIENT = "杨华"
+DEFAULT_DINGTALK_PLATFORM = "dingtalk"
+DEFAULT_DINGTALK_PROVIDER = "dws-cli"
+# Recipient resolution outcomes that are treated as "the requested name cannot
+# be targeted safely" and therefore trigger the default-recipient fallback.
+_RECIPIENT_FALLBACK_REASONS = frozenset((
+    "recipient_not_found",
+    "recipient_ambiguous",
+    "recipient_not_resolved",
+    "provider_recipient_resolution_failed",
+))
+
 
 class DeliveryBatchResult(object):
     def __init__(self, results):
@@ -264,6 +278,178 @@ class BridgeService(object):
             return DeliveryBatchResult([result])
         result = self._run_delivery(canonical, capability_list, 0)
         return self._finalize(canonical.report_id, result)
+
+    def deliver_auto(self, envelope, requested_recipient=None, capabilities=None,
+                     dry_run=False):
+        """Deliver to DingTalk/DWS with default-recipient fallback.
+
+        Recipient priority: conversation/CLI recipient (cleaned display name)
+        when it resolves uniquely, otherwise the built-in default. An unknown
+        or ambiguous requested name never aborts delivery and never picks a
+        candidate; it falls back to the default recipient. Feishu and wecom
+        have no default channel and are never touched by this path. Nothing is
+        persisted to config: authorization/profile are used in-memory only.
+        """
+        self._validate_runtime_config()
+        canonical = _canonical_envelope(envelope)
+        capability_list = _capability_list(capabilities)
+        self.state_store.save_retry(canonical.to_dict(), capability_list, False)
+
+        # Gate on a discovered, version-verified DWS before any auth/send. The
+        # auto path honors the same DWS_EXE/PATH discovery and >= floor policy as
+        # setup, so an absent or too-old DWS never silently reaches a sender.
+        executable = self._auto_dependency_ready()
+        if not isinstance(executable, str):
+            return self._finalize(
+                canonical.report_id, DeliveryBatchResult([executable])
+            )
+
+        provider = self._auto_dingtalk_provider(capability_list, executable)
+        profile = self._authorized_profile(provider)
+        if not isinstance(profile, str):
+            return self._finalize(canonical.report_id, DeliveryBatchResult([profile]))
+
+        recipient = self._resolve_with_default(provider, profile, requested_recipient)
+        if not isinstance(recipient, str):
+            return self._finalize(canonical.report_id, DeliveryBatchResult([recipient]))
+
+        result = self._auto_send(provider, canonical, profile, recipient, dry_run)
+        return self._finalize(canonical.report_id, DeliveryBatchResult([result]))
+
+    def _auto_dingtalk_provider(self, capability_list, executable=None):
+        from .providers.dws import DwsProvider
+        for provider in self._providers_for(capability_list):
+            if (provider.platform == DEFAULT_DINGTALK_PLATFORM
+                    and provider.name == DEFAULT_DINGTALK_PROVIDER):
+                runner = getattr(provider, "_runner", None)
+                if isinstance(provider, DwsProvider) and runner is not None:
+                    # Reuse the host-controlled runner but target the exact
+                    # executable that discovery/verification approved.
+                    selected = DwsProvider(
+                        runner, executable=executable or provider.executable
+                    )
+                else:
+                    selected = provider
+                if selected.capabilities().get("available"):
+                    return selected
+        return None
+
+    def _auto_dependency_ready(self):
+        """Return a verified DWS executable, or a stable skip result.
+
+        The auto path never installs or upgrades unattended. A machine with no
+        usable DWS is treated as "notification disabled" (quiet, non-blocking);
+        an installed DWS below the floor is surfaced so the host can upgrade.
+        """
+        minimum_version = self._minimum_version()
+        discovered = self._dependency_discoverer(
+            self._dependency_environment, self._dependency_platform,
+            self._dependency_which, minimum_version,
+        )
+        if discovered.status == "discovered":
+            verified = self._dependency_verifier(
+                discovered.executable,
+                _runner_for_dependency(self.providers),
+                minimum_version,
+            )
+        else:
+            verified = discovered
+        if verified.status == "ready" and verified.executable:
+            return verified.executable
+        if verified.reason == "dws_upgrade_required":
+            return ProviderResult("skipped", "dws_upgrade_required")
+        return ProviderResult("skipped", "notification_disabled")
+
+    def _authorized_profile(self, provider):
+        if provider is None:
+            return ProviderResult("skipped", "provider_unavailable")
+        try:
+            auth = provider.auth_status(None)
+        except Exception:
+            return ProviderResult("failed", "provider_auth_status_failed",
+                                  retryable=True)
+        state = _authorization_state(auth)
+        if state != "authorized":
+            reason = ("login_required" if state in ("missing", "expired")
+                      else "authorization_required")
+            return ProviderResult("skipped", reason)
+        try:
+            profiles = provider.list_profiles()
+        except Exception:
+            return ProviderResult("failed", "provider_profile_list_failed",
+                                  retryable=True)
+        if profiles.status in SUCCESS_STATUSES:
+            profile = _profiles_from_result(profiles)
+            if profile is not None and len(profile) == 1:
+                return profile[0]["profile"]
+        if (profiles.status == "action_required"
+                and profiles.reason == "profile_selection_required"):
+            return ProviderResult("skipped", "profile_selection_required")
+        return ProviderResult("skipped", profiles.reason or "profile_not_validated")
+
+    def _resolve_with_default(self, provider, profile, requested):
+        from .providers.dws import clean_recipient_name
+        wanted = clean_recipient_name(requested)
+        if wanted and wanted != DEFAULT_DINGTALK_RECIPIENT:
+            result = self._resolve_one(provider, profile, wanted)
+            if isinstance(result, str):
+                return result
+        default_result = self._resolve_one(
+            provider, profile, DEFAULT_DINGTALK_RECIPIENT
+        )
+        if isinstance(default_result, str):
+            return default_result
+        return ProviderResult("skipped", "recipient_not_configured")
+
+    def _resolve_one(self, provider, profile, name):
+        try:
+            result = provider.resolve_recipient(profile, name)
+        except Exception:
+            return None
+        if result.status in ("ok", "resolved"):
+            recipient = result.data.get("recipient")
+            if isinstance(recipient, str) and recipient:
+                return recipient
+        if result.reason in _RECIPIENT_FALLBACK_REASONS:
+            return None
+        return None
+
+    def _auto_send(self, provider, envelope, profile, recipient, dry_run):
+        validate_envelope(envelope)  # Integrity gate immediately before send.
+        if dry_run:
+            # A preview proves name resolution and renderability but must be
+            # side-effect free: never touch the ledger, so the same report can
+            # still be claimed and sent for real afterwards.
+            try:
+                result = provider.send_report(
+                    profile, recipient, envelope, dry_run=True
+                )
+            except Exception:
+                return ProviderResult("failed", "provider_send_failed",
+                                      retryable=True)
+            if result.status == "ok" and result.reason == "dry_run":
+                return ProviderResult("skipped", "dry_run",
+                                      data={"dry_run": True})
+            return result
+        key = DeliveryKey(
+            envelope.report_id, DEFAULT_DINGTALK_PLATFORM,
+            DEFAULT_DINGTALK_PROVIDER, profile, recipient,
+        )
+        claim = self.ledger.claim(key)
+        if not claim.acquired:
+            return ProviderResult("skipped", claim.reason)
+        try:
+            result = provider.send_report(
+                profile, recipient, envelope, dry_run=False
+            )
+        except Exception:
+            self.ledger.mark_failure(claim, "provider_send_failed", True)
+            return ProviderResult("failed", "provider_send_failed", retryable=True)
+        if result.status in SUCCESS_STATUSES or result.status == "sent":
+            self.ledger.mark_success(claim, result.data.get("external_id", ""))
+            return ProviderResult("sent", data=result.data)
+        self.ledger.mark_failure(claim, result.reason, bool(result.retryable))
+        return result
 
     def retry(self, report_id, capabilities=None):
         record = self.state_store.load_retry(report_id)
@@ -584,7 +770,11 @@ class BridgeService(object):
             )
         selector = channel.recipients[recipient_index]
         try:
-            result = provider.resolve_recipient(channel.profile, selector)
+            resolver = (
+                getattr(provider, "host_resolve_recipient", None)
+                or provider.resolve_recipient
+            )
+            result = resolver(channel.profile, selector)
         except Exception:
             result = ProviderResult(
                 "failed", "provider_recipient_resolution_failed", retryable=True
@@ -660,10 +850,9 @@ class BridgeService(object):
 
         send_envelope = _canonical_envelope(envelope)
         validate_envelope(send_envelope)  # Integrity gate immediately before send.
+        sender = getattr(provider, "host_send_report", None) or provider.send_report
         try:
-            result = provider.send_report(
-                channel.profile, recipient, send_envelope
-            )
+            result = sender(channel.profile, recipient, send_envelope)
         except Exception:
             result = ProviderResult(
                 "failed", "provider_send_failed", retryable=True

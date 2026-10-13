@@ -40,6 +40,7 @@ BRIDGE_DELIVERY_STATUSES = frozenset((
     "dependency_verification_failed",
     "dependency_version_unsupported",
     "duplicate_resolved_recipient",
+    "dry_run",
     "dws_admin_authorization_required",
     "dws_authorization_required",
     "dws_command_failed",
@@ -68,7 +69,9 @@ BRIDGE_DELIVERY_STATUSES = frozenset((
     "provider_send_failed",
     "provider_unavailable",
     "provider_unsupported",
+    "recipient_ambiguous",
     "recipient_not_configured",
+    "recipient_not_found",
     "recipient_not_resolved",
     "recipient_selection_required",
     "reconciled_not_delivered",
@@ -86,7 +89,7 @@ class NotificationResult(object):
     def requires_attention(self):
         return self.status not in (
             "delivered", "notification_disabled", "recipient_not_configured",
-            "skipped",
+            "dry_run", "skipped",
         )
 
     @property
@@ -96,7 +99,8 @@ class NotificationResult(object):
         return "Enterprise notification: {0}".format(self.status)
 
 
-def trigger_notification(markdown, report_json, summary=None, bridge_command=None):
+def trigger_notification(markdown, report_json, summary=None, bridge_command=None,
+                         recipient=None, dry_run=False):
     language = _report_language(markdown)
     validate_standard_report(markdown, language)
     validate_standard_json(report_json)
@@ -113,8 +117,14 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
                 mode="w", encoding="utf-8", suffix=".json", delete=False) as handle:
             envelope_path = handle.name
             json.dump(envelope, handle, ensure_ascii=False, separators=(",", ":"))
+        delivery_command = command + ["deliver", "--envelope", envelope_path, "--auto"]
+        recipient_name = _recipient_name(recipient)
+        if recipient_name:
+            delivery_command += ["--to", recipient_name]
+        if dry_run:
+            delivery_command.append("--dry-run")
         completed = subprocess.run(
-            command + ["deliver", "--envelope", envelope_path],
+            delivery_command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -122,7 +132,7 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
             errors="replace",
             check=False,
             shell=False,
-            timeout=30,
+            timeout=60,
         )
         return _result_from_process(completed)
     except Exception as error:
@@ -135,6 +145,19 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
                 os.unlink(envelope_path)
             except OSError:
                 pass
+
+
+def _recipient_name(recipient):
+    """Validate a conversation-supplied recipient name (plain display name)."""
+    if not isinstance(recipient, str):
+        return ""
+    name = recipient.strip()
+    if not name or any(ord(ch) < 32 for ch in name):
+        return ""
+    # Stable ids are not valid display-name overrides; callers must pass a name.
+    if ":" in name:
+        return ""
+    return name
 
 
 def _build_envelope(markdown, report_json, summary):

@@ -11,49 +11,110 @@ native DingTalk Provider.
    supplies one. Codex, Claude Code, WorkBuddy, OpenClaw, and company-specific
    Agents use the same semantic capability contract.
 2. If native DingTalk is declared, use it and do not discover or install DWS.
-3. If native is unavailable, inspect DWS. Version 1.0.15 or newer must pass
+3. If native is unavailable, inspect DWS. Version 1.0.63 or newer must pass
    either the JSON version response or DWS's complete official text version
    banner (`dws version v<SemVer> (<commit>, <UTC build time>)`), followed by
-   the per-leaf JSON-format help gates. Arbitrary text containing a version
-   number is not accepted.
+   the per-leaf JSON-format help gates (`auth status`, `auth login`,
+   `profile list`). Arbitrary text containing a version number is not accepted.
 4. Missing or outdated DWS returns `dependency_install_required` or
    `dws_upgrade_required`. This is a proposal, not approval.
+
+## Fast install for ordinary users in mainland China
+
+The bridge never downloads the DWS binary itself. It downloads only the small
+official installer script, and that upstream script then fetches the DWS release
+binary (about 17.6 MB tar.gz / 47 MB installed on macOS).
+
+Why a plain `curl … | sh` from GitHub hangs for an ordinary user without an
+agent proxy/VPN:
+
+- The release binary is served from the GitHub release-assets CDN. On a normal
+  mainland network that endpoint frequently fails with `SSL connection timeout`,
+  a 0-byte body, or HTTP 502.
+- The upstream installer's auto-probe only checks the lightweight
+  `…/releases/latest` HTML redirect (observed reachable, HTTP 302 in ~0.6 s).
+  Because that probe succeeds while the asset CDN is unreachable, the installer
+  wrongly concludes GitHub is usable, stays on GitHub to pull the binary, and
+  never falls back. This is a probe blind spot, not a Gitee outage.
+
+The fix is to force the official Gitee mirror, which hosts the identical release
+assets and checksums. Measured on this machine on a normal network: the full
+17,627,332-byte macOS archive downloads from Gitee in ~8.5 s (~2.0 MB/s,
+HTTP 200); GitHub asset CDN returned `curl: (28) SSL connection timeout` with
+0 bytes. Full Gitee install (download + SHA-256 verify + extract) takes ~18 s.
+
+Two supported ways to use it:
+
+```text
+# Preferred: through the detector bridge. The first install candidate is the
+# official Gitee mirror and exports DWS_GITEE_REPO, so the upstream script pulls
+# both the version list and the binary from Gitee; --china-mirror pins Gitee only.
+./run.sh setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --yes
+
+# Remote / headless / SSH host (no local browser for the OAuth loopback):
+./run.sh setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --device-login --yes
+```
+
+Or the upstream installer directly (the bridge-independent equivalent). The
+`DWS_GITEE_REPO` variable is what makes the script resolve both tags and asset
+URLs through Gitee. Download the script to a file and inspect/run it rather
+than piping a network stream straight into a shell:
+
+```sh
+tmp=$(mktemp -d) && \
+curl -fsSL -o "$tmp/install.sh" \
+  https://gitee.com/dingtalk-real-ai/dingtalk-workspace-cli/raw/main/scripts/install.sh && \
+DWS_GITEE_REPO=DingTalk-Real-AI/dingtalk-workspace-cli DWS_NO_SKILLS=1 \
+  sh "$tmp/install.sh"
+```
+
+After the binary is ready, setup proceeds to authorization. On a desktop it
+opens the DingTalk QR/OAuth page in a browser; on a headless host it otherwise
+blocks on `Waiting for authorization...` until the process timeout, which the
+bridge reports as `unavailable / dws_command_failed`. Use `--device-login` there.
+A successful Gitee install followed by an un-scanned login in a headless shell is
+therefore an authorization pause, not a download failure — confirm with
+`dws --version` (expect `v1.0.63` or newer).
 
 ## Approved installation
 
 Review the returned action with the user, including platform, minimum version,
-source, and whether the China mirror was requested. Only then run the matching
-setup command with both `--install-dws` and `--yes`:
+source, and whether the China mirror was requested. Then run the matching setup
+command with `--yes` (the legacy `--install-dws` gate is still accepted):
 
 ```text
-# macOS or Linux, official GitHub source
+# macOS or Linux — default order is official Gitee first, then GitHub fallback
 ./run.sh setup --platform dingtalk --provider dws-cli --install-dws --yes
 
-# macOS or Linux, explicitly selected official Gitee China mirror
+# macOS or Linux — pin the official Gitee China mirror only (recommended in CN)
 ./run.sh setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --yes
 
-# Windows PowerShell launcher, official GitHub source
-./run.ps1 setup --platform dingtalk --provider dws-cli --install-dws --yes
+# Windows PowerShell launcher
+./run.ps1 setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --yes
 
 # Windows batch launcher
-run.bat setup --platform dingtalk --provider dws-cli --install-dws --yes
+run.bat setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --yes
 ```
 
-The installer accepts only official DingTalk scripts pinned to commit
-`251ae0d71f1a047b62af8425cec9374ccef42df2`. Both the GitHub source and the
-explicitly selected Gitee mirror must match the SHA-256 values shipped in
-`notification_bridge/installer.py`. Missing content or a mismatch stops before
-execution; there is no fallback to the mutable branch. Updating the pinned
-installer requires reviewing a new revision and updating its digests.
+The installer accepts only official DingTalk installer scripts fetched over
+HTTPS from the official Gitee mirror first and the official GitHub source as
+fallback. No commit or installer-script digest is pinned: the newest stable
+release is resolved dynamically, and the upstream installer verifies every
+release binary against the checksum published in that same release. (`--china-mirror`
+restricts execution to Gitee only.) The version floor is resolved live from the
+Gitee/GitHub release APIs with a time-based cache; if both APIs are unreachable
+it falls back to the constant `TRUSTED_VERSION_FLOOR = 1.0.63`.
 
-Installation uses a private temporary directory, a 20-second download timeout,
-a 2 MiB script limit, a 180-second process timeout, and explicit OS/proxy
-environment variables. `DWS_NO_SKILLS=1` limits the official installer to the
-CLI; it does not add unrelated agent skills. The pinned upstream installer
-verifies the CLI release archive against its published checksum before use.
-The installer still has the user's filesystem permissions: approval is required,
-and the environment allowlist is not a sandbox. Temporary material is removed
-on success and failure; the installed CLI is verified again before use.
+Installation uses a private 0700 temporary directory, a 20-second download
+timeout for the small script, a 2 MiB script limit, a 180-second process
+timeout, `shell=False`, and an explicit OS/proxy environment allowlist (agent
+tokens are never passed through). `DWS_NO_SKILLS=1` limits the official
+installer to the CLI; it does not add unrelated agent skills. The upstream
+installer verifies the CLI release archive against its published checksum
+before use. The installer still has the user's filesystem permissions: approval
+is required, and the environment allowlist is not a sandbox. Temporary material
+is removed on success and failure; the installed CLI is discovered and verified
+again before use.
 
 ## Authorization, organization, and recipients
 
@@ -81,15 +142,19 @@ Fixed recipients are configured after Profile binding and may be decided later:
 ./run.sh recipients --platform dingtalk --profile corpId:userId --recipient <exact-configured-selector>
 ```
 
-An empty recipient list means no send. Never infer `self`, the current user, a
-default contact, or a similarly named person. First delivery still requires its
-separate correlated confirmation.
+An empty recipient list means no send on the configured-channel (MCP/continuation)
+path; never infer `self`, the current user, or a similarly named person there.
+The detector's unattended `deliver --auto` path is separate: it resolves the
+recipient from `--notify-to`, then the `ENTERPRISE_NOTIFICATION_RECIPIENT`
+variable, falling back to the fixed default 杨华, and sends on first authorized
+run without an extra confirmation step.
 
 ## Independent upgrade and uninstall
 
 The Bridge reports `dws_upgrade_required` when the discovered version is below
-1.0.15. Repeat the approved setup flow to upgrade from an official source, or
-follow the official DWS upgrade procedure outside the detector. To uninstall,
+1.0.63. Repeat the approved setup flow (prefer `--china-mirror` in mainland
+China) to upgrade from an official source, or follow the official DWS upgrade
+procedure outside the detector. To uninstall,
 use the official DWS uninstall procedure for the installed platform, then switch
 the channel to a native Provider or disable it. These lifecycle operations do
 not remove or modify `wifi-health-detector`.
@@ -101,7 +166,7 @@ an organization, or send a message. A real preflight requires explicit approval
 for each external side effect.
 
 1. With approval to inspect an existing installation, run `dws --version` and
-   require 1.0.15 or newer.
+   require 1.0.63 or newer.
 2. With approval to inspect account state, run the documented JSON capability
    gates and then `dws auth status --format json`.
 3. Only if authorization is absent or expired, ask approval to open the DingTalk

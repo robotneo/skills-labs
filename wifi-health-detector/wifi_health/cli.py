@@ -2,6 +2,7 @@ from __future__ import absolute_import, print_function
 
 import argparse
 import json
+import os
 import statistics
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +42,10 @@ def build_parser():
     parser.add_argument("--json", metavar="PATH", help="write the complete JSON report")
     parser.add_argument("--csv", metavar="PATH", help="write the complete CSV report")
     parser.add_argument("--no-notify", action="store_true", help="skip enterprise notification delivery")
+    parser.add_argument("--notify-to", metavar="NAME",
+                        help="DingTalk recipient display name (overrides the default recipient)")
+    parser.add_argument("--notify-dry-run", action="store_true",
+                        help="preview the DingTalk report message without sending it")
     return parser
 
 
@@ -118,7 +123,13 @@ def main(argv=None):
         if args.json: _write(args.json, json_text)
         if args.csv: _write(args.csv, render_csv(report, args.mask))
         if not args.no_notify:
-            notification_result = trigger_notification(markdown, report_json)
+            recipient = (args.notify_to
+                         if args.notify_to is not None
+                         else os.environ.get("ENTERPRISE_NOTIFICATION_RECIPIENT"))
+            notification_result = trigger_notification(
+                markdown, report_json, recipient=recipient,
+                dry_run=args.notify_dry_run,
+            )
             if notification_result.requires_attention:
                 print(notification_result.message, file=sys.stderr)
         return 0

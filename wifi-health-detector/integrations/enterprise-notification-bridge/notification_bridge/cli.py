@@ -197,13 +197,19 @@ class BridgeCommands(object):
         }
 
     def deliver(self, envelope_value, capabilities=None,
-                request_host_summary=False):
+                request_host_summary=False, auto=False, recipient=None,
+                dry_run=False):
         envelope = load_envelope(envelope_value)
         capability_bundle = load_capabilities(capabilities)
         try:
-            result = self.service.deliver(
-                envelope, capability_bundle, request_host_summary
-            )
+            if auto:
+                result = self.service.deliver_auto(
+                    envelope, recipient, capability_bundle, dry_run
+                )
+            else:
+                result = self.service.deliver(
+                    envelope, capability_bundle, request_host_summary
+                )
         except ContinuationError as error:
             raise CommandError("malformed_capabilities", str(error))
         return result_to_dict(result)
@@ -394,6 +400,9 @@ def _execute(arguments, commands):
         return commands.deliver(
             arguments.envelope, arguments.capabilities,
             arguments.request_host_summary,
+            auto=getattr(arguments, "auto", False),
+            recipient=getattr(arguments, "to", None),
+            dry_run=getattr(arguments, "dry_run", False),
         )
     if arguments.command == "retry":
         return commands.retry(arguments.report_id, arguments.capabilities)
@@ -445,6 +454,18 @@ def _parser():
     delivery.add_argument("--envelope", required=True)
     delivery.add_argument("--capabilities")
     delivery.add_argument("--request-host-summary", action="store_true")
+    delivery.add_argument(
+        "--auto", action="store_true",
+        help="unattended DingTalk/DWS delivery with default-recipient fallback",
+    )
+    delivery.add_argument(
+        "--to", dest="to",
+        help="conversation-specified recipient display name (overrides default)",
+    )
+    delivery.add_argument(
+        "--dry-run", dest="dry_run", action="store_true",
+        help="preview the DingTalk message without sending",
+    )
 
     retry = subparsers.add_parser("retry")
     retry.add_argument("--report-id", required=True)

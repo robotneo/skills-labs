@@ -35,6 +35,39 @@ To suppress the detector-to-Bridge trigger for one detector run, use
 `wifi-health-detector --no-notify`. This flag does not alter the standardized
 report.
 
+### Unattended auto delivery (detector default)
+
+The detector invokes a second, config-free delivery path after it renders the
+report:
+
+```text
+run.sh deliver --envelope /path/to/validated-envelope.json --auto [--to <display-name>] [--dry-run]
+```
+
+`--auto` bootstraps the DingTalk/DWS channel in memory only. It discovers and
+version-verifies DWS (`>=1.0.63`), reuses the current authorized Profile,
+resolves a recipient by display name, and sends the report Markdown as a direct
+message. Nothing is written to the saved channel configuration, and Feishu /
+WeCom are never touched by this path.
+
+Recipient priority is:
+
+1. `--to <display-name>` (the detector's `--notify-to NAME`), then
+2. the `ENTERPRISE_NOTIFICATION_RECIPIENT` environment variable, then
+3. the built-in default recipient `杨华`.
+
+A requested name that is empty, unknown, or matches several people never picks
+a candidate and never aborts delivery; the message falls back to the default
+recipient. Stable identifiers (`corpId:userId`, `openDingTalkId`) are rejected
+as `--to` values; only plain display names are accepted. A machine with no
+usable DWS returns `notification_disabled` (quiet, non-blocking); an installed
+DWS below the floor returns `dws_upgrade_required`. `--dry-run` proves name
+resolution and rendering without sending and without claiming a ledger entry,
+so the same report can still be sent for real afterward.
+
+The configured-channel continuation workflow below is unchanged and remains
+the only path used by MCP tools; it never infers a default recipient.
+
 Fresh installations start disabled. Activate delivery explicitly in this
 order; no report generation enables notifications implicitly:
 
@@ -51,18 +84,21 @@ effect. `setup` is native-first when the declared host-native DingTalk
 capability includes the complete setup operation set (`auth_status`, `login`,
 and `list_profiles`). A send-only or otherwise partial native capability is not
 setup-capable, so `provider=auto` falls back to DWS while explicit
-`provider=native` returns `configured_provider_unavailable`. DWS 1.0.15 or
+`provider=native` returns `configured_provider_unavailable`. DWS 1.0.63 or
 newer is checked as a conditional fallback. Missing or outdated DWS returns an
 action without executing it. Review that action, then approve explicitly with:
 
 ```text
-run.sh setup --platform dingtalk --provider dws-cli --install-dws --yes
+# mainland China: pin the official Gitee mirror (fast, avoids the GitHub asset CDN)
+run.sh setup --platform dingtalk --provider dws-cli --china-mirror --install-dws --yes
 ```
 
-The official installer is pinned to a reviewed commit and checked against
-bundled SHA-256 values before execution. `--china-mirror` selects its official
-Gitee mirror; unavailable revisions and checksum mismatches fail closed.
-Installation is limited to the CLI, not additional agent skills. See
+The official installer resolves the newest stable release dynamically (no
+pinned commit or bundled script digest) and verifies each release binary
+against the checksum published in that release. The default candidate order is
+the official Gitee mirror first with official GitHub fallback; `--china-mirror`
+restricts execution to Gitee only. Installation is limited to the CLI, not
+additional agent skills. See
 [setup details](references/DWS-SETUP.md). Setup requests DingTalk login or QR/device
 authorization only on first use or after authorization expires. `--device-login`
 (MCP: `deviceLogin`) uses the documented `dws auth login --device` flow when a

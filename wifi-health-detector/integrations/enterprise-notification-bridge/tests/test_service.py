@@ -37,13 +37,20 @@ class FakeProvider(Provider):
     name = "dws-cli"
     priority = 100
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, platform=None):
         if name is not None:
             self.name = name
+        if platform is not None:
+            self.platform = platform
         self.auth_result = ProviderResult("authorized")
         self.resolve_result = None
         self.next_result = ProviderResult("sent", data={"external_id": "message-1"})
         self.send_error = None
+        self.available = True
+        self.profile_result = ProviderResult("ok", data={"profile": "corp:user"})
+        # Optional selector -> ProviderResult routing for the auto path.
+        self.resolve_routes = None
+        self.dry_run_calls = []
         self.capabilities_calls = 0
         self.auth_calls = []
         self.profile_calls = 0
@@ -52,7 +59,7 @@ class FakeProvider(Provider):
 
     def capabilities(self):
         self.capabilities_calls += 1
-        return {"available": True}
+        return {"available": self.available}
 
     def auth_status(self, profile=None):
         self.auth_calls.append(profile)
@@ -60,16 +67,23 @@ class FakeProvider(Provider):
 
     def list_profiles(self):
         self.profile_calls += 1
-        return ProviderResult("ok", data={"profile": "corp:user"})
+        return self.profile_result
 
     def resolve_recipient(self, profile, selector):
         self.resolve_calls.append((profile, selector))
+        if self.resolve_routes is not None:
+            routed = self.resolve_routes.get(selector)
+            return routed if routed is not None else ProviderResult(
+                "failed", "recipient_not_found", retryable=False
+            )
         if self.resolve_result is not None:
             return self.resolve_result
         return ProviderResult("resolved", data={"recipient": selector})
 
-    def send_report(self, profile, recipient, envelope):
+    def send_report(self, profile, recipient, envelope, dry_run=False):
         self.send_calls.append(SendCall(profile, recipient, envelope))
+        if dry_run:
+            self.dry_run_calls.append(SendCall(profile, recipient, envelope))
         if self.send_error is not None:
             raise self.send_error
         return self.next_result
@@ -79,6 +93,34 @@ def make_envelope(summary_text="AI summary"):
     return build_envelope(
         STANDARD_MARKDOWN, STANDARD_REPORT, summary_text, "host_agent", "2.4.0"
     )
+
+
+class _Dependency(object):
+    def __init__(self, status, reason, executable="/verified/bin/dws"):
+        self.status = status
+        self.reason = reason
+        self.executable = executable
+
+
+class ReadyDependency(object):
+    def discoverer(self, environment, platform, which, minimum_version=None):
+        return _Dependency("discovered", "dependency_discovered")
+
+    def verifier(self, executable, runner, minimum_version=None):
+        return _Dependency("ready", "dependency_ready", executable)
+
+
+class DependencyFixture(ReadyDependency):
+    def __init__(self, status, reason):
+        self.status = status
+        self.reason = reason
+
+    def discoverer(self, environment, platform, which, minimum_version=None):
+        return _Dependency(self.status, self.reason,
+                           executable="/verified/bin/dws")
+
+    def verifier(self, executable, runner, minimum_version=None):
+        return _Dependency(self.status, self.reason, executable)
 
 
 def make_config(recipients=None, profile="corp:user"):
@@ -265,6 +307,211 @@ class BridgeServiceTests(unittest.TestCase):
         self.assertEqual(alternative.profile_calls, 0)
         self.assertEqual(selected.capabilities_calls, 1)
         self.assertEqual(alternative.capabilities_calls, 1)
+
+
+class DeliverAutoTests(unittest.TestCase):
+    """Default DingTalk auto-delivery with recipient fallback to 杨华."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.ledger = DeliveryLedger(
+            os.path.join(self.directory.name, "ledger.sqlite3")
+        )
+        self.provider = FakeProvider()
+        self.state_store = MemoryStateStore()
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def service(self, provider=None, dependency=None):
+        # The auto path is independent of persisted channel configuration.
+        config = BridgeConfig(enabled=True, channels=[])
+        dependency = dependency if dependency is not None else ReadyDependency()
+        return BridgeService(
+            config, [provider or self.provider], self.ledger,
+            state_store=self.state_store,
+            dependency_discoverer=dependency.discoverer,
+            dependency_verifier=dependency.verifier,
+            environment={"DWS_EXE": "/verified/bin/dws"},
+            platform_name="darwin",
+            which=lambda name: "/verified/bin/dws" if name == "dws" else None,
+        )
+
+    def test_without_dws_dependency_auto_delivery_is_disabled(self):
+        dependency = DependencyFixture("action_required",
+                                       "dependency_install_required")
+
+        result = self.service(dependency=dependency).deliver_auto(make_envelope())
+
+        self.assertEqual(result.results[0].status, "skipped")
+        self.assertEqual(result.results[0].reason, "notification_disabled")
+        self.assertEqual(self.provider.send_calls, [])
+        self.assertEqual(self.provider.auth_calls, [])
+
+    def test_below_floor_dws_returns_upgrade_required_without_sending(self):
+        dependency = DependencyFixture("action_required",
+                                       "dws_upgrade_required")
+
+        result = self.service(dependency=dependency).deliver_auto(make_envelope())
+
+        self.assertEqual(result.results[0].status, "skipped")
+        self.assertEqual(result.results[0].reason, "dws_upgrade_required")
+        self.assertEqual(self.provider.send_calls, [])
+        self.assertEqual(self.provider.auth_calls, [])
+
+    def test_explicit_unique_recipient_overrides_default(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "王芳": ProviderResult("resolved", data={"recipient": "王芳"}),
+        }
+
+        result = self.service().deliver_auto(envelope, requested_recipient="王芳")
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(result.results[0].status, "sent")
+        self.assertEqual(
+            self.provider.resolve_calls, [("corp:user", "王芳")]
+        )
+        self.assertEqual(self.provider.send_calls[0].recipient, "王芳")
+
+    def test_unknown_recipient_falls_back_to_default_yanghua(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "钱七": ProviderResult(
+                "failed", "recipient_not_found", retryable=False
+            ),
+            "杨华": ProviderResult("resolved", data={"recipient": "杨华"}),
+        }
+
+        result = self.service().deliver_auto(envelope, requested_recipient="钱七")
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(self.provider.send_calls[0].recipient, "杨华")
+        self.assertEqual(
+            [selector for _, selector in self.provider.resolve_calls],
+            ["钱七", "杨华"],
+        )
+
+    def test_ambiguous_recipient_falls_back_without_picking_candidate(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "李娜": ProviderResult(
+                "failed", "recipient_ambiguous", retryable=False
+            ),
+            "杨华": ProviderResult("resolved", data={"recipient": "杨华"}),
+        }
+
+        result = self.service().deliver_auto(envelope, requested_recipient="李娜")
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(self.provider.send_calls[0].recipient, "杨华")
+
+    def test_no_requested_recipient_sends_to_default(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "杨华": ProviderResult("resolved", data={"recipient": "杨华"}),
+        }
+
+        result = self.service().deliver_auto(envelope)
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(self.provider.send_calls[0].recipient, "杨华")
+        self.assertEqual(
+            self.provider.resolve_calls, [("corp:user", "杨华")]
+        )
+
+    def test_identifier_like_recipient_is_ignored_and_uses_default(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "杨华": ProviderResult("resolved", data={"recipient": "杨华"}),
+        }
+
+        result = self.service().deliver_auto(
+            envelope,
+            requested_recipient="dingc96cdb4c99a85452:2014540426841958",
+        )
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(self.provider.send_calls[0].recipient, "杨华")
+        self.assertEqual(
+            [selector for _, selector in self.provider.resolve_calls],
+            ["杨华"],
+        )
+
+    def test_multiple_profiles_skip_without_sending(self):
+        self.provider.profile_result = ProviderResult(
+            "action_required", "profile_selection_required",
+            data={"profiles": [{"profile": "a:u"}, {"profile": "b:u"}]},
+        )
+
+        result = self.service().deliver_auto(make_envelope())
+
+        self.assertEqual(result.results[0].status, "skipped")
+        self.assertEqual(result.results[0].reason, "profile_selection_required")
+        self.assertEqual(self.provider.send_calls, [])
+
+    def test_unauthorized_skips_without_sending(self):
+        self.provider.auth_result = ProviderResult(
+            "ok", data={"authenticated": False}
+        )
+
+        result = self.service().deliver_auto(make_envelope())
+
+        self.assertEqual(result.results[0].status, "skipped")
+        self.assertEqual(result.results[0].reason, "login_required")
+        self.assertEqual(self.provider.send_calls, [])
+
+    def test_no_dingtalk_dws_provider_skips(self):
+        other = FakeProvider(name="native", platform="feishu")
+
+        result = self.service(other).deliver_auto(make_envelope())
+
+        self.assertEqual(result.results[0].status, "skipped")
+        self.assertEqual(result.results[0].reason, "provider_unavailable")
+        self.assertEqual(other.send_calls, [])
+
+    def test_duplicate_delivery_is_claimed_once(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "杨华": ProviderResult("resolved", data={"recipient": "杨华"}),
+        }
+        service = self.service()
+
+        first = service.deliver_auto(envelope)
+        second = service.deliver_auto(envelope)
+
+        self.assertEqual(first.status, "delivered")
+        self.assertEqual(len(self.provider.send_calls), 1)
+        self.assertEqual(
+            second.results[0].reason, "delivery_already_succeeded"
+        )
+
+    def test_dry_run_does_not_mark_success_and_can_send_afterward(self):
+        envelope = make_envelope()
+        self.provider.resolve_routes = {
+            "杨华": ProviderResult("resolved", data={"recipient": "杨华"}),
+        }
+        self.provider.next_result = ProviderResult(
+            "ok", "dry_run", data={"dry_run": True}
+        )
+        service = self.service()
+
+        preview = service.deliver_auto(envelope, dry_run=True)
+        self.assertEqual(preview.results[0].reason, "dry_run")
+        self.assertEqual(len(self.provider.dry_run_calls), 1)
+
+        # A real send is still allowed because dry-run never claimed success.
+        self.provider.next_result = ProviderResult(
+            "sent", data={"external_id": "m-9"}
+        )
+        delivered = service.deliver_auto(envelope)
+
+        self.assertEqual(delivered.status, "delivered")
+        self.assertEqual(len(self.provider.send_calls), 2)
+        key = DeliveryKey(
+            envelope.report_id, "dingtalk", "dws-cli", "corp:user", "杨华"
+        )
+        self.assertEqual(self.ledger.get(key)["state"], "succeeded")
 
 
 if __name__ == "__main__":

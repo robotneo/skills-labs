@@ -162,6 +162,148 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertFalse(os.path.exists(record_path))
 
+    def _completed(self, payload):
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(payload), stderr=""
+        )
+
+    def test_trigger_uses_auto_delivery_without_a_recipient_flag(self):
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            return self._completed({"status": "delivered", "reason": "sent"})
+
+        with patch("wifi_health.notification.subprocess.run",
+                   side_effect=fake_run):
+            result = trigger_notification(
+                self.markdown, self.report_json,
+                bridge_command=["/bin/bridge"],
+            )
+
+        command = captured["command"]
+        self.assertEqual(command[:2], ["/bin/bridge", "deliver"])
+        self.assertIn("--envelope", command)
+        self.assertIn("--auto", command)
+        self.assertNotIn("--to", command)
+        self.assertNotIn("--dry-run", command)
+        self.assertEqual(result.status, "delivered")
+
+    def test_trigger_passes_clean_recipient_as_to_flag(self):
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            return self._completed({"status": "delivered"})
+
+        with patch("wifi_health.notification.subprocess.run",
+                   side_effect=fake_run):
+            trigger_notification(
+                self.markdown, self.report_json,
+                bridge_command=["/bin/bridge"], recipient=" 王芳 ",
+            )
+
+        command = captured["command"]
+        self.assertIn("--auto", command)
+        self.assertEqual(command[command.index("--to") + 1], "王芳")
+
+    def test_trigger_identifier_recipient_is_ignored(self):
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            return self._completed({"status": "delivered"})
+
+        with patch("wifi_health.notification.subprocess.run",
+                   side_effect=fake_run):
+            trigger_notification(
+                self.markdown, self.report_json,
+                bridge_command=["/bin/bridge"],
+                recipient="dingc96:2014540426841958",
+            )
+
+        self.assertNotIn("--to", captured["command"])
+
+    def test_trigger_dry_run_sets_flag_and_status_is_non_actionable(self):
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            return self._completed({"status": "skipped", "reason": "dry_run"})
+
+        with patch("wifi_health.notification.subprocess.run",
+                   side_effect=fake_run):
+            result = trigger_notification(
+                self.markdown, self.report_json,
+                bridge_command=["/bin/bridge"], dry_run=True,
+            )
+
+        self.assertIn("--dry-run", captured["command"])
+        self.assertFalse(result.requires_attention)
+
+    def test_cli_recipient_overrides_environment_recipient(self):
+        report = self._sample_report()
+        commands = []
+
+        def fake_run(command, **kwargs):
+            commands.append(command)
+            return self._completed({"status": "delivered"})
+
+        bridge = json.dumps([sys.executable, "-c",
+                             "import json;print(json.dumps({'status':'delivered'}))"])
+        with patch.dict(
+            os.environ,
+            {
+                "ENTERPRISE_NOTIFICATION_RECIPIENT": "环境收件人",
+                "ENTERPRISE_NOTIFICATION_BRIDGE": bridge,
+            },
+            clear=False,
+        ), patch("wifi_health.cli.collect_report", return_value=report), patch(
+            "wifi_health.cli.apply_quality"
+        ), patch("wifi_health.notification.subprocess.run",
+                  side_effect=fake_run):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = main([
+                    "--language", "en", "--no-public-test",
+                    "--notify-to", "对话收件人",
+                ])
+
+        self.assertEqual(code, 0)
+        command = commands[0]
+        self.assertEqual(command[command.index("--to") + 1], "对话收件人")
+
+    def test_cli_falls_back_to_environment_recipient(self):
+        report = self._sample_report()
+        commands = []
+
+        def fake_run(command, **kwargs):
+            commands.append(command)
+            return self._completed({"status": "delivered"})
+
+        bridge = json.dumps([sys.executable, "-c",
+                             "import json;print(json.dumps({'status':'delivered'}))"])
+        with patch.dict(
+            os.environ,
+            {
+                "ENTERPRISE_NOTIFICATION_RECIPIENT": "环境收件人",
+                "ENTERPRISE_NOTIFICATION_BRIDGE": bridge,
+            },
+            clear=False,
+        ), patch("wifi_health.cli.collect_report", return_value=report), patch(
+            "wifi_health.cli.apply_quality"
+        ), patch("wifi_health.notification.subprocess.run",
+                  side_effect=fake_run):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = main(["--language", "en", "--no-public-test"])
+
+        self.assertEqual(code, 0)
+        command = commands[0]
+        self.assertEqual(command[command.index("--to") + 1], "环境收件人")
+
     def test_dependency_attention_statuses_preserve_report_and_hide_bridge_details(self):
         report = self._sample_report()
         expected = render_text(report, language="en")
@@ -491,12 +633,7 @@ class NotificationIntegrationTests(unittest.TestCase):
                 "notification": {
                     "enabled": True,
                     "failure_policy": "non_blocking",
-                    "channels": [{
-                        "platform": "dingtalk",
-                        "provider": "auto",
-                        "profile": "corp:user",
-                        "recipients": [],
-                    }],
+                    "channels": [],
                 },
             }, handle)
         dws_path = os.path.join(self.directory.name, "dws")
@@ -505,14 +642,19 @@ class NotificationIntegrationTests(unittest.TestCase):
             handle.write("#!/bin/sh\n")
             handle.write("echo \"$*\" >> \"$DWS_LOG\"\n")
             handle.write("case \"$*\" in\n")
+            handle.write("  '--version --format json') echo '{\"version\":\"1.0.63\"}' ;;\n")
             handle.write("  '--help') echo 'DWS help' ;;\n")
-            handle.write("  *'auth status --help'*) echo '--format json' ;;\n")
-            handle.write("  *'profile list --help'*) echo '--format json' ;;\n")
+            handle.write("  *'auth status --help'*) echo '  --format <format> [choices: text, json]' ;;\n")
+            handle.write("  *'auth login --help'*) echo '  --format <format> [choices: text, json]' ;;\n")
+            handle.write("  *'profile list --help'*) echo '  --format <format> [choices: text, json]' ;;\n")
+            handle.write("  *'contact +lookup'*'--help'*) echo '--format json' ;;\n")
             handle.write("  *'auth status --format json'*)\n")
             handle.write("    if [ \"${DWS_MODE:-ok}\" = failure ]; then exit 9; fi\n")
             handle.write("    echo '{\"authenticated\":true}' ;;\n")
             handle.write("  *'profile list --format json'*)\n")
             handle.write("    echo '{\"profiles\":[{\"profile\":\"corp:user\"}]}' ;;\n")
+            handle.write("  *'contact +lookup --name '*) echo '{\"ok\":true,\"data\":{\"profile\":{\"orgUserId\":\"201454\",\"orgUserName\":\"杨华\"}}}' ;;\n")
+            handle.write("  *'chat +dm'*'--yes'*) echo '{\"ok\":true,\"executed\":true,\"data\":{\"messageId\":\"m-1\"}}' ;;\n")
             handle.write("  *) exit 1 ;;\n")
             handle.write("esac\n")
         os.chmod(dws_path, 0o755)
@@ -523,6 +665,7 @@ class NotificationIntegrationTests(unittest.TestCase):
             ROOT, "integrations", "enterprise-notification-bridge", "run.sh"
         )
         observed = []
+        auto_commands = []
         real_run = notification_module.subprocess.run
         bridge_statuses = []
 
@@ -531,6 +674,7 @@ class NotificationIntegrationTests(unittest.TestCase):
                 envelope_path = command[command.index("--envelope") + 1]
                 with open(envelope_path, encoding="utf-8") as handle:
                     observed.append(json.load(handle))
+                auto_commands.append(list(command))
             result = real_run(command, *args, **kwargs)
             if command and os.path.abspath(command[0]) == os.path.abspath(adjacent_launcher):
                 bridge_statuses.append(json.loads(result.stdout)["status"])
@@ -558,8 +702,20 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(observed[0]["report"]["markdown"], expected)
         self.assertEqual(observed[0]["report"]["json"], json.loads(render_json(report)))
         self.assertEqual(observed[0]["ai_summary"]["mode"], "deterministic")
-        self.assertEqual(bridge_statuses, ["recipient_not_configured"])
+        # The detector invokes the unattended auto path, and a report with no
+        # conversation recipient is delivered to the built-in default 杨华.
+        self.assertIn("--auto", auto_commands[0])
+        self.assertNotIn("--to", auto_commands[0])
+        self.assertEqual(bridge_statuses, ["delivered"])
+        with open(dws_log, encoding="utf-8") as handle:
+            dws_log_text = handle.read()
+        self.assertIn("contact +lookup --name 杨华", dws_log_text)
+        self.assertIn("chat +dm", dws_log_text)
+        self.assertIn("--yes", dws_log_text)
 
+        # A failing auth probe stays non-blocking and never reaches lookup/send.
+        # Reset the captured dws command log to isolate the failure run.
+        open(dws_log, "w").close()
         with patch.dict(os.environ, dict(environment, DWS_MODE="failure"), clear=True), patch(
             "wifi_health.cli.collect_report", return_value=report
         ), patch("wifi_health.cli.apply_quality"), patch(
@@ -569,13 +725,14 @@ class NotificationIntegrationTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(failed_stdout, expected)
-        self.assertIn("dws_command_failed", failed_stderr)
+        self.assertIn("authorization_required", failed_stderr)
         self.assertEqual(len(observed), 2)
-        self.assertEqual(bridge_statuses, ["recipient_not_configured", "dws_command_failed"])
+        self.assertEqual(bridge_statuses, ["delivered", "authorization_required"])
         with open(dws_log, encoding="utf-8") as handle:
-            dws_calls = handle.read().splitlines()
-        self.assertTrue(dws_calls)
-        self.assertFalse(any("send" in call or "recipient" in call for call in dws_calls))
+            failed_calls = handle.read()
+        self.assertIn("auth status --format json", failed_calls)
+        self.assertNotIn("chat +dm", failed_calls)
+        self.assertNotIn("contact +lookup", failed_calls)
 
     def _run_detector_without_override(self):
         stdout = io.StringIO()
@@ -583,7 +740,6 @@ class NotificationIntegrationTests(unittest.TestCase):
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = main(["--language", "en", "--no-public-test"])
         return code, stdout.getvalue(), stderr.getvalue()
-
     def _bridge_command(self, response, record_path=None, return_code=0):
         script = [
             "import json,sys",

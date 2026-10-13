@@ -9,7 +9,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from notification_bridge.providers.dws import DwsProvider, choose_profile
+from notification_bridge.providers.dws import (
+    DwsProvider,
+    choose_profile,
+    clean_recipient_name,
+)
 
 
 class CommandResult(object):
@@ -151,7 +155,7 @@ class DwsProviderTests(unittest.TestCase):
         self.assertNotIn("opaque-secret", repr(result.data))
 
     def test_undocumented_dws_send_requests_correlated_host_continuation(self):
-        result = DwsProvider(FakeRunner("{}")).send_report(
+        result = DwsProvider(FakeRunner("{}")).host_send_report(
             "corp:user", "ops", {"report_id": "report"}
         )
 
@@ -199,13 +203,189 @@ class DwsProviderTests(unittest.TestCase):
         self.assertEqual(result.data["profile"], "corp:user")
 
     def test_recipient_resolution_requires_a_human_supplied_choice(self):
-        result = DwsProvider(FakeRunner("{}")).resolve_recipient("corp:user", "ops")
+        result = DwsProvider(FakeRunner("{}")).host_resolve_recipient(
+            "corp:user", "ops"
+        )
 
         self.assertEqual(result.status, "action_required")
         self.assertEqual(result.reason, "recipient_selection_required")
         self.assertEqual(result.data["operation"], "resolve_recipient")
         self.assertEqual(result.data["profile"], "corp:user")
         self.assertEqual(result.data["selector"], "ops")
+
+    # --- Real default auto path: contact +lookup resolution ---
+
+    @staticmethod
+    def _lookup_commands(name, executable="dws"):
+        help_command = [
+            executable, "contact", "+lookup", "--name", name, "--help"
+        ]
+        business_command = [
+            executable, "contact", "+lookup", "--name", name,
+            "--format", "json",
+        ]
+        return help_command, business_command
+
+    def test_resolve_recipient_unique_lookup_returns_resolved_name(self):
+        help_command, business_command = self._lookup_commands("杨华")
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("--format json"),
+            tuple(business_command): CommandResult(
+                '{"ok":true,"outcome":"success","data":{"profile":{'
+                '"orgUserId":"201454","orgUserName":"杨华"}}}'
+            ),
+        })
+
+        result = DwsProvider(runner).resolve_recipient("corp:user", " 杨华 ")
+
+        self.assertEqual(result.status, "resolved")
+        self.assertEqual(result.data["recipient"], "杨华")
+        self.assertEqual(result.data["selector"], "杨华")
+        self.assertEqual(runner.calls, [help_command, business_command])
+
+    def test_resolve_recipient_not_found_is_classified(self):
+        help_command, business_command = self._lookup_commands("钱七")
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("--format json"),
+            tuple(business_command): CommandResult(
+                '{"ok":false,"error":{"subtype":"not_found"}}'
+            ),
+        })
+
+        result = DwsProvider(runner).resolve_recipient("corp:user", "钱七")
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "recipient_not_found")
+        self.assertFalse(result.retryable)
+
+    def test_resolve_recipient_ambiguous_match_is_classified(self):
+        help_command, business_command = self._lookup_commands("李娜")
+        runner = FakeRunner("", responses={
+            tuple(help_command): CommandResult("--format json"),
+            tuple(business_command): CommandResult(
+                '{"ok":false,"error":{"subtype":"ambiguous_match"}}'
+            ),
+        })
+
+        result = DwsProvider(runner).resolve_recipient("corp:user", "李娜")
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "recipient_ambiguous")
+        self.assertFalse(result.retryable)
+
+    def test_resolve_recipient_rejects_identifier_selector_without_lookup(self):
+        runner = FakeRunner("{}")
+
+        result = DwsProvider(runner).resolve_recipient(
+            "corp:user", "dingc96cdb4c99a85452:2014540426841958"
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "recipient_not_resolved")
+        self.assertEqual(runner.calls, [])
+
+    # --- Real default auto path: chat +dm send ---
+
+    @staticmethod
+    def _dm_command(name, content, dry_run=False, executable="dws"):
+        command = [
+            executable, "chat", "+dm", "--to", name,
+            "--content", content, "--format", "json",
+        ]
+        command.append("--dry-run" if dry_run else "--yes")
+        return command
+
+    def test_send_report_executes_real_dm_with_yes_flag(self):
+        envelope = {"report": {"markdown": "# WiFi 报告"}}
+        command = self._dm_command("杨华", "# WiFi 报告", dry_run=False)
+        runner = FakeRunner("", responses={
+            tuple(command): CommandResult(
+                '{"ok":true,"executed":true,"data":{"messageId":"m-1"}}'
+            ),
+        })
+
+        result = DwsProvider(runner).send_report(
+            "corp:user", "杨华", envelope, dry_run=False
+        )
+
+        self.assertEqual(result.status, "sent")
+        self.assertEqual(result.data["external_id"], "m-1")
+        self.assertEqual(runner.calls, [command])
+
+    def test_send_report_dry_run_previews_without_delivering(self):
+        envelope = {"report": {"markdown": "# WiFi 报告"}}
+        command = self._dm_command("杨华", "# WiFi 报告", dry_run=True)
+        runner = FakeRunner("", responses={
+            tuple(command): CommandResult(
+                '{"dry_run":true,"executed":false,'
+                '"tool":"send_personal_message",'
+                '"arguments":{"receiverOpenDingTalkId":"DfoZ"}}'
+            ),
+        })
+
+        result = DwsProvider(runner).send_report(
+            "corp:user", "杨华", envelope, dry_run=True
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.reason, "dry_run")
+        self.assertTrue(result.data["dry_run"])
+
+    def test_send_report_dry_run_ambiguity_is_classified_even_on_rc_zero(self):
+        envelope = {"report": {"markdown": "# WiFi 报告"}}
+        command = self._dm_command("李娜", "# WiFi 报告", dry_run=True)
+        runner = FakeRunner("", responses={
+            tuple(command): CommandResult(
+                '{"error":{"reason":"resolution_ambiguous",'
+                '"details":{"subtype":"ambiguous","candidates":['
+                '{"name":"李娜 A"},{"name":"李娜 B"}]}}}',
+                returncode=0,
+            ),
+        })
+
+        result = DwsProvider(runner).send_report(
+            "corp:user", "李娜", envelope, dry_run=True
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "recipient_ambiguous")
+        self.assertFalse(result.retryable)
+
+    def test_send_report_rejects_id_like_recipient_without_running_command(self):
+        runner = FakeRunner("{}")
+
+        result = DwsProvider(runner).send_report(
+            "corp:user", "DfoZCRADiS6Pl43m8iiNbBE2pwJQHNUsBsN",
+            {"report": {"markdown": "# x"}},
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "recipient_not_resolved")
+        self.assertEqual(runner.calls, [])
+
+    def test_send_report_rejects_empty_and_oversized_content(self):
+        runner = FakeRunner("{}")
+
+        empty = DwsProvider(runner).send_report(
+            "corp:user", "杨华", {"report": {"markdown": ""}}
+        )
+        oversized = DwsProvider(runner).send_report(
+            "corp:user", "杨华",
+            {"report": {"markdown": "x" * 12001}},
+        )
+
+        self.assertEqual((empty.status, empty.reason),
+                         ("failed", "provider_send_failed"))
+        self.assertEqual((oversized.status, oversized.reason),
+                         ("failed", "provider_send_failed"))
+        self.assertEqual(runner.calls, [])
+
+    def test_clean_recipient_name_accepts_plain_display_names(self):
+        self.assertEqual(clean_recipient_name("  杨华 "), "杨华")
+        self.assertEqual(clean_recipient_name("Li Na"), "Li Na")
+        for invalid in ("", "   ", "a:b", "line\nbreak",
+                        "DfoZCRADiS6Pl43m8iiNbBE2pwJQHNUsBsN", None):
+            self.assertEqual(clean_recipient_name(invalid), "")
 
 
 if __name__ == "__main__":

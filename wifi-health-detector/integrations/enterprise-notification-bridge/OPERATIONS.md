@@ -88,14 +88,18 @@ explicit `native` selection fails closed. Only when native setup capability is
 unavailable and DingTalk resolves to `dws-cli` may it inspect the conditional
 DWS dependency. Missing or outdated DWS returns a correlated install action; it
 never installs at detector startup. Show the source and command to the user,
-then rerun with `--install-dws --yes` only after explicit approval. GitHub is
-the default official repository source. The installer is pinned to a reviewed
-commit and checked against bundled SHA-256 values before execution.
-`--china-mirror` explicitly selects the matching official Gitee plan; a missing
-revision or checksum mismatch stops installation. It installs the CLI only,
-without additional agent skills. See [DWS setup](references/DWS-SETUP.md) for
-source, integrity checks, and time limits. Never substitute an unofficial
-mirror or pipe a download directly into a shell.
+then rerun with `--china-mirror --install-dws --yes` only after explicit
+approval. The official Gitee mirror is the default first candidate (it exports
+`DWS_GITEE_REPO`), with official GitHub as fallback; `--china-mirror` restricts
+execution to Gitee only, which is recommended in mainland China because the
+GitHub release-asset CDN is frequently unreachable there even though the
+lighter `releases/latest` probe succeeds. The newest stable release is resolved
+dynamically (no pinned commit) and each binary is verified against the
+checksum published in that release; a failed checksum stops installation. It
+installs the CLI only, without additional agent skills. See
+[DWS setup](references/DWS-SETUP.md) for source, integrity checks, time limits,
+and measured Gitee download timings. Never substitute an unofficial mirror or
+pipe a download directly into a shell.
 
 After dependency verification, setup performs the authorization/Profile
 handshake. Request a DingTalk login window or device/QR flow only on first use
@@ -118,6 +122,21 @@ arbitrary similarly named commands.
 The detector's `--no-notify` flag suppresses the optional trigger for one run
 without changing the report. Start the line-oriented MCP server with
 `python3 -m notification_bridge.mcp_server`.
+
+### Unattended auto delivery
+
+Separately from the configured continuation workflow, the detector calls
+`deliver --envelope <path> --auto [--to NAME] [--dry-run]`. This path does not
+read or write channel configuration: it discovers and verifies DWS
+(`>=1.0.63`), uses the single current authorized Profile, and sends the report
+Markdown as a DingTalk direct message through DWS. The recipient priority is
+`--to NAME`, then `ENTERPRISE_NOTIFICATION_RECIPIENT`, then the built-in
+default `杨华`. An empty/unknown/ambiguous requested name falls back to the
+default without choosing a candidate; stable IDs are not accepted as names.
+No usable DWS returns `notification_disabled`; outdated DWS returns
+`dws_upgrade_required`; missing login or multiple Profiles are skipped. Feishu
+and WeCom are never auto-sent. `--dry-run` neither sends nor claims a ledger
+entry. Auto delivery is CLI-only; the MCP tools keep the configured workflow.
 
 ### Continuation protocol
 
