@@ -7,14 +7,14 @@
 | --- | --- |
 | 产品 / 命令 | vCenter AIops / 唯一公共命令 `vcenter-aiops` |
 | 当前版本 | **3.0.0b4**（execution-beta，候选版；新增克隆模版标准流程 `deploy clone-template`，待真机复测 D08/D15/D16/D25b 及克隆验收，非 GA） |
-| 看板更新 | 2026-10-14（迁移 vcenter-ops v2.0 克隆模版流程为 `deploy clone-template`；481 离线测试通过） |
+| 看板更新 | 2026-10-14（迁移 vcenter-ops v2.0 克隆模版流程为 `deploy clone-template`；新增 15 项 Engine 级克隆流程桩测试并清理死代码/构建产物；496 离线测试通过） |
 | 安装状态 | 已安装用户级 `~/.workbuddy/skills/vcenter-aiops/`（b1 安全审计后）；b4 发布后 rsync 同步，经 `VCENTER_AIOPS_PYTHON` 指向隔离 venv 运行 |
 | PRD 必需叶子 | 150 |
 | 当前实施范围 | 149（`cluster add-host` 经用户批准方案 A 延期，不计入完成） |
 | 已交付（地面真值） | **108 / 149（72%）**（PRD 必需口径；另额外注册 `deploy clone-template` 对齐 vcenter-ops 克隆模版标准流程，不属原 150 必需叶） |
 | 剩余 41 的拆分 | **搁置 41**（原 14 项运维待做已全部转为已交付，待实机验收） |
 | 台账口径（2026-10-10 beta） | `COMMAND-ACCEPTANCE.md`：14 项 A–E 组全部注册 ☑ + 离线 ☑，实机列待用户勾选 ☐；41 项低频/治理维持搁置；完整 150 项归档于 `docs/archive/COMMAND-ACCEPTANCE-FULL-150-20260929.md` |
-| 离线测试 | **481 项通过**（截至 2026-10-14 b4） |
+| 离线测试 | **496 项通过**（截至 2026-10-14；481 + 15 项克隆流程 Engine 桩测试） |
 | 实机验收 | 6.5 / 6.7 / 7.0 / 8.0 → **0 / 4**（14 项新增能力全部 `not_lab_verified`） |
 
 > 数字口径：`capabilities list` 实注册 **112** = 必需 108 + 额外 `datastore search-*` 3（search-inspect / list / status，不抵扣必需）+ `deploy clone-template` 1（对齐 vcenter-ops v2.0 克隆模版标准流程）。
@@ -139,7 +139,7 @@ Iteration I (P0)  ── W1–W4 完成：inventory/events/quota、ip 3、ova/ov
   ▼
 3.0.0b3 ── 工程治理：只读复用 RetrieveContent 缓存、OVF lease 有界等待、HTTP 泄漏修复、清理 build/egg-info/pycache；命令契约不变 / 111 命令 / 468 离线测试
   ▼
-3.0.0b4 (当前) ── 迁移 vcenter-ops v2.0「克隆模版」标准流程：新增 `deploy clone-template`（独立 TemplateClone Provider，单次原子 CloneSpec：改网+静态IP Linux定制+CPU/内存+磁盘仅扩容+有IP即开机；host 省略走 DRS；MoRef 精确寻址）/ 112 命令 / 481 离线测试（新增 13）；干净构建 verify_wheel 76 模块通过；Tools 就绪交 `vm wait-tools`（不阻塞确认引擎）；MCP 叶子、clean-slate、迁移工具仍未做（属 rc/搁置）
+3.0.0b4 (当前) ── 迁移 vcenter-ops v2.0「克隆模版」标准流程：新增 `deploy clone-template`（独立 TemplateClone Provider，单次原子 CloneSpec：改网+静态IP Linux定制+CPU/内存+磁盘仅扩容+有IP即开机；host 省略走 DRS；MoRef 精确寻址）/ 112 命令 / 496 离线测试（Provider 级 13 + Engine 流程级 15）；干净构建 verify_wheel 76 模块通过；Tools 就绪交 `vm wait-tools`（不阻塞确认引擎）；MCP 叶子、clean-slate、迁移工具仍未做（属 rc/搁置）
   ▼  门：真机重跑 D08/D15/D16/D25b，并由用户在真实 vCenter 完成 14 项实机验收（6.5/6.7/7.0/8.0）；clone-template 另需验静态 IP 定制/DVPG/DRS 放置/Linux Guest 引导
 3.0.0rc          ── 门：7.0/8.0 实机核心矩阵通过；Windows 密钥后端；TTL/扫描/通知默认关
   ▼

@@ -1,6 +1,5 @@
 """Bounded, profile-aware views of existing plan and operation evidence."""
 import json
-import time
 
 from ..domain.models import fail
 

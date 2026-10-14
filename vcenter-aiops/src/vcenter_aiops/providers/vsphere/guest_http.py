@@ -12,6 +12,11 @@ from contextlib import closing
 
 from .ovf_http import ssl_context
 
+# ssl_context is defined in ovf_http and intentionally re-exported here: guest.py
+# resolves it as ``guest_http.ssl_context`` right next to get_url/put_url. Listing
+# it in __all__ marks the import as a deliberate public re-export, not dead code.
+__all__ = ("get_url", "put_url", "ssl_context")
+
 
 def _connection(parts):
     if parts.scheme == "https":

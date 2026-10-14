@@ -4,7 +4,6 @@ The hard, testable safety boundary is local archive extraction: an OVA entry
 must never escape the target directory. Descriptor and network/disk mapping
 validation are pure logic so they can be fully exercised offline.
 """
-import io
 import os
 import posixpath
 import re

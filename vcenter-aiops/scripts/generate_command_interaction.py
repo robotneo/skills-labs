@@ -55,8 +55,8 @@ TIER_FIX = {
     "batch power-on": ("behavior", ["test_provider_routing.py"],
                        "plans.batch_power_on 被直接调用，断言只构建固定对象计划不提交"),
     "policy inspect": ("contract", [], "静态策略视图无专属 CLI/handler 用例，仅被全量 schema/--help 基线覆盖"),
-    "deploy clone-template": ("logic", ["test_template_clone.py"],
-                              "Provider preflight/submit/observe/verify 全链路 + Engine request_id 去重被直接断言；"
+    "deploy clone-template": ("logic", ["test_template_clone.py", "test_template_clone_flow.py"],
+                              "Provider preflight/submit/observe/verify 全链路 + Engine preview/apply/去重/取消/补偿边界被直接断言；"
                               "命令仅为薄 preview 包装层，未逐字走 CLI（路径字面量仅作 preflight 实参）"),
 }
 

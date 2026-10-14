@@ -1,7 +1,7 @@
 """Cluster lifecycle boundary with exact identity and conservative license checks."""
 import re
 
-from ...domain.models import OperationError, fail
+from ...domain.models import fail
 from .hosts import Hosts
 from .licenses import Licenses
 

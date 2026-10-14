@@ -7,7 +7,7 @@ fetch/put are injected, so the whole flow runs offline with doubles.
 """
 import base64
 
-from ...domain.models import OperationError, fail
+from ...domain.models import fail
 from .guest_protocol import validate_path
 
 

@@ -51,7 +51,6 @@ def refresh(ctx, p):
 
 
 def invalidate(ctx, p):
-    config = ctx.profiles.get(ctx.profile)
     with ctx.store() as store:
         cache = CacheStore(store)
         removed = cache.invalidate(ctx.profile, p["kind"])

@@ -15,7 +15,6 @@ from .hosts import Hosts
 
 # Fixed-IP clones boot and run Linux guest customization; off clones do not.
 TOOLS_HINT = "克隆任务成功仅表示 VM 已创建；静态 IP 克隆已开机并下发定制，VMware Tools/IP 就绪请用 vm wait-tools 或 task wait 核对，不假定已就绪"
-SUPPORTED_VERSION = re.compile(r"^(6\.[57]|7\.0|8\.0)(\.|$)")
 NAME_RE = re.compile(r"[/\\%\x00-\x1f]")
 IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 

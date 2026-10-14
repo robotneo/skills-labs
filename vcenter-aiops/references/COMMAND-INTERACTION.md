@@ -43,7 +43,7 @@
 - ④ **仅契约基线**：仅被全量 schema/`--help` 基线覆盖。
 - 所有远端命令的 6.5/6.7/7.0/8.0 兼容性在 capabilities 中均为 `not_lab_verified`，离线测试**不等于实机验收**。
 
-**覆盖汇总**：总 112 = ①行为级 **73** + ②逻辑级 **35** + ③共享轨 **3** + ④仅契约 **1**。
+**覆盖汇总**：总 112 = ①行为级 **74** + ②逻辑级 **34** + ③共享轨 **3** + ④仅契约 **1**。
 
 > 复核方法：运行 `vcenter-aiops capabilities list`（机器契约）或 `vcenter-aiops capabilities show "领域 动词"`（单条 schema）；离线测试用 `python -m unittest discover -s tests -p "test_*.py" < /dev/null`。再生成/校验本文档：`PYTHONPATH=src python scripts/generate_command_interaction.py`（加 `--check` 仅校验是否最新）。实机验收时建议优先覆盖 ③ 的 3 条与 ② 中的新增写命令。
 
@@ -408,7 +408,7 @@ vcenter-aiops --profile lab plan archive <plan-id>
 ```
 - **预期结果**：本地写入：仅改本机状态（config.yaml/state.db/secrets.json），不联网；失败以错误信封返回。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
 ### `plan create`  ·  编排/恢复
 - **operation_id**：`plan.create`
@@ -444,7 +444,7 @@ vcenter-aiops --profile lab plan list
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
 ### `plan reconcile`  ·  远端只读
 - **operation_id**：`plan.reconcile`
@@ -462,7 +462,7 @@ vcenter-aiops --profile lab plan reconcile <plan-id>
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 ### `plan rollback`  ·  编排/恢复
@@ -480,7 +480,7 @@ vcenter-aiops --profile lab plan rollback <plan-id>
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 ### `plan show`  ·  本地只读
@@ -498,7 +498,7 @@ vcenter-aiops --profile lab plan show <plan-id>
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
 ### `plan validate`  ·  远端只读
 - **operation_id**：`plan.validate`
@@ -632,7 +632,7 @@ vcenter-aiops --profile lab events list --vm-id vm-101 --host-id host-21 --since
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cluster_lifecycle.py`, `test_contracts.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_guest_transfer.py`, `test_guest_windows.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_ip_signals.py`, `test_license_entitlements.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_ops_extensions.py`, `test_ovf.py`, `test_ovf_deploy.py`, `test_ovf_lease.py`, `test_placement.py`, `test_plans.py`, `test_provider.py`, `test_provider_routing.py`, `test_read_models.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cluster_lifecycle.py`, `test_contracts.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_guest_transfer.py`, `test_guest_windows.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_ip_signals.py`, `test_license_entitlements.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_ops_extensions.py`, `test_ovf.py`, `test_ovf_deploy.py`, `test_ovf_lease.py`, `test_placement.py`, `test_plans.py`, `test_provider.py`, `test_provider_routing.py`, `test_read_models.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1250,7 +1250,7 @@ vcenter-aiops --profile lab vm wait-tools --vm-id vm-101
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_read_models.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_read_models.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1297,7 +1297,7 @@ vcenter-aiops --profile lab template inspect --id <id> --name demo-vm
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 ### `template list`  ·  远端只读
@@ -1315,7 +1315,7 @@ vcenter-aiops --profile lab template list --limit 1
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1354,8 +1354,8 @@ vcenter-aiops --profile lab deploy clone-template --vm-id vm-101 --name demo-vm 
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_template_clone.py`
-  - 备注：Provider preflight/submit/observe/verify 全链路 + Engine request_id 去重被直接断言；命令仅为薄 preview 包装层，未逐字走 CLI（路径字面量仅作 preflight 实参）
+  - 覆盖文件：`test_template_clone.py`, `test_template_clone_flow.py`
+  - 备注：Provider preflight/submit/observe/verify 全链路 + Engine preview/apply/去重/取消/补偿边界被直接断言；命令仅为薄 preview 包装层，未逐字走 CLI（路径字面量仅作 preflight 实参）
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 ### `deploy iso`  ·  远端写（确认执行）
@@ -2006,7 +2006,7 @@ vcenter-aiops --profile lab cache status --kind vm
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cluster_lifecycle.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cluster_lifecycle.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_write_cli.py`
 
 
 ---
@@ -2028,8 +2028,8 @@ vcenter-aiops --profile lab cache status --kind vm
 vcenter-aiops --profile lab task cancel <op-id>
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_plans.py`, `test_provider_routing.py`, `test_real_type_contracts.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_template_clone_flow.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 ### `task inspect`  ·  本地只读
@@ -2064,7 +2064,7 @@ vcenter-aiops --profile lab task list --limit 1
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_plans.py`, `test_provider_routing.py`, `test_real_type_contracts.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_plans.py`, `test_provider_routing.py`, `test_real_type_contracts.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
 ### `task reconcile`  ·  远端只读
 - **operation_id**：`task.reconcile`

@@ -11,7 +11,7 @@ error). They are normalised from their string form so no SDK import is required.
 """
 import time
 
-from ...domain.models import OperationError, fail
+from ...domain.models import fail
 
 # Bounded wait for vCenter to finalize the lease (verify/register) after all
 # bytes have been pushed and HttpNfcLeaseComplete was called. This is a short
