@@ -28,6 +28,9 @@ __pycache__/
 # WorkBuddy 本地工作记忆/日志（仅本机，勿入库）
 .workbuddy/
 
+# superpowers SDD 本地工作区/过程报告（仅本机，勿入库）
+.superpowers/
+
 # Python 打包/构建产物（pyproject.toml 仅供工具读取，无需提交这些）
 build/
 dist/
