@@ -79,8 +79,6 @@ def parse_windows_netsh(text):
         if not target:
             continue
         value = value.strip()
-        if target == "ssid" and normalized == "bssid":
-            continue
         if target in ("channel", "channel_width"):
             match = re.search(r"\d+", value)
             if match:

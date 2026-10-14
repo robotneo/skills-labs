@@ -123,6 +123,20 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
         self.assertEqual(response["result"]["capabilities"], {"tools": {}})
 
+    def test_initialize_server_info_version_matches_manifest(self):
+        manifest_path = os.path.join(ROOT, "manifest.json")
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            component_version = json.load(handle)["version"]
+
+        response = self.request("initialize", {
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"},
+        })
+
+        server_info = response["result"]["serverInfo"]
+        self.assertEqual(server_info["name"], "enterprise-notification-bridge")
+        self.assertEqual(server_info["version"], component_version)
+
     def test_setup_tool_delegates_to_shared_command_service(self):
         response = self.request("tools/call", {
             "name": "setup_notification_dependency",

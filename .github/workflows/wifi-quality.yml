@@ -1,0 +1,64 @@
+name: Wi-Fi quality
+on:
+  push:
+    paths:
+      - 'wifi-health-detector/**'
+      - '.github/workflows/wifi-quality.yml'
+  pull_request:
+    paths:
+      - 'wifi-health-detector/**'
+      - '.github/workflows/wifi-quality.yml'
+permissions:
+  contents: read
+jobs:
+  lint:
+    name: pyflakes (unused imports / undefined names)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pyflakes
+        run: python -m pip install pyflakes
+      - name: Lint detector and bridge
+        working-directory: wifi-health-detector
+        # The shipped software stays zero-third-party; pyflakes is a CI-only
+        # static check (unused imports/names, redefinitions, syntax errors).
+        run: |
+          python -m pyflakes wifi_health tests
+          python -m pyflakes \
+            integrations/enterprise-notification-bridge/notification_bridge \
+            integrations/enterprise-notification-bridge/tests
+  unit-tests:
+    name: Python ${{ matrix.python-version }} unit matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.7', '3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Pure-Python contracts only. Platform/native integration (run.sh, the
+      # JXA/PowerShell engines, real launchers) is exercised by the macOS and
+      # Windows jobs in wifi-runtime-tests.yml; those paths self-skip or fail
+      # on a Linux host with no osascript/PowerShell.
+      - name: Detector pure-Python contracts
+        working-directory: wifi-health-detector
+        run: >-
+          python -m unittest
+          tests.test_core
+          tests.test_windows
+          tests.test_report_parity
+          -v
+      # The bridge suite is platform-independent (platform names are injected;
+      # POSIX-permission cases self-skip off POSIX) and embeds the cross-
+      # deliverable contracts: version single-source (package __version__ ==
+      # manifest == component.yaml, and detector four-location parity) plus the
+      # detector<->bridge report wording parity imported by test_report_parity.
+      - name: Bridge suite with cross-deliverable contract assertions
+        working-directory: wifi-health-detector/integrations/enterprise-notification-bridge
+        run: python -m unittest discover -s tests -v

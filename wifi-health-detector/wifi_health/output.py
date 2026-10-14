@@ -223,14 +223,14 @@ def _reason(reason, language):
     return REASON_ZH.get(reason, reason or "原因未知") if language == "zh" else (reason or "reason unknown")
 
 
-def _display_field(report, section, name, language, mask=False, include_unit=True):
+def _display_field(report, section, name, language, mask=False):
     item = report.get(section, name)
     if not item.available:
         return "—（系统未提供：%s）" % _reason(item.reason, language) if language == "zh" else "— (Unavailable: %s)" % _reason(item.reason, language)
     value = _masked(name, item.value) if mask and name in SENSITIVE_FIELDS else item.value
     if isinstance(value, bool): value = ("是" if value else "否") if language == "zh" else ("Yes" if value else "No")
     shown = _escape(value)
-    return shown + (" " + item.unit if include_unit and item.unit else "")
+    return shown + (" " + item.unit if item.unit else "")
 
 
 def _localized_evidence(item, language):

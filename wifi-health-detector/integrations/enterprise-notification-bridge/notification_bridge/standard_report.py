@@ -26,6 +26,20 @@ EN_CORE_ROW_LABELS = (
     "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
     "Public Latency", "Public Packet Loss", "Security Type",
 )
+# Canonical quality-table column field order. The fixed row labels are derived
+# from FIELD_LABELS so rendering and contract validation share one fact: a
+# label is correct because it is the FIELD_LABELS entry for that field position.
+LOCAL_QUALITY_FIELDS = (
+    "target", "reachable", "latency", "jitter", "packet_loss",
+)
+PUBLIC_QUALITY_FIELDS = (
+    "target", "reachable", "dns_latency", "latency", "jitter", "packet_loss",
+    "download_speed",
+)
+ZH_LOCAL_ROW_LABELS = tuple(FIELD_LABELS_ZH[name] for name in LOCAL_QUALITY_FIELDS)
+EN_LOCAL_ROW_LABELS = tuple(FIELD_LABELS_EN[name] for name in LOCAL_QUALITY_FIELDS)
+ZH_PUBLIC_ROW_LABELS = tuple(FIELD_LABELS_ZH[name] for name in PUBLIC_QUALITY_FIELDS)
+EN_PUBLIC_ROW_LABELS = tuple(FIELD_LABELS_EN[name] for name in PUBLIC_QUALITY_FIELDS)
 ZH_RECOMMENDATIONS = {
     "weak_signal": "靠近接入点、减少遮挡，或增加更近的 Mesh/AP 节点。",
     "moderate_signal": "优化 AP 位置或减少遮挡，以改善视频会议和游戏体验。",
@@ -173,8 +187,8 @@ def render_standard_markdown(report_json, language):
     lines.extend("| %s | %s |" % row for row in _core_rows(report_json, language))
     field_labels = FIELD_LABELS_ZH if zh else FIELD_LABELS_EN
     quality_sections = (
-        ("local_quality", "## 🏠 " + ("本地网络质量" if zh else "Local Network Quality"), ("target", "reachable", "latency", "jitter", "packet_loss")),
-        ("public_quality", "## 🌐 " + ("公网质量" if zh else "Public Network Quality"), ("target", "reachable", "dns_latency", "latency", "jitter", "packet_loss", "download_speed")),
+        ("local_quality", "## 🏠 " + ("本地网络质量" if zh else "Local Network Quality"), LOCAL_QUALITY_FIELDS),
+        ("public_quality", "## 🌐 " + ("公网质量" if zh else "Public Network Quality"), PUBLIC_QUALITY_FIELDS),
     )
     quality_headers = ("参数", "当前值", "状态") if zh else ("Parameter", "Current Value", "Status")
     for section, heading, names in quality_sections:

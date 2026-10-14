@@ -6,15 +6,14 @@ import os
 import re
 from collections import namedtuple
 
-
-MINIMUM_DWS_VERSION = "1.0.63"
-
-_SEMVER_BODY = (
-    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+from .versioning import (
+    MINIMUM_DWS_VERSION,
+    SEMVER as _SEMVER,
+    SEMVER_BODY as _SEMVER_BODY,
+    semver_key as _version_key,
 )
-_SEMVER = re.compile(r"^" + _SEMVER_BODY + r"$")
+
+
 _DWS_TEXT_VERSION = re.compile(
     r"^dws version v(" + _SEMVER_BODY + r") "
     r"\([0-9a-fA-F]{7,40}, "
@@ -325,13 +324,6 @@ def _is_strict_semver(version):
              and identifier.startswith("0"))
         for identifier in prerelease.split(".")
     )
-
-
-def _version_key(version):
-    match = _SEMVER.match(version)
-    core = tuple(int(part) for part in match.groups()[:3])
-    has_prerelease = "-" in version.split("+", 1)[0]
-    return core + (0 if has_prerelease else 1,)
 
 
 def _run(runner, command):

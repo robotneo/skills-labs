@@ -445,7 +445,7 @@ class BridgeService(object):
         except Exception:
             self.ledger.mark_failure(claim, "provider_send_failed", True)
             return ProviderResult("failed", "provider_send_failed", retryable=True)
-        if result.status in SUCCESS_STATUSES or result.status == "sent":
+        if result.status in SUCCESS_STATUSES:
             self.ledger.mark_success(claim, result.data.get("external_id", ""))
             return ProviderResult("sent", data=result.data)
         self.ledger.mark_failure(claim, result.reason, bool(result.retryable))

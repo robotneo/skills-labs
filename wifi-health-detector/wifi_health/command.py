@@ -9,7 +9,6 @@ import signal
 
 class CommandResult(object):
     def __init__(self, args, returncode, stdout="", stderr="", error=""):
-        self.args = args
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr

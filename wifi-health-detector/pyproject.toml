@@ -1,0 +1,36 @@
+# Metadata-only packaging for the Wi-Fi Health Detector Python package.
+#
+# The skill itself ships as a self-contained *directory* and is launched through
+# run.sh / run.bat (engine selection) -> main.py; there is intentionally NO pip
+# install step and NO third-party runtime dependency. This file exists to:
+#   1. make the project metadata (name, supported Python, dependency stance)
+#      machine-readable for tooling and future dependency/vulnerability scans;
+#   2. keep a single version source. The version is read dynamically from
+#      wifi_health/__init__.py and must stay identical across that file,
+#      manifest.json, skill.yaml and SKILL.md (enforced by
+#      integrations/enterprise-notification-bridge/tests/test_agent_contracts.py).
+# Only the importable library is described here; portable engines, launchers and
+# metadata files belong to the directory deliverable, not to a pip wheel.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wifi-health-detector"
+dynamic = ["version"]
+description = "Zero-dependency, cross-platform local Wi-Fi health diagnostics skill (macOS/Windows)."
+requires-python = ">=3.7"
+# Deliberately empty: the runtime uses only the Python standard library and the
+# OS-native engines. Add future runtime requirements here deliberately.
+dependencies = []
+
+[project.optional-dependencies]
+# CI/local development only; never required at runtime.
+dev = ["pyflakes"]
+
+[tool.setuptools]
+packages = ["wifi_health"]
+
+[tool.setuptools.dynamic]
+version = {attr = "wifi_health.__version__"}

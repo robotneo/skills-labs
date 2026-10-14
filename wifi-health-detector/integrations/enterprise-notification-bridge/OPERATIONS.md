@@ -111,7 +111,7 @@ configure recipients before an exact Provider/Profile binding has completed.
 MCP clients use `bind_notification_profile`,
 `configure_notification_recipient`, `deliver_enterprise_report`,
 `retry_enterprise_report`, and `continue_enterprise_notification`; the full
-MCP surface contains six tools including `notification_status`.
+MCP surface contains seven tools including `notification_status`.
 
 The CLI emits exactly one JSON document on stdout and diagnostics on stderr.
 `deliver` and `retry` remain process-successful when delivery itself fails;

@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import json
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -273,10 +274,63 @@ class AgentInstructionContractTests(unittest.TestCase):
     def test_detector_declares_bridge_as_optional_integration(self):
         with open(os.path.join(DETECTOR_ROOT, "manifest.json")) as handle:
             manifest = json.load(handle)
-        self.assertEqual(manifest["version"], "2.6.3")
+        detector_version = manifest["version"]
         self.assertIn("enterprise-notification-bridge", manifest["optional_integrations"])
         skill = _read(os.path.join(DETECTOR_ROOT, "SKILL.md"))
         self.assertIn("enterprise-notification-bridge", skill)
+        # The detector version is a single fact surfaced in four metadata/runtime
+        # locations; assert they all move together instead of pinning one string.
+        skill_yaml = _read(os.path.join(DETECTOR_ROOT, "skill.yaml"))
+        init_py = _read(os.path.join(
+            DETECTOR_ROOT, "wifi_health", "__init__.py"))
+        self.assertRegex(skill_yaml, r"(?m)^version:\s*" + re.escape(detector_version) + r"\s*$")
+        self.assertIn("version: " + detector_version + "\n", skill)
+        self.assertIn('__version__ = "%s"' % detector_version, init_py)
+
+    def test_bridge_version_is_single_fact_across_python_and_metadata(self):
+        with open(os.path.join(ROOT, "manifest.json")) as handle:
+            manifest_version = json.load(handle)["version"]
+        component_yaml = _read(os.path.join(ROOT, "component.yaml"))
+        import notification_bridge as bridge_package
+        from notification_bridge import mcp_server
+        self.assertEqual(bridge_package.__version__, manifest_version)
+        # The MCP serverInfo version is the package version, not a second literal.
+        self.assertEqual(mcp_server.__version__, manifest_version)
+        self.assertRegex(
+            component_yaml,
+            r"(?m)^version:\s*" + re.escape(manifest_version) + r"\s*$",
+        )
+
+    # The metadata-only pyproject.toml files exist for tooling and future
+    # dependency/vulnerability scans. They must not introduce a second version
+    # literal and must keep the zero-third-party runtime stance explicit. Parsed
+    # as text (not tomllib) so the assertion itself runs on Python 3.7.
+    def _assert_metadata_only_pyproject(self, path, package_name, expect_packages):
+        text = _read(path)
+        self.assertRegex(text, r"(?m)^requires-python\s*=\s*\">=3\.7\"\s*$")
+        self.assertRegex(text, r"(?m)^dependencies\s*=\s*\[\]\s*$")
+        self.assertRegex(
+            text,
+            r"(?m)^version\s*=\s*\{\s*attr\s*=\s*\""
+            + re.escape(package_name)
+            + r"\.__version__\"\s*\}\s*$",
+        )
+        for package in expect_packages:
+            self.assertIn('"%s"' % package, text)
+
+    def test_detector_pyproject_shares_version_and_stays_dependency_free(self):
+        self._assert_metadata_only_pyproject(
+            os.path.join(DETECTOR_ROOT, "pyproject.toml"),
+            "wifi_health",
+            ["wifi_health"],
+        )
+
+    def test_bridge_pyproject_shares_version_and_stays_dependency_free(self):
+        self._assert_metadata_only_pyproject(
+            os.path.join(ROOT, "pyproject.toml"),
+            "notification_bridge",
+            ["notification_bridge", "notification_bridge.providers"],
+        )
 
     def test_metadata_describes_python_free_bridge_package(self):
         with open(os.path.join(ROOT, "manifest.json")) as handle:
@@ -301,7 +355,7 @@ class AgentInstructionContractTests(unittest.TestCase):
         positions = [setup.index(item) for item in recipe]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("no login or delivery", setup)
-        self.assertIn("six tools", setup)
+        self.assertIn("seven tools", setup)
         self.assertIn("continue_enterprise_notification", setup)
 
     def test_behavioral_fixture_preserves_envelope_and_never_sends_empty_recipients(self):

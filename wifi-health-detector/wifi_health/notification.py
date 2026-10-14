@@ -116,6 +116,11 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
         with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", suffix=".json", delete=False) as handle:
             envelope_path = handle.name
+            # Envelope contains SSID/MAC/IP; lock it to the owner before writing.
+            # NamedTemporaryFile already creates it 0600 via mkstemp, but enforce
+            # the intent explicitly so a future creation change cannot weaken it.
+            if hasattr(os, "fchmod"):
+                os.fchmod(handle.fileno(), 0o600)
             json.dump(envelope, handle, ensure_ascii=False, separators=(",", ":"))
         delivery_command = command + ["deliver", "--envelope", envelope_path, "--auto"]
         recipient_name = _recipient_name(recipient)

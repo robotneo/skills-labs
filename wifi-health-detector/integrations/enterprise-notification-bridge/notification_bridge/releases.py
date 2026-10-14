@@ -1,24 +1,25 @@
 from __future__ import absolute_import
 
 import json
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib import request as urllib_request
 
-
-# Newest-stable DWS version is always resolved live from the official release
-# APIs; this constant is never the install target. It is only a trusted floor
-# used when every release endpoint is unreachable (offline CI / air-gapped
-# host), so the dependency gate still has a safe, conservative value.
-TRUSTED_VERSION_FLOOR = "1.0.63"
-
-_SEMVER_BODY = (
-    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+from .versioning import (
+    SEMVER as _SEMVER,
+    TRUSTED_VERSION_FLOOR,
+    semver_key as version_key,
 )
-_SEMVER = re.compile(r"^" + _SEMVER_BODY + r"$")
+
+# TRUSTED_VERSION_FLOOR and version_key are re-exported here so existing
+# callers/tests keep importing them from the releases module; both now have a
+# single definition in versioning.
+__all__ = [
+    "TRUSTED_VERSION_FLOOR", "LatestVersionResolver", "default_urlopener",
+    "is_stable_semver", "normalize_tag", "stable_version_from_payload",
+    "version_key",
+]
+
 
 # Official release-metadata endpoints. Gitee answers quickly inside mainland
 # China; GitHub is the authoritative source (its /releases/latest skips betas).
@@ -37,14 +38,6 @@ def is_stable_semver(version):
     if not isinstance(version, str) or _SEMVER.match(version) is None:
         return False
     return "-" not in version and "+" not in version
-
-
-def version_key(version):
-    """Comparable key for a strict semver value (stable sorts above prerelease)."""
-    match = _SEMVER.match(version)
-    core = tuple(int(part) for part in match.groups()[:3])
-    has_prerelease = "-" in version.split("+", 1)[0]
-    return core + (0 if has_prerelease else 1,)
 
 
 def normalize_tag(tag_name):
@@ -106,15 +99,26 @@ class LatestVersionResolver(object):
     """Resolve the newest stable DWS release live, China-first, cached."""
 
     def __init__(self, fetcher=None, cache_ttl=3600, floor=None,
-                 gitee_url=None, github_url=None, clock=None):
+                 gitee_url=None, github_url=None, clock=None, logger=None):
         self._fetcher = fetcher or default_urlopener
         self._cache_ttl = cache_ttl
         self._floor = floor or TRUSTED_VERSION_FLOOR
         self._gitee_url = gitee_url or _GITEE_LATEST
         self._github_url = github_url or _GITHUB_LATEST
         self._clock = clock or time.time
+        # Observability hook: logger(event, **details). Production wires it to
+        # stderr so an ordinary user can see cache hits / which mirror answered
+        # / why the floor was used; tests omit it and get complete silence.
+        self._logger = logger or (lambda event, **details: None)
         self._cached_version = None
         self._cached_at = None
+
+    def _log(self, event, **details):
+        try:
+            self._logger(event, **details)
+        except Exception:
+            # Diagnostics must never affect version resolution.
+            pass
 
     def latest_stable(self, force_refresh=False):
         """Return the newest stable DWS version.
@@ -131,6 +135,7 @@ class LatestVersionResolver(object):
         if (not force_refresh and self._cached_version is not None
                 and self._cached_at is not None
                 and now - self._cached_at < self._cache_ttl):
+            self._log("cache_hit", version=self._cached_version)
             return self._cached_version
 
         candidates = []
@@ -138,32 +143,37 @@ class LatestVersionResolver(object):
         # slower single source, not the sum. Gitee answers fast in China;
         # GitHub is authoritative and prevents a lagging Gitee mirror from
         # pinning an older release. Either source failing never blocks setup.
+        sources = (("gitee", self._gitee_url), ("github", self._github_url))
         with ThreadPoolExecutor(max_workers=2) as executor:
             jobs = {
-                executor.submit(self._fetch, url): url
-                for url in (self._gitee_url, self._github_url)
+                executor.submit(self._fetch, url): name for name, url in sources
             }
-            for future in jobs:
-                try:
-                    version = future.result()
-                except Exception:
-                    version = None
-                if version is not None:
-                    candidates.append(version)
+            for future, name in jobs.items():
+                candidate, error = future.result()
+                if candidate is not None:
+                    candidates.append(candidate)
+                    self._log("source_ok", source=name, version=candidate)
+                else:
+                    self._log("source_failed", source=name)
 
         version = max(candidates, key=version_key) if candidates else None
         if version is None or version_key(version) < version_key(self._floor):
             # No trustworthy answer: reuse cache if possible, else the floor.
             if self._cached_version is not None:
+                self._log(
+                    "stale_cache_fallback", version=self._cached_version
+                )
                 return self._cached_version
+            self._log("floor_fallback", version=self._floor)
             return self._floor
 
         self._cached_version = version
         self._cached_at = now
+        self._log("resolved", version=version, sources=len(candidates))
         return version
 
     def _fetch(self, url):
         try:
-            return stable_version_from_payload(self._fetcher(url))
-        except Exception:
-            return None
+            return stable_version_from_payload(self._fetcher(url)), None
+        except Exception as exc:
+            return None, exc

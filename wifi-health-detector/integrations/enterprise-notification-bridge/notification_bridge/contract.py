@@ -8,7 +8,20 @@ import re
 from collections.abc import Mapping
 
 from .models import Envelope
-from .standard_report import detect_language, normalize_markdown, render_standard_markdown
+# Row labels are owned by standard_report.py (the renderer); the validator
+# imports the same tuples so a label change cannot make validation accept a
+# table the renderer would not produce.
+from .standard_report import (
+    EN_CORE_ROW_LABELS,
+    EN_LOCAL_ROW_LABELS,
+    EN_PUBLIC_ROW_LABELS,
+    ZH_CORE_ROW_LABELS,
+    ZH_LOCAL_ROW_LABELS,
+    ZH_PUBLIC_ROW_LABELS,
+    detect_language,
+    normalize_markdown,
+    render_standard_markdown,
+)
 
 
 ZH_MARKDOWN_TITLE = "# 📶 Wi-Fi 健康报告"
@@ -16,34 +29,12 @@ ZH_MARKDOWN_SECTIONS = (
     "## ⭐ 核心参数", "## 🏠 本地网络质量", "## 🌐 公网质量", "## 🧭 诊断与建议",
 )
 ZH_MARKDOWN_SUBSECTIONS = ("### 主要问题", "### 优化建议")
-ZH_CORE_ROW_LABELS = (
-    "操作系统版本", "芯片架构", "MAC 地址", "Wi-Fi 名称", "无线接口",
-    "Wi-Fi 工作频段", "无线信道", "信道频宽", "信号强度 RSSI", "信噪比 SNR",
-    "发送速率", "接收速率", "网关延迟", "网关抖动", "网关丢包",
-    "公网延迟", "公网丢包", "安全类型",
-)
 EN_MARKDOWN_TITLE = "# 📶 Wi-Fi Health Report"
 EN_MARKDOWN_SECTIONS = (
     "## ⭐ Core Metrics", "## 🏠 Local Network Quality", "## 🌐 Public Network Quality",
     "## 🧭 Diagnostics & Recommendations",
 )
 EN_MARKDOWN_SUBSECTIONS = ("### Main Issues", "### Recommendations")
-EN_CORE_ROW_LABELS = (
-    "Operating System Version", "Chip Architecture", "MAC Address", "Wi-Fi Name",
-    "Wireless Interface", "Wi-Fi Band", "Wireless Channel", "Channel Width",
-    "Signal Strength (RSSI)", "Signal-to-Noise Ratio (SNR)", "Transmit Rate",
-    "Receive Rate", "Gateway Latency", "Gateway Jitter", "Gateway Packet Loss",
-    "Public Latency", "Public Packet Loss", "Security Type",
-)
-ZH_LOCAL_ROW_LABELS = ("测试目标", "可达状态", "平均延迟", "网络抖动", "丢包率")
-EN_LOCAL_ROW_LABELS = ("Target", "Reachable", "Latency", "Jitter", "Packet Loss")
-ZH_PUBLIC_ROW_LABELS = (
-    "测试目标", "可达状态", "DNS 解析延迟", "平均延迟", "网络抖动", "丢包率", "下载速度",
-)
-EN_PUBLIC_ROW_LABELS = (
-    "Target", "Reachable", "DNS Latency", "Latency", "Jitter", "Packet Loss",
-    "Download Speed",
-)
 JSON_SECTIONS = (
     "system", "adapter", "connection", "radio", "link", "ip",
     "local_quality", "public_quality",

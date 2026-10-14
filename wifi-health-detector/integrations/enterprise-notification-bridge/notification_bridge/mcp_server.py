@@ -4,19 +4,11 @@ import json
 import re
 import sys
 
+from . import __version__
 from .cli import CommandError, _json_value, build_commands
 
 
 PROTOCOL_VERSION = "2024-11-05"
-EXPECTED_TOOLS = (
-    "notification_status",
-    "setup_notification_dependency",
-    "bind_notification_profile",
-    "configure_notification_recipient",
-    "deliver_enterprise_report",
-    "retry_enterprise_report",
-    "continue_enterprise_notification",
-)
 
 CAPABILITY_SCHEMA = {
     "type": "object",
@@ -178,6 +170,9 @@ TOOLS = (
     },
 )
 TOOLS_BY_NAME = dict((tool["name"], tool) for tool in TOOLS)
+# Single ordered name list, derived from the authoritative TOOLS schema so the
+# advertised surface and the tool count can never drift apart.
+EXPECTED_TOOLS = tuple(tool["name"] for tool in TOOLS)
 
 
 class RpcError(ValueError):
@@ -215,7 +210,7 @@ def handle_request(request, commands):
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
             "serverInfo": {
-                "name": "enterprise-notification-bridge", "version": "1.1.0",
+                "name": "enterprise-notification-bridge", "version": __version__,
             },
         }
         return None if is_notification else _result(request_id, response)

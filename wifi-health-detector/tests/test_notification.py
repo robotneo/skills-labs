@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -188,6 +189,25 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertNotIn("--to", command)
         self.assertNotIn("--dry-run", command)
         self.assertEqual(result.status, "delivered")
+
+    @unittest.skipUnless(hasattr(os, "fchmod"), "POSIX file modes only")
+    def test_envelope_temp_file_is_owner_only_before_delivery(self):
+        observed = {}
+
+        def fake_run(command, **kwargs):
+            envelope_path = command[command.index("--envelope") + 1]
+            observed["mode"] = stat.S_IMODE(os.stat(envelope_path).st_mode)
+            return self._completed({"status": "delivered"})
+
+        with patch("wifi_health.notification.subprocess.run",
+                   side_effect=fake_run):
+            result = trigger_notification(
+                self.markdown, self.report_json,
+                bridge_command=["/bin/bridge"],
+            )
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(observed["mode"], 0o600)
 
     def test_trigger_passes_clean_recipient_as_to_flag(self):
         captured = {}

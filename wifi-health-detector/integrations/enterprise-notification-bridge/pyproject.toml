@@ -1,0 +1,36 @@
+# Metadata-only packaging for the bundled enterprise notification bridge.
+#
+# The bridge is an *optional, separately deliverable* integration shipped inside
+# the Wi-Fi skill directory. It is invoked via main.py / `python -m
+# notification_bridge.mcp_server`, not installed with pip, and keeps ZERO
+# third-party runtime dependencies (the MCP server is a hand-written JSON-RPC
+# stdio loop; installed providers come from their own official tooling).
+#
+# This file makes that dependency stance explicit for tooling and gives future
+# dependency management / vulnerability scanning a single place to look. The
+# version is read dynamically from notification_bridge/__init__.py and must stay
+# identical to manifest.json and component.yaml (enforced by
+# tests/test_agent_contracts.py).
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enterprise-notification-bridge"
+dynamic = ["version"]
+description = "Optional enterprise IM report delivery bridge (DingTalk/Feishu/WeCom) bundled with the Wi-Fi health skill."
+requires-python = ">=3.7"
+# Deliberately empty: standard library only at runtime. Add any future runtime
+# requirement here explicitly so dependency/vulnerability scans can see it.
+dependencies = []
+
+[project.optional-dependencies]
+# CI/local development only; never required at runtime.
+dev = ["pyflakes"]
+
+[tool.setuptools]
+packages = ["notification_bridge", "notification_bridge.providers"]
+
+[tool.setuptools.dynamic]
+version = {attr = "notification_bridge.__version__"}

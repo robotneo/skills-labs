@@ -1,9 +1,13 @@
 name: Wi-Fi skill security
 on:
   push:
-    paths: ['wifi-health-detector/**', 'scripts/package_wifi_skill.py', '.github/workflows/wifi-security-scan.yml']
+    paths:
+      - 'wifi-health-detector/**'
+      - '.github/workflows/wifi-security-scan.yml'
   pull_request:
-    paths: ['wifi-health-detector/**', 'scripts/package_wifi_skill.py', '.github/workflows/wifi-security-scan.yml']
+    paths:
+      - 'wifi-health-detector/**'
+      - '.github/workflows/wifi-security-scan.yml'
 permissions:
   contents: read
 jobs:
@@ -16,10 +20,35 @@ jobs:
           python-version: '3.12'
       - name: Install scanner
         run: python -m pip install cisco-ai-skill-scanner==2.2.1
-      - name: Build and unpack complete runtime package
+      # Assemble the runtime-only skill tree straight from the Git manifest:
+      # the skill ships as a directory with no build step. git archive only
+      # contains tracked files, so __pycache__/*.pyc and other untracked output
+      # can never enter the package. Tests, development READMEs and symlinks are
+      # then stripped/guarded to match the released deliverable.
+      - name: Assemble runtime-only package from tracked files
         run: |
-          python scripts/package_wifi_skill.py --output dist/wifi-health-detector.zip
-          python -m zipfile -e dist/wifi-health-detector.zip dist/release
+          set -euo pipefail
+          mkdir -p dist/release
+          git archive --format=tar HEAD -- wifi-health-detector \
+            | tar -xf - -C dist/release
+          find dist/release -type d -name tests -prune -exec rm -rf {} +
+          find dist/release -type d -name __pycache__ -prune -exec rm -rf {} +
+          find dist/release -type f -name '*.pyc' -delete
+          find dist/release -type f -name 'README.md' -delete
+          # pyproject.toml is dev/tooling metadata, not part of the directory
+          # deliverable (which is launched via run.sh / main.py, never pip).
+          find dist/release -type f -name 'pyproject.toml' -delete
+          if [ -n "$(find dist/release -type l -print -quit)" ]; then
+            echo '::error::symlinks are not allowed in the released skill'
+            exit 1
+          fi
+          test -f dist/release/wifi-health-detector/manifest.json
+          test -x dist/release/wifi-health-detector/run.sh
+          echo '--- assembled runtime tree ---'
+          (cd dist/release && find wifi-health-detector -type f | sort)
+      - name: Build downloadable zip artifact
+        working-directory: dist/release
+        run: zip -r -X ../wifi-health-detector.zip wifi-health-detector
       - name: Scan with Nacos default options
         run: |
           set -o pipefail

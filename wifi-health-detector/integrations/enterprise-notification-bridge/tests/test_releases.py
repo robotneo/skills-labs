@@ -212,5 +212,65 @@ class LatestVersionResolverTests(unittest.TestCase):
         self.assertEqual(TRUSTED_VERSION_FLOOR, MINIMUM_DWS_VERSION)
 
 
+class LatestVersionResolverLoggingTests(unittest.TestCase):
+    def _resolver(self, fetcher, events, **kwargs):
+        return LatestVersionResolver(
+            fetcher=fetcher, floor="1.0.63",
+            gitee_url=GITEE, github_url=GITHUB, clock=FakeClock(),
+            logger=lambda event, **details: events.append((event, details)),
+            **kwargs,
+        )
+
+    def test_logs_resolved_and_per_source_events(self):
+        events = []
+        fetcher = RecordingFetcher({
+            GITEE: release("v1.0.60"), GITHUB: release("v1.0.63"),
+        })
+        resolver = self._resolver(fetcher, events)
+        resolver.latest_stable()
+        names = [name for name, _ in events]
+        self.assertIn("resolved", names)
+        ok_sources = {details["source"] for name, details in events
+                      if name == "source_ok"}
+        self.assertEqual(ok_sources, {"gitee", "github"})
+        resolved = [details for name, details in events
+                    if name == "resolved"][0]
+        self.assertEqual(resolved["version"], "1.0.63")
+        self.assertEqual(resolved["sources"], 2)
+
+    def test_logs_source_failed_then_floor_fallback(self):
+        events = []
+        fetcher = RecordingFetcher(failing_urls=(GITEE, GITHUB))
+        resolver = self._resolver(fetcher, events)
+        resolver.latest_stable()
+        names = [name for name, _ in events]
+        self.assertEqual(names.count("source_failed"), 2)
+        self.assertEqual(names[-1], "floor_fallback")
+        self.assertEqual(events[-1][1]["version"], "1.0.63")
+
+    def test_logs_cache_hit_on_second_call(self):
+        events = []
+        fetcher = RecordingFetcher({
+            GITEE: release("v1.0.63"), GITHUB: release("v1.0.63"),
+        })
+        resolver = self._resolver(fetcher, events)
+        resolver.latest_stable()
+        resolver.latest_stable()
+        self.assertEqual(events[-1], ("cache_hit", {"version": "1.0.63"}))
+
+    def test_logger_exception_never_breaks_resolution(self):
+        def broken_logger(event, **details):
+            raise RuntimeError("logger broken")
+        fetcher = RecordingFetcher({
+            GITEE: release("v1.0.63"), GITHUB: release("v1.0.63"),
+        })
+        resolver = LatestVersionResolver(
+            fetcher=fetcher, floor="1.0.63",
+            gitee_url=GITEE, github_url=GITHUB, clock=FakeClock(),
+            logger=broken_logger,
+        )
+        self.assertEqual(resolver.latest_stable(), "1.0.63")
+
+
 if __name__ == "__main__":
     unittest.main()

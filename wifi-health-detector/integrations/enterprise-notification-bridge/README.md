@@ -139,7 +139,7 @@ run.sh retry --report-id <64-character-report-id> --capabilities /path/to/capabi
 ```
 
 Start the line-oriented MCP server with `python3 -m
-notification_bridge.mcp_server`. It exposes six tools, including
+notification_bridge.mcp_server`. It exposes seven tools, including
 `continue_enterprise_notification`; every tool delegates to the same durable
 service used by the CLI.
 
