@@ -78,6 +78,26 @@ def compute_report_id(markdown, report_json):
     return hashlib.sha256(payload).hexdigest()
 
 
+# Standalone HTML reports are self-contained; bound them tightly so an
+# envelope cannot smuggle an arbitrarily large or network-linked attachment.
+MAX_HTML_ATTACHMENT_CHARS = 200_000
+
+
+def _validate_html_attachment(value):
+    if not isinstance(value, str) or not value:
+        raise ContractError("report html must be non-empty text")
+    if len(value) > MAX_HTML_ATTACHMENT_CHARS:
+        raise ContractError("report html is too large")
+    head = value.lstrip()[:400].lower()
+    if "<!doctype html" not in head and "<html" not in head:
+        raise ContractError("report html must be a standalone html document")
+    # The attachment must render offline and must not exfiltrate data: forbid
+    # external resource references and active scripts. All styling is inline.
+    lowered = value.lower()
+    if "<script" in lowered or "http://" in lowered or "https://" in lowered:
+        raise ContractError("report html must be self-contained and script-free")
+
+
 def build_envelope(markdown, report_json, summary_text, summary_mode, detector_version):
     if isinstance(markdown, str):
         markdown = normalize_markdown(markdown)
@@ -99,8 +119,16 @@ def validate_envelope(envelope):
     _validate_detector(envelope.detector)
     _validate_ai_summary(envelope.ai_summary)
     report = envelope.report
-    if not isinstance(report, Mapping) or set(report) != set(("markdown", "json")):
+    # ``markdown`` + ``json`` remain the identity-bearing canonical payload
+    # (report_id hashes only those two). An optional standalone ``html``
+    # document may ride along so the bridge can deliver a fixed-layout file
+    # attachment; it never participates in identity or de-duplication.
+    if not isinstance(report, Mapping) or not {"markdown", "json"} <= set(report):
         raise ContractError("report must contain markdown and json")
+    if not set(report) <= {"markdown", "json", "html"}:
+        raise ContractError("report contains an unknown field")
+    if "html" in report:
+        _validate_html_attachment(report["html"])
     if (not isinstance(envelope.report_id, str)
             or not REPORT_ID_PATTERN.match(envelope.report_id)):
         raise ContractError("report_id must be a SHA-256 identifier")

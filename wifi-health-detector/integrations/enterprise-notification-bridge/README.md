@@ -46,9 +46,16 @@ run.sh deliver --envelope /path/to/validated-envelope.json --auto [--to <display
 
 `--auto` bootstraps the DingTalk/DWS channel in memory only. It discovers and
 version-verifies DWS (`>=1.0.63`), reuses the current authorized Profile,
-resolves a recipient by display name, and sends the report Markdown as a direct
-message. Nothing is written to the saved channel configuration, and Feishu /
-WeCom are never touched by this path.
+resolves a recipient by display name, and delivers the report. When the
+envelope carries a standalone HTML document (the detector default since
+2.6.7/1.0.6), it is uploaded as a **file message** via
+`chat +messages-send --as user --user-query <name> --msg-type file` from a
+private 0700 outbox (0600 attachment, relative basename only, deleted right
+after upload). Opening the file in each DingTalk client's system webview gives
+an identical fixed layout instead of relying on the clients' divergent
+Markdown rendering. Envelopes without HTML still fall back to the legacy
+`chat +dm` Markdown direct message. Nothing is written to the saved channel
+configuration, and Feishu / WeCom are never touched by this path.
 
 Recipient priority is:
 

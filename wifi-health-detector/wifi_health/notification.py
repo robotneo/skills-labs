@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 
 from . import __version__
+from .html_report import render_html
 from .output import (
     ReportContractError,
     validate_standard_json,
@@ -104,7 +105,8 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
     language = _report_language(markdown)
     validate_standard_report(markdown, language)
     validate_standard_json(report_json)
-    envelope = _build_envelope(markdown, report_json, summary)
+    html_attachment = _render_html_attachment(report_json, language)
+    envelope = _build_envelope(markdown, report_json, summary, html_attachment)
     envelope_path = None
     try:
         try:
@@ -165,7 +167,20 @@ def _recipient_name(recipient):
     return name
 
 
-def _build_envelope(markdown, report_json, summary):
+def _render_html_attachment(report_json, language):
+    """Render the standalone, fixed-layout HTML carried as a DingTalk file.
+
+    Failure is non-fatal: returning an empty string makes the bridge fall back
+    to the legacy Markdown direct message, so a renderer problem never blocks
+    notification delivery or the on-screen report.
+    """
+    try:
+        return render_html(report_json, language)
+    except Exception:
+        return ""
+
+
+def _build_envelope(markdown, report_json, summary, html_attachment=""):
     checked_at = report_json["sections"]["system"]["checked_at"]["value"]
     _validate_generated_at(checked_at)
     if summary is None:
@@ -173,15 +188,18 @@ def _build_envelope(markdown, report_json, summary):
     if not isinstance(summary, str):
         raise ReportContractError("notification summary must be text")
     summary_mode = "host_agent" if summary else "deterministic"
+    report = {
+        "markdown": markdown,
+        "json": copy.deepcopy(report_json),
+    }
+    if html_attachment:
+        report["html"] = html_attachment
     return {
         "schema_version": "1",
         "report_id": _report_id(markdown, report_json),
         "generated_at": checked_at,
         "detector": {"name": "wifi-health-detector", "version": __version__},
-        "report": {
-            "markdown": markdown,
-            "json": copy.deepcopy(report_json),
-        },
+        "report": report,
         "ai_summary": {"mode": summary_mode, "text": summary},
     }
 

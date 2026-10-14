@@ -1,7 +1,10 @@
 from __future__ import absolute_import
 
 import json
+import os
 import re
+import shutil
+import tempfile
 
 from .base import Provider, ProviderResult
 
@@ -10,6 +13,15 @@ from .base import Provider, ProviderResult
 # short; this only guards a pathological payload without truncating content
 # silently (an over-long report is reported as a send failure instead).
 _MAX_MESSAGE_CHARS = 12000
+
+# The standalone HTML attachment is delivered as a file message. DWS only
+# accepts a safe path relative to the process working directory, so the report
+# is materialized inside a private outbox (the runner's cwd) and referenced by
+# its basename. Bounds mirror the bridge contract's attachment limit.
+_MAX_HTML_CHARS = 200_000
+_ATTACHMENT_PREFIX = "wifi-report-"
+_ATTACHMENT_NAME = "health"
+_ATTACHMENT_SUFFIX = ".html"
 
 
 def report_message_text(envelope):
@@ -22,6 +34,18 @@ def report_message_text(envelope):
         report = {}
     markdown = report.get("markdown", "") if isinstance(report, dict) else ""
     return markdown if isinstance(markdown, str) else ""
+
+
+def report_html_text(envelope):
+    """Return the optional standalone HTML report, or '' when absent."""
+    if hasattr(envelope, "report"):
+        report = envelope.report
+    elif isinstance(envelope, dict):
+        report = envelope.get("report", {})
+    else:
+        report = {}
+    html_text = report.get("html", "") if isinstance(report, dict) else ""
+    return html_text if isinstance(html_text, str) else ""
 
 
 def clean_recipient_name(value):
@@ -212,10 +236,25 @@ class DwsProvider(Provider):
         )
 
     def send_report(self, profile, recipient, envelope, dry_run=False):
-        """Send the validated report Markdown to one resolved display name."""
+        """Send one report to a resolved display name.
+
+        Preferred transport (cross-client consistency): when the envelope
+        carries a standalone, fixed-layout HTML document, deliver it as a
+        ``file`` message via ``chat +messages-send``; DingTalk opens the
+        attachment in the system webview/browser, so the layout is identical
+        across desktop/mobile/web instead of depending on each client's
+        Markdown rendering. When no HTML is present (older producers), fall
+        back to the legacy Markdown ``chat +dm`` bubble.
+        """
         name = clean_recipient_name(recipient)
         if not name:
             return ProviderResult("failed", "recipient_not_resolved")
+        html_text = report_html_text(envelope)
+        if html_text:
+            return self._send_html_report(name, html_text, dry_run)
+        return self._send_markdown_report(name, envelope, dry_run)
+
+    def _send_markdown_report(self, name, envelope, dry_run):
         content = report_message_text(envelope)
         if not content or len(content) > _MAX_MESSAGE_CHARS:
             return ProviderResult("failed", "provider_send_failed")
@@ -227,8 +266,41 @@ class DwsProvider(Provider):
             command.append("--dry-run")
         else:
             command.append("--yes")
-        result = self._dm_command(command)
-        return result
+        return self._dm_command(command)
+
+    def _send_html_report(self, name, html_text, dry_run):
+        if len(html_text) > _MAX_HTML_CHARS:
+            return ProviderResult("failed", "provider_send_failed")
+        # DWS accepts only a safe path relative to the process working
+        # directory. Materialize the attachment in a private 0700 outbox, run
+        # the upload with that directory as cwd, and remove it immediately
+        # afterwards (a dry-run never reads the network either).
+        outbox = tempfile.mkdtemp(prefix="dws-outbox-")
+        try:
+            os.chmod(outbox, 0o700)
+            file_name = _ATTACHMENT_PREFIX + _ATTACHMENT_NAME + _ATTACHMENT_SUFFIX
+            file_path = os.path.join(outbox, file_name)
+            descriptor = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(html_text)
+            except Exception:
+                return ProviderResult("failed", "provider_send_failed")
+            command = [
+                self.executable, "chat", "+messages-send",
+                "--as", "user", "--user-query", name,
+                "--msg-type", "file", "--file", file_name,
+                "--format", "json",
+            ]
+            if dry_run:
+                command.append("--dry-run")
+            else:
+                command.append("--yes")
+            return self._dm_command(command, cwd=outbox)
+        except OSError:
+            return ProviderResult("failed", "provider_send_failed", retryable=True)
+        finally:
+            shutil.rmtree(outbox, ignore_errors=True)
 
     def host_send_report(self, profile, recipient, envelope):
         """Legacy host-mediated send request (continuation path)."""
@@ -240,12 +312,15 @@ class DwsProvider(Provider):
             },
         )
 
-    def _dm_command(self, command):
-        # ``chat +dm`` is not a stable JSON-formatted leaf; the binary still
-        # emits a JSON envelope for both execution and dry-run, plus a JSON
-        # resolution-error object for ambiguous names. Parse it explicitly and
+    def _dm_command(self, command, cwd=None):
+        # Both ``chat +dm`` and ``chat +messages-send`` emit a JSON envelope
+        # for execution and dry-run, plus a JSON resolution-error object for
+        # ambiguous names. These shortcut leaves are not stable JSON-format
+        # probes, so they bypass the help gate. Parse them explicitly and
         # never trust the process exit code alone (dry-run ambiguity exits 0).
-        error, returncode, stdout, stderr = self._run(command)
+        # A file send runs with ``cwd`` pointing at the private outbox because
+        # DWS only accepts a path relative to the process working directory.
+        error, returncode, stdout, stderr = self._run(command, cwd=cwd)
         if error is not None:
             return ProviderResult("unavailable", "dws_unavailable", retryable=True)
         payload = _parse_json_object(stdout)
@@ -309,10 +384,20 @@ class DwsProvider(Provider):
         self._json_help_confirmed.add(leaf_command)
         return None
 
-    def _run(self, command):
+    def _run(self, command, cwd=None):
         try:
             if hasattr(self._runner, "run"):
-                output = self._runner.run(list(command))
+                # The file-attachment send passes a private outbox as cwd; the
+                # injected runner accepts it as a keyword. Plain calls keep the
+                # historical single-argument invocation so existing hosts/fakes
+                # that only model read commands stay compatible.
+                if cwd is not None:
+                    try:
+                        output = self._runner.run(list(command), cwd=cwd)
+                    except TypeError:
+                        output = self._runner.run(list(command))
+                else:
+                    output = self._runner.run(list(command))
             else:
                 output = self._runner(list(command))
         except (OSError, RuntimeError) as error:

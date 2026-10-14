@@ -1,6 +1,6 @@
 ---
 name: wifi-health-detector
-version: 2.6.6
+version: 2.6.7
 description: 检测当前 macOS 或 Windows 电脑的 Wi-Fi 信号、干扰、连接速率、IP、网关及公网质量，生成中文诊断报告。报告默认经内置企业通知组件的钉钉 DWS 通道自动发送给默认接收人，可用 --no-notify 关闭、--notify-to 指定收件人、--notify-dry-run 预览。
 compatibility: macOS 10.12+ or Windows 10/11; Python 3.10+, native JXA/PowerShell 5.1. Requires local command execution and network access for connectivity tests and optional notifications.
 ---
@@ -27,7 +27,7 @@ compatibility: macOS 10.12+ or Windows 10/11; Python 3.10+, native JXA/PowerShel
 
 默认读取本机无线接口并测试默认网关、阿里公共 DNS `223.5.5.5` / `223.6.6.6`、腾讯公共 DNS `119.29.29.29`，解析 `www.baidu.com` 和 `www.taobao.com`。这些探测不上传诊断报告。`--speedtest` 从 `https://speed.cloudflare.com` 下载最多约 1 MB 测试数据。
 
-Python 引擎在报告生成后默认尝试**无人值守自动发送**：经内置桥的钉钉 DWS 通道把报告作为单聊 Markdown 发给默认接收人「杨华」。对话中用 `--notify-to NAME`（或环境变量 `ENTERPRISE_NOTIFICATION_RECIPIENT`，CLI 优先）指定他人时，指定人优先；指定名为空、查无此人或命中多个同名候选时，不挑选候选、一律回退发给杨华。收件人只接受普通显示名，不接受 `corpid:userid` 或 openDingTalkId 等稳定标识。本机没有可用 DWS、未登录或存在多个 Profile 时安静跳过；DWS 已安装但低于 `1.0.63` 时提示 `dws_upgrade_required`。飞书、企业微信本期不配置默认接收人、不触发自动发送。发送前过信封完整性闸门并按操作账本去重；`--notify-dry-run` 只预览不发送、不记账本。报告可包含 SSID、MAC、IP 和网络质量，分享前遵循用户的脱敏选择。
+Python 引擎在报告生成后默认尝试**无人值守自动发送**：经内置桥的钉钉 DWS 通道把报告渲染成**一份固定排版、样式全内联、自包含的 HTML 文件**，以单聊**文件消息**发给默认接收人「杨华」。钉钉各端（桌面/移动/网页）在系统 webview/浏览器中打开该附件，布局与配色完全一致，规避了 Markdown 气泡在不同钉钉版本渲染不一的问题；旧版未携带 HTML 的信封仍回退为单聊 Markdown。对话中用 `--notify-to NAME`（或环境变量 `ENTERPRISE_NOTIFICATION_RECIPIENT`，CLI 优先）指定他人时，指定人优先；指定名为空、查无此人或命中多个同名候选时，不挑选候选、一律回退发给杨华。收件人只接受普通显示名，不接受 `corpid:userid` 或 openDingTalkId 等稳定标识。本机没有可用 DWS、未登录或存在多个 Profile 时安静跳过；DWS 已安装但低于 `1.0.63` 时提示 `dws_upgrade_required`。飞书、企业微信本期不配置默认接收人、不触发自动发送。发送前过信封完整性闸门并按操作账本去重；`--notify-dry-run` 只预览不发送、不记账本。报告可包含 SSID、MAC、IP 和网络质量，分享前遵循用户的脱敏选择。
 
 仅在用户要求配置钉钉通知、宿主原生能力不足且用户授权安装时，内置组件才获取官方 DWS 安装器：默认从 Gitee 官方镜像下载，失败再回退 GitHub 官方源；用户显式选择中国镜像时仅用 Gitee。安装器从所选源拉取该源提供的最新稳定版（不锁 commit/脚本摘要，按发布校验和核对）。是否通过安装/发送门控只看内置静态可信地板 `1.0.63`，**不**实时联网比对"最新 release"：这样即便 Gitee 镜像短暂落后于 GitHub（如 GitHub 已发 1.0.64、Gitee 仍为 1.0.63），国内通道装到的 1.0.63 也能立即通过、不会被误判 `dws_upgrade_required`。安装与登录不属于普通 Wi-Fi 检测步骤。
 
@@ -35,7 +35,7 @@ Python 引擎在报告生成后默认尝试**无人值守自动发送**：经内
 
 成功时将程序 stdout 原样作为检测报告，不从 JSON/CSV 重建或改写；stderr 中的运行诊断单独处理。失败时报告错误，不编造检测结果。默认中文，`--language en` 输出英文。
 
-Markdown 固定五部分：Wi-Fi 健康报告、核心参数、本地网络质量、公网质量、诊断与建议。核心参数保留 18 行，缺失数据保留原因，不因缺失扣分。接收速率不能用发送速率推测；实际信道频宽不能用网卡最大配置替代。Bridge 以 JSON 确定性重建 Markdown 并检查一致性。
+Markdown 固定五部分：Wi-Fi 健康报告、核心参数、本地网络质量、公网质量、诊断与建议。核心参数保留 18 行，缺失数据保留原因，不因缺失扣分。接收速率不能用发送速率推测；实际信道频宽不能用网卡最大配置替代。Bridge 以 JSON 确定性重建 Markdown 并检查一致性。`wifi_health/html_report.py` 从同一份 schema 2.0 JSON 确定性渲染 HTML 附件（标准库零依赖、样式全内联、所有动态值 HTML 转义、无外链/脚本），保证钉钉各端打开一致。
 
 ## 企业通知（随包提供）
 
@@ -43,7 +43,7 @@ Markdown 固定五部分：Wi-Fi 健康报告、核心参数、本地网络质�
 
 检测报告有两条发送路径：
 
-1. **自动直发（默认，CLI/检测使用）**：检测器调用 `deliver --envelope <path> --auto`，内存引导 dingtalk/dws-cli 与当前 Profile，不落盘配置、不改动飞书/企微。收件人优先级为 `--notify-to NAME` → 环境变量 `ENTERPRISE_NOTIFICATION_RECIPIENT` → 内置默认「杨华」；指定人无法唯一定位时回退杨华，绝不从多个同名候选中猜选。`--dry-run` 只预览不发送。
+1. **自动直发（默认，CLI/检测使用）**：检测器调用 `deliver --envelope <path> --auto`，内存引导 dingtalk/dws-cli 与当前 Profile，不落盘配置、不改动飞书/企微。发送形态为 DWS `chat +messages-send --as user --user-query <显示名> --msg-type file`：把自包含 HTML 报告写进一个 0700 私有 outbox（附件 0600、仅以相对基名引用防路径穿越），以该 outbox 为工作目录上传后立即删除；信封未携带 HTML 时回退旧的 `chat +dm` Markdown 气泡。收件人优先级为 `--notify-to NAME` → 环境变量 `ENTERPRISE_NOTIFICATION_RECIPIENT` → 内置默认「杨华」；指定人无法唯一定位时回退杨华，绝不从多个同名候选中猜选。`--dry-run` 只预览不发送。
 2. **已配置渠道续步（MCP/显式配置使用）**：用户启用渠道、选定 Provider 返回的组织并明确收件人后，经宿主续步完成选人/发送，保持原有 `bind`/`recipients`/`continue` 工作流不变。
 
 原生 Provider 优先，只有钉钉可回退 DWS；自动直发只走 DWS，不猜测组织、收件人或宿主能力。已有有效授权可复用，关闭偏好需保留。外部 Bridge 路径仅来自用户或可信宿主配置：显式 `ENTERPRISE_NOTIFICATION_BRIDGE` JSON 命令数组、内置组件、旧版相邻目录依次查找。

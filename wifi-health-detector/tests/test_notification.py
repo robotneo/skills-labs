@@ -674,7 +674,11 @@ class NotificationIntegrationTests(unittest.TestCase):
             handle.write("  *'profile list --format json'*)\n")
             handle.write("    echo '{\"profiles\":[{\"profile\":\"corp:user\"}]}' ;;\n")
             handle.write("  *'contact +lookup --name '*) echo '{\"ok\":true,\"data\":{\"profile\":{\"orgUserId\":\"201454\",\"orgUserName\":\"杨华\"}}}' ;;\n")
-            handle.write("  *'chat +dm'*'--yes'*) echo '{\"ok\":true,\"executed\":true,\"data\":{\"messageId\":\"m-1\"}}' ;;\n")
+            handle.write("  *'chat +messages-send'*'--yes'*)\n")
+            handle.write("    case \"$*\" in *'--msg-type file --file '*) ;; *) exit 1;; esac\n")
+            handle.write("    f=\"\"; p=\"\"; for a do if [ \"$p\" = \"--file\" ]; then f=\"$a\"; fi; p=\"$a\"; done\n")
+            handle.write("    [ -n \"$f\" ] && [ -f \"$f\" ] || exit 1\n")
+            handle.write("    echo '{\"ok\":true,\"executed\":true,\"data\":{\"messageId\":\"m-1\"}}' ;;\n")
             handle.write("  *) exit 1 ;;\n")
             handle.write("esac\n")
         os.chmod(dws_path, 0o755)
@@ -721,6 +725,11 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(len(observed), 1)
         self.assertEqual(observed[0]["report"]["markdown"], expected)
         self.assertEqual(observed[0]["report"]["json"], json.loads(render_json(report)))
+        # The report also rides along as a standalone, self-contained HTML
+        # attachment so the layout is identical across DingTalk clients.
+        html_attachment = observed[0]["report"].get("html", "")
+        self.assertTrue(html_attachment.lstrip().lower().startswith("<!doctype html"))
+        self.assertNotIn("<script", html_attachment.lower())
         self.assertEqual(observed[0]["ai_summary"]["mode"], "deterministic")
         # The detector invokes the unattended auto path, and a report with no
         # conversation recipient is delivered to the built-in default 杨华.
@@ -730,8 +739,11 @@ class NotificationIntegrationTests(unittest.TestCase):
         with open(dws_log, encoding="utf-8") as handle:
             dws_log_text = handle.read()
         self.assertIn("contact +lookup --name 杨华", dws_log_text)
-        self.assertIn("chat +dm", dws_log_text)
+        # The HTML report is delivered as a file message, not a Markdown bubble.
+        self.assertIn("chat +messages-send", dws_log_text)
+        self.assertIn("--msg-type file", dws_log_text)
         self.assertIn("--yes", dws_log_text)
+        self.assertNotIn("chat +dm", dws_log_text)
 
         # A failing auth probe stays non-blocking and never reaches lookup/send.
         # Reset the captured dws command log to isolate the failure run.

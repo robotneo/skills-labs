@@ -45,11 +45,11 @@ class SubprocessRunner(object):
     def __init__(self, run_process=None):
         self._run_process = run_process or subprocess.run
 
-    def run(self, command):
+    def run(self, command, cwd=None):
         return self._run_process(
             list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
-            check=False, shell=False, timeout=30,
+            check=False, shell=False, cwd=cwd, timeout=30,
         )
 
 

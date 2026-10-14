@@ -312,6 +312,68 @@ class ContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(ContractError, "ai_summary"):
                     validate_envelope(envelope)
 
+    # --- Optional standalone HTML attachment (file delivery) ---
+
+    def _envelope_with_html(self, html_text):
+        from notification_bridge.models import Envelope
+        base = valid_envelope().to_dict()
+        report = dict(base["report"])
+        report["html"] = html_text
+        return Envelope(
+            base["report_id"], base["generated_at"], base["detector"],
+            report, base["ai_summary"], base["schema_version"],
+        )
+
+    def test_accepts_self_contained_html_attachment(self):
+        document = (
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            "<style>body{color:#111}</style></head><body>报告</body></html>"
+        )
+        validate_envelope(self._envelope_with_html(document))  # no raise
+
+    def test_html_attachment_does_not_change_report_identity(self):
+        base = valid_envelope().to_dict()
+        first = self._envelope_with_html("<!doctype html><html><body>a</body></html>")
+        second = self._envelope_with_html("<!doctype html><html><body>b</body></html>")
+        self.assertEqual(first.report_id, base["report_id"])
+        self.assertEqual(first.report_id, second.report_id)
+
+    def test_rejects_html_with_script_or_external_url(self):
+        cases = (
+            '<!doctype html><html><body><script>alert(1)</script></body></html>',
+            '<!doctype html><html><body><img src="https://x/a.png"></body></html>',
+            '<!doctype html><html><body><link href="http://x/c.css"></body></html>',
+        )
+        for document in cases:
+            with self.subTest(document=document):
+                with self.assertRaisesRegex(ContractError, "self-contained"):
+                    validate_envelope(self._envelope_with_html(document))
+
+    def test_rejects_non_html_empty_and_oversized_attachment(self):
+        not_a_document = "just markdown text, no doctype"
+        empty = ""
+        oversized = "<!doctype html><html><body>" + ("x" * 200_001) + "</body></html>"
+        for document, match in (
+            (not_a_document, "standalone html"),
+            (empty, "non-empty"),
+            (oversized, "too large"),
+        ):
+            with self.subTest(match=match):
+                with self.assertRaisesRegex(ContractError, match):
+                    validate_envelope(self._envelope_with_html(document))
+
+    def test_rejects_unknown_report_field(self):
+        from notification_bridge.models import Envelope
+        base = valid_envelope().to_dict()
+        report = dict(base["report"])
+        report["unknown"] = 1
+        envelope = Envelope(
+            base["report_id"], base["generated_at"], base["detector"],
+            report, base["ai_summary"], base["schema_version"],
+        )
+        with self.assertRaisesRegex(ContractError, "unknown field"):
+            validate_envelope(envelope)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -428,6 +428,97 @@ class DwsProviderTests(unittest.TestCase):
                         "DfoZCRADiS6Pl43m8iiNbBE2pwJQHNUsBsN", None):
             self.assertEqual(clean_recipient_name(invalid), "")
 
+    # --- Standalone HTML attachment path: chat +messages-send file ---
+
+    def _html_envelope(self, html_text="<!doctype html><html><body>报告</body></html>"):
+        return {"report": {"markdown": "# WiFi 报告", "html": html_text}}
+
+    def test_send_html_report_uploads_file_from_private_outbox(self):
+        runner = FileSendRunner(
+            '{"ok":true,"executed":true,"data":{"messageId":"m-9"}}'
+        )
+        result = DwsProvider(runner).send_report(
+            "corp:user", "杨华", self._html_envelope("<html>精排报告</html>"),
+            dry_run=False,
+        )
+
+        self.assertEqual(result.status, "sent")
+        self.assertEqual(result.data["external_id"], "m-9")
+        command, cwd = runner.calls[-1]
+        # Identity-independent command vector; the file is a basename relative
+        # to the private outbox so it cannot traverse outside cwd.
+        self.assertEqual(
+            command,
+            ["dws", "chat", "+messages-send", "--as", "user",
+             "--user-query", "杨华", "--msg-type", "file",
+             "--file", "wifi-report-health.html", "--format", "json", "--yes"],
+        )
+        self.assertTrue(os.path.basename(cwd).startswith("dws-outbox-"))
+        # The runner saw the attachment materialized with exact content and the
+        # outbox is removed immediately after the send.
+        self.assertTrue(runner.last_file_existed)
+        self.assertIn("精排报告", runner.last_file_content)
+        self.assertFalse(os.path.exists(cwd))
+
+    def test_send_html_report_dry_run_uses_preview_flag_and_cleans_outbox(self):
+        runner = FileSendRunner('{"dry_run":true,"executed":false}')
+        result = DwsProvider(runner).send_report(
+            "corp:user", "杨华", self._html_envelope(), dry_run=True
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.reason, "dry_run")
+        command, cwd = runner.calls[-1]
+        self.assertIn("--dry-run", command)
+        self.assertNotIn("--yes", command)
+        self.assertFalse(os.path.exists(cwd))
+
+    def test_send_html_report_rejects_oversized_attachment_without_running(self):
+        runner = FileSendRunner("{}")
+        from notification_bridge.providers.dws import _MAX_HTML_CHARS
+        result = DwsProvider(runner).send_report(
+            "corp:user", "杨华", self._html_envelope("x" * (_MAX_HTML_CHARS + 1))
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "provider_send_failed")
+        self.assertEqual(runner.calls, [])
+
+    def test_envelope_without_html_still_uses_legacy_markdown_dm(self):
+        runner = FileSendRunner("{}")
+        DwsProvider(runner).send_report(
+            "corp:user", "杨华", {"report": {"markdown": "# WiFi 报告"}}
+        )
+        command, cwd = runner.calls[-1]
+        self.assertIn("+dm", command)
+        self.assertNotIn("+messages-send", command)
+        self.assertIsNone(cwd)
+
+
+class FileSendRunner(object):
+    """Records (command, cwd) and inspects the attachment while it exists."""
+
+    def __init__(self, stdout):
+        self.stdout = stdout
+        self.calls = []
+        self.last_file_existed = False
+        self.last_file_content = ""
+
+    def run(self, command, cwd=None):
+        self.calls.append((list(command), cwd))
+        if "--file" in command:
+            name = command[command.index("--file") + 1]
+            path = os.path.join(cwd, name)
+            self.last_file_existed = os.path.exists(path)
+            with open(path, "r", encoding="utf-8") as handle:
+                self.last_file_content = handle.read()
+
+        class _Result(object):
+            returncode = 0
+            stderr = ""
+            def __init__(self, text):
+                self.stdout = text
+        return _Result(self.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
