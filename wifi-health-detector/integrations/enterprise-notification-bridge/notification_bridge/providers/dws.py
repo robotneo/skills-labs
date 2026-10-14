@@ -126,6 +126,21 @@ class DwsProvider(Provider):
         self.executable = executable
         self._json_help_confirmed = set()
 
+    def prime_json_help(self, leaves):
+        """Pre-mark leaves whose ``--help`` JSON support was already verified.
+
+        Dependency verification probes leaf help before this provider runs. On a
+        cold DWS install the first leaf invocation builds an MCP discovery
+        cache, so sharing the verified result here avoids re-launching the same
+        probes (and contending for that cache lock) during one send. Each leaf
+        is given relative to the current executable, matching the key that
+        ``_confirm_json_format`` builds, e.g. ("auth", "status").
+        """
+        for leaf in leaves or ():
+            self._json_help_confirmed.add(
+                (self.executable,) + tuple(leaf)
+            )
+
     def capabilities(self):
         result = self._run([self.executable, "--help"])
         if result[0] is not None or result[1] != 0:

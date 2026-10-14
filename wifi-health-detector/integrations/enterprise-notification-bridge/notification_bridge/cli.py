@@ -18,7 +18,6 @@ from .ledger import DeliveryLedger
 from .installer import execute_dws_install
 from .models import Envelope
 from .providers.dws import DwsProvider
-from .releases import LatestVersionResolver
 from .service import BridgeService, DeliveryBatchResult
 
 
@@ -327,31 +326,6 @@ def production_providers(run_process=None):
     return [DwsProvider(SubprocessRunner(run_process))]
 
 
-# Human-readable, stderr-only diagnostics for live release resolution. Only
-# coarse events/versions are emitted (no exception text or proxy URLs) so the
-# stdout JSON contract stays intact and no environment detail leaks.
-_RELEASE_LOG_MESSAGES = {
-    "cache_hit": "using cached latest DWS release {version}",
-    "source_ok": "{source} reports latest DWS release {version}",
-    "source_failed": "{source} release lookup failed",
-    "stale_cache_fallback":
-        "release endpoints unavailable; reusing cached DWS release {version}",
-    "floor_fallback":
-        "release endpoints unavailable; using trusted DWS floor {version}",
-    "resolved": "resolved latest DWS release {version} from {sources} source(s)",
-}
-
-
-def _release_logger(event, **details):
-    template = _RELEASE_LOG_MESSAGES.get(event)
-    if template is None:
-        return
-    try:
-        sys.stderr.write("[release] " + template.format(**details) + "\n")
-    except Exception:
-        pass
-
-
 def build_commands(config_path=None, ledger_path=None, state_path=None,
                    providers=None, run_process=None):
     config_path = config_path or os.environ.get(
@@ -370,10 +344,9 @@ def build_commands(config_path=None, ledger_path=None, state_path=None,
         config, provider_list, DeliveryLedger(ledger_path),
         state_store=PendingStateStore(state_path),
         persist_config=lambda: save_config(config, config_path),
-        # Resolve the newest-stable DWS release live from the official APIs
-        # (China-first) rather than trusting a version baked into this code.
-        version_resolver=LatestVersionResolver(
-            logger=_release_logger).latest_stable,
+        # Dependency gating uses the static trusted floor, so no live
+        # latest-release resolver is wired in here. The installer still
+        # downloads the newest build its chosen official source offers.
         dependency_installer=lambda plan, approved: execute_dws_install(
             plan, approved, UrlDownloader(), InstallerProcessRunner()
         ),

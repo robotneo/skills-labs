@@ -97,8 +97,13 @@ The official installer resolves the newest stable release dynamically (no
 pinned commit or bundled script digest) and verifies each release binary
 against the checksum published in that release. The default candidate order is
 the official Gitee mirror first with official GitHub fallback; `--china-mirror`
-restricts execution to Gitee only. Installation is limited to the CLI, not
-additional agent skills. See
+restricts execution to Gitee only. Pass/fail dependency gating is intentionally
+decoupled from that newest-release lookup: setup and unattended send only
+require the static trusted floor (`1.0.63`), so a China-channel install that
+gets the floor build while Gitee briefly lags GitHub is accepted immediately
+instead of being rejected as `dws_upgrade_required`, and neither setup nor
+delivery makes a network call just to gate the version. Installation is
+limited to the CLI, not additional agent skills. See
 [setup details](references/DWS-SETUP.md). Setup requests DingTalk login or QR/device
 authorization only on first use or after authorization expires. `--device-login`
 (MCP: `deviceLogin`) uses the documented `dws auth login --device` flow when a

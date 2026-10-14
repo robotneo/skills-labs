@@ -1,6 +1,6 @@
 ---
 name: wifi-health-detector
-version: 2.6.5
+version: 2.6.6
 description: 检测当前 macOS 或 Windows 电脑的 Wi-Fi 信号、干扰、连接速率、IP、网关及公网质量，生成中文诊断报告。报告默认经内置企业通知组件的钉钉 DWS 通道自动发送给默认接收人，可用 --no-notify 关闭、--notify-to 指定收件人、--notify-dry-run 预览。
 compatibility: macOS 10.12+ or Windows 10/11; Python 3.10+, native JXA/PowerShell 5.1. Requires local command execution and network access for connectivity tests and optional notifications.
 ---
@@ -29,7 +29,7 @@ compatibility: macOS 10.12+ or Windows 10/11; Python 3.10+, native JXA/PowerShel
 
 Python 引擎在报告生成后默认尝试**无人值守自动发送**：经内置桥的钉钉 DWS 通道把报告作为单聊 Markdown 发给默认接收人「杨华」。对话中用 `--notify-to NAME`（或环境变量 `ENTERPRISE_NOTIFICATION_RECIPIENT`，CLI 优先）指定他人时，指定人优先；指定名为空、查无此人或命中多个同名候选时，不挑选候选、一律回退发给杨华。收件人只接受普通显示名，不接受 `corpid:userid` 或 openDingTalkId 等稳定标识。本机没有可用 DWS、未登录或存在多个 Profile 时安静跳过；DWS 已安装但低于 `1.0.63` 时提示 `dws_upgrade_required`。飞书、企业微信本期不配置默认接收人、不触发自动发送。发送前过信封完整性闸门并按操作账本去重；`--notify-dry-run` 只预览不发送、不记账本。报告可包含 SSID、MAC、IP 和网络质量，分享前遵循用户的脱敏选择。
 
-仅在用户要求配置钉钉通知、宿主原生能力不足且用户授权安装时，内置组件才获取官方 DWS 安装器：默认从 Gitee 官方镜像下载，失败再回退 GitHub 官方源；用户显式选择中国镜像时仅用 Gitee。安装目标版本通过 Gitee/GitHub release API 实时解析最新稳定版（双源并行、取最高稳定 tag，过滤预发布/draft），全部端点不可达时才回退内置最低可信版本。安装与登录不属于普通 Wi-Fi 检测步骤。
+仅在用户要求配置钉钉通知、宿主原生能力不足且用户授权安装时，内置组件才获取官方 DWS 安装器：默认从 Gitee 官方镜像下载，失败再回退 GitHub 官方源；用户显式选择中国镜像时仅用 Gitee。安装器从所选源拉取该源提供的最新稳定版（不锁 commit/脚本摘要，按发布校验和核对）。是否通过安装/发送门控只看内置静态可信地板 `1.0.63`，**不**实时联网比对"最新 release"：这样即便 Gitee 镜像短暂落后于 GitHub（如 GitHub 已发 1.0.64、Gitee 仍为 1.0.63），国内通道装到的 1.0.63 也能立即通过、不会被误判 `dws_upgrade_required`。安装与登录不属于普通 Wi-Fi 检测步骤。
 
 ## 报告
 

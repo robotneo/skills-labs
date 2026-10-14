@@ -179,6 +179,47 @@ class DwsProviderTests(unittest.TestCase):
 
         self.assertEqual(runner.calls, [help_command, business_command, business_command])
 
+    def test_primed_leaf_help_skips_the_cold_start_probe(self):
+        # Dependency verification already probed this leaf serially (which
+        # warms a cold DWS MCP discovery cache). Priming the provider must make
+        # the first business call skip its own leaf --help, so a single send no
+        # longer relaunches the same expensive probe and contends on the lock.
+        executable = "/verified/bin/dws"
+        business_command = [
+            executable, "auth", "status", "--format", "json"
+        ]
+        runner = FakeRunner("", responses={
+            tuple(business_command): CommandResult('{"authenticated":true}'),
+        })
+        provider = DwsProvider(runner, executable=executable)
+        provider.prime_json_help([("auth", "status")])
+
+        result = provider.auth_status()
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(runner.calls, [business_command])
+
+    def test_primed_help_is_keyed_to_the_current_executable(self):
+        # Retargeting the provider after priming (a freshly installed path)
+        # must not reuse stale confirmations keyed to a different executable.
+        runner = FakeRunner("", responses={
+            ("dws", "profile", "list", "--help"): CommandResult("--format json"),
+            ("dws", "profile", "list", "--format", "json"): CommandResult(
+                '{"profiles":[{"profile":"corp:user"}]}'
+            ),
+        })
+        provider = DwsProvider(runner, executable="/old/dws")
+        provider.prime_json_help([("profile", "list")])
+        provider.executable = "dws"
+
+        result = provider.list_profiles()
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(runner.calls, [
+            ["dws", "profile", "list", "--help"],
+            ["dws", "profile", "list", "--format", "json"],
+        ])
+
     def test_capability_discovery_never_attempts_login(self):
         runner = FakeRunner("DWS command line help")
 

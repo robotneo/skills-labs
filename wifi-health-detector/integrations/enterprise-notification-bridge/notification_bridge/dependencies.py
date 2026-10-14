@@ -101,6 +101,12 @@ def verify_dws(executable, runner, minimum_version=None):
         ("auth", "login"),
         ("profile", "list"),
     )
+    # These probes stay strictly serial on purpose. A freshly installed DWS
+    # builds an MCP service-discovery cache on the first leaf ``--help``;
+    # launching probes concurrently makes them contend for that lock. Serial
+    # execution lets the first probe build the cache and the rest resolve from
+    # the warmed cache. The service layer primes the sending provider with
+    # these same results so they are never launched twice within one send.
     for leaf in required_leaves:
         result = _run(runner, [executable] + list(leaf) + ["--help"])
         if (result is None or result[0] != 0

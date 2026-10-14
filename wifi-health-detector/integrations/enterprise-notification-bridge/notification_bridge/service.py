@@ -83,13 +83,16 @@ class BridgeService(object):
         self._dependency_verifier = dependency_verifier or verify_dws
         self._dependency_installer = dependency_installer
         self._dependency_plan = dependency_plan or plan_dws_install
-        # Default resolver stays offline (returns the trusted floor) so unit
-        # tests and embedded use never touch the network. The production CLI
-        # injects a live LatestVersionResolver here.
-        self._version_resolver = version_resolver or (
-            lambda: MINIMUM_DWS_VERSION
-        )
-        self._resolved_minimum_version = None
+        # Dependency gating ALWAYS uses the static trusted floor, on both the
+        # setup and the unattended send paths. A live "newest release" lookup
+        # must never act as a pass/fail gate: the Gitee mirror can lag the
+        # authoritative GitHub release (e.g. GitHub ships 1.0.64 while Gitee is
+        # still on 1.0.63), and gating on the newest tag would reject a freshly
+        # installed, fully-capable floor binary right after a China-channel
+        # install. The installer already pulls the newest build its source
+        # offers; the floor certifies only the verified minimum capability set.
+        # ``version_resolver`` is retained for API compatibility but is never
+        # used for gating anymore.
         self._dependency_environment = dict(
             os.environ if environment is None else environment
         )
@@ -97,16 +100,8 @@ class BridgeService(object):
         self._dependency_which = which or shutil.which
 
     def _minimum_version(self):
-        """Resolve (and memoize) the newest-stable DWS minimum version."""
-        if self._resolved_minimum_version is None:
-            try:
-                value = self._version_resolver()
-            except Exception:
-                value = MINIMUM_DWS_VERSION
-            if not isinstance(value, str) or not value:
-                value = MINIMUM_DWS_VERSION
-            self._resolved_minimum_version = value
-        return self._resolved_minimum_version
+        """Static trusted floor used by every dependency gate (never live)."""
+        return MINIMUM_DWS_VERSION
 
     def setup_dependency(self, platform, provider="auto", capabilities=None,
                          install_dws=False, china_mirror=False,
@@ -323,11 +318,17 @@ class BridgeService(object):
                     and provider.name == DEFAULT_DINGTALK_PROVIDER):
                 runner = getattr(provider, "_runner", None)
                 if isinstance(provider, DwsProvider) and runner is not None:
-                    # Reuse the host-controlled runner but target the exact
-                    # executable that discovery/verification approved.
-                    selected = DwsProvider(
-                        runner, executable=executable or provider.executable
-                    )
+                    # Reuse the single host-controlled provider together with
+                    # the leaf-help confirmations primed by dependency
+                    # verification, merely retargeting it to the approved
+                    # executable. Constructing a fresh DwsProvider here would
+                    # drop the warm help cache and, on a cold DWS install,
+                    # relaunch the same leaf probes and contend on the MCP
+                    # discovery-cache lock.
+                    target = executable or provider.executable
+                    if target and target != provider.executable:
+                        provider.executable = target
+                    selected = provider
                 else:
                     selected = provider
                 if selected.capabilities().get("available"):
@@ -344,8 +345,9 @@ class BridgeService(object):
         The send path deliberately gates on the static trusted floor rather
         than the live latest-release resolver: delivering a report must not
         touch the network, and a DWS already at the trusted floor must stay
-        usable even when a newer release has just been published. Only setup
-        consults the dynamic resolver.
+        usable even when a newer release has just been published. The verified
+        leaf set is also primed into the reused DWS provider so the cold-start
+        help probes are not launched twice within one send.
         """
         minimum_version = MINIMUM_DWS_VERSION
         discovered = self._dependency_discoverer(
@@ -361,10 +363,35 @@ class BridgeService(object):
         else:
             verified = discovered
         if verified.status == "ready" and verified.executable:
+            self._prime_auto_dws_provider(verified.executable)
             return verified.executable
         if verified.reason == "dws_upgrade_required":
             return ProviderResult("skipped", "dws_upgrade_required")
         return ProviderResult("skipped", "notification_disabled")
+
+    def _prime_auto_dws_provider(self, executable):
+        """Share dependency-verified leaf help confirmations with the provider.
+
+        ``verify_dws`` already probed these leaves serially, which warms a cold
+        DWS MCP service-discovery cache. Pre-marking them on the reused
+        provider means the subsequent send only pays the single unavoidable
+        root ``--help`` capability probe and never relaunches the verified leaf
+        probes (which previously doubled the cold-start process count and could
+        exceed the host notification timeout under cache-lock contention).
+        """
+        from .providers.dws import DwsProvider
+        verified_leaves = (
+            ("auth", "status"),
+            ("auth", "login"),
+            ("profile", "list"),
+        )
+        for provider in self.providers:
+            if (provider.platform == DEFAULT_DINGTALK_PLATFORM
+                    and provider.name == DEFAULT_DINGTALK_PROVIDER
+                    and isinstance(provider, DwsProvider)):
+                provider.executable = executable
+                provider.prime_json_help(verified_leaves)
+                return
 
     def _authorized_profile(self, provider):
         if provider is None:

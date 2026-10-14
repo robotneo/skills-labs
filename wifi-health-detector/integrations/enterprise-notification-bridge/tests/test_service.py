@@ -559,6 +559,136 @@ class DeliverAutoTests(unittest.TestCase):
         )
         self.assertEqual(self.ledger.get(key)["state"], "succeeded")
 
+    def test_cold_start_does_not_relaunch_verified_leaf_help(self):
+        # P1: a freshly installed DWS builds an MCP discovery cache on the
+        # first leaf ``--help``. The verified leaves must be primed onto the
+        # reused provider so one auto-send runs each leaf help at most once,
+        # instead of verify probing them and then a brand-new provider probing
+        # the same leaves again (contending on the cold cache lock).
+        from notification_bridge.dependencies import verify_dws
+        from notification_bridge.providers.dws import DwsProvider
+
+        # verify_dws only gates on a real, executable path; the recording
+        # runner below intercepts every actual invocation, so this dummy just
+        # satisfies the reference check.
+        executable = os.path.join(self.directory.name, "dws")
+        with open(executable, "w") as handle:
+            handle.write("#!/bin/sh\n")
+        os.chmod(executable, 0o755)
+
+        class Proc(object):
+            def __init__(self, stdout, returncode=0):
+                self.stdout = stdout
+                self.stderr = ""
+                self.returncode = returncode
+
+        class RecordingRunner(object):
+            def __init__(self):
+                self.calls = []
+
+            def run(self, command):
+                command = list(command)
+                self.calls.append(command)
+                tail = command[1:]
+                if tail == ["--version", "--format", "json"]:
+                    return Proc('{"version":"1.0.63"}')
+                if tail == ["--help"]:
+                    return Proc("DWS command line")
+                if command[-1] == "--help":
+                    return Proc(
+                        'Options:\n  --format <format>  Output format '
+                        '[allowed values: "text", "json"]'
+                    )
+                if tail[:2] == ["auth", "status"]:
+                    return Proc('{"authenticated":true}')
+                if tail[:2] == ["profile", "list"]:
+                    return Proc('{"profiles":[{"profile":"corp:user"}]}')
+                if command[1:3] == ["contact", "+lookup"]:
+                    return Proc(
+                        '{"ok":true,"data":{"profile":{"orgUserName":"杨华"}}}'
+                    )
+                if command[1:3] == ["chat", "+dm"]:
+                    return Proc(
+                        '{"ok":true,"executed":true,"data":{"messageId":"m-1"}}'
+                    )
+                return Proc("", returncode=1)
+
+        runner = RecordingRunner()
+        provider = DwsProvider(runner, executable=executable)
+
+        def discoverer(environment, platform, which, minimum_version=None):
+            return _Dependency("discovered", "dependency_discovered",
+                               executable)
+
+        service = BridgeService(
+            BridgeConfig(enabled=True, channels=[]), [provider], self.ledger,
+            state_store=self.state_store,
+            dependency_discoverer=discoverer,
+            dependency_verifier=verify_dws,
+            environment={"DWS_EXE": executable},
+            platform_name="darwin",
+            which=lambda name: executable if name == "dws" else None,
+        )
+
+        result = service.deliver_auto(make_envelope())
+
+        self.assertEqual(result.status, "delivered")
+        help_calls = [c for c in runner.calls if c[-1] == "--help"]
+        # Root capability help + the three serially verified leaves + the one
+        # send-only contact leaf; auth status / profile list appear only once.
+        self.assertEqual(
+            [c for c in help_calls
+             if c[1:3] == ["auth", "status"]].count(
+                [executable, "auth", "status", "--help"]),
+            1,
+        )
+        self.assertEqual(
+            [c for c in help_calls
+             if c[1:3] == ["profile", "list"]].count(
+                [executable, "profile", "list", "--help"]),
+            1,
+        )
+        # Exactly: root help, 3 verified leaves, 1 contact lookup leaf.
+        self.assertEqual(len(help_calls), 5)
+
+    def test_setup_gate_also_uses_static_floor_when_latest_is_newer(self):
+        # P0: setup dependency gating must not chase the live newest release.
+        # When Gitee only offers the floor (1.0.63) while GitHub already
+        # shipped 1.0.64, a China-channel install must still pass verification
+        # rather than be rejected as dws_upgrade_required.
+        from notification_bridge.versioning import MINIMUM_DWS_VERSION
+
+        seen_minimums = []
+
+        def discoverer(environment, platform, which, minimum_version=None):
+            seen_minimums.append(minimum_version)
+            return _Dependency("discovered", "dependency_discovered")
+
+        def verifier(executable, runner, minimum_version=None):
+            seen_minimums.append(minimum_version)
+            return _Dependency("ready", "dependency_ready", executable)
+
+        resolver_calls = []
+
+        service = BridgeService(
+            BridgeConfig(enabled=True, channels=[]), [self.provider], self.ledger,
+            state_store=self.state_store,
+            dependency_discoverer=discoverer,
+            dependency_verifier=verifier,
+            dependency_installer=lambda plan, approved: None,
+            dependency_plan=lambda platform, mirror: object(),
+            environment={"DWS_EXE": "/verified/bin/dws"},
+            platform_name="darwin",
+            which=lambda name: "/verified/bin/dws" if name == "dws" else None,
+            version_resolver=lambda: resolver_calls.append(1) or "1.0.64",
+        )
+
+        service.setup_dependency("dingtalk", "dws-cli")
+
+        self.assertTrue(seen_minimums)
+        self.assertTrue(all(m == MINIMUM_DWS_VERSION for m in seen_minimums))
+        self.assertEqual(resolver_calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

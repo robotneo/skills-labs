@@ -93,10 +93,14 @@ approval. The official Gitee mirror is the default first candidate (it exports
 `DWS_GITEE_REPO`), with official GitHub as fallback; `--china-mirror` restricts
 execution to Gitee only, which is recommended in mainland China because the
 GitHub release-asset CDN is frequently unreachable there even though the
-lighter `releases/latest` probe succeeds. The newest stable release is resolved
-dynamically (no pinned commit) and each binary is verified against the
-checksum published in that release; a failed checksum stops installation. It
-installs the CLI only, without additional agent skills. See
+lighter `releases/latest` probe succeeds. The installer pulls the newest build
+its selected source offers (no pinned commit) and each binary is verified
+against the checksum published in that release; a failed checksum stops
+installation. Dependency gating is decoupled from that newest-release lookup:
+both setup and unattended send require only the static trusted floor
+(`1.0.63`), so a Gitee mirror briefly lagging GitHub never rejects a freshly
+installed floor build as `dws_upgrade_required`, and gating makes no network
+call. It installs the CLI only, without additional agent skills. See
 [DWS setup](references/DWS-SETUP.md) for source, integrity checks, time limits,
 and measured Gitee download timings. Never substitute an unofficial mirror or
 pipe a download directly into a shell.

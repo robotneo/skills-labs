@@ -7,7 +7,7 @@ from .models import Envelope
 # diagnostics). The packaging metadata (manifest.json, component.yaml) must match
 # this value; test_agent_contracts enforces the three-way equality so they can
 # never silently drift again.
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 __all__ = [
     "ContractError", "Envelope", "__version__",
