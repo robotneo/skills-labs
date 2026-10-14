@@ -1,6 +1,6 @@
 ---
 name: wifi-health-detector
-version: 2.6.4
+version: 2.6.5
 description: 检测当前 macOS 或 Windows 电脑的 Wi-Fi 信号、干扰、连接速率、IP、网关及公网质量，生成中文诊断报告。报告默认经内置企业通知组件的钉钉 DWS 通道自动发送给默认接收人，可用 --no-notify 关闭、--notify-to 指定收件人、--notify-dry-run 预览。
 compatibility: macOS 10.12+ or Windows 10/11; Python 3.7+, native JXA/PowerShell 5.1. Requires local command execution and network access for connectivity tests and optional notifications.
 ---

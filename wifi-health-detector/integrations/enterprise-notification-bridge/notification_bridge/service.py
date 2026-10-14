@@ -340,8 +340,14 @@ class BridgeService(object):
         The auto path never installs or upgrades unattended. A machine with no
         usable DWS is treated as "notification disabled" (quiet, non-blocking);
         an installed DWS below the floor is surfaced so the host can upgrade.
+
+        The send path deliberately gates on the static trusted floor rather
+        than the live latest-release resolver: delivering a report must not
+        touch the network, and a DWS already at the trusted floor must stay
+        usable even when a newer release has just been published. Only setup
+        consults the dynamic resolver.
         """
-        minimum_version = self._minimum_version()
+        minimum_version = MINIMUM_DWS_VERSION
         discovered = self._dependency_discoverer(
             self._dependency_environment, self._dependency_platform,
             self._dependency_which, minimum_version,

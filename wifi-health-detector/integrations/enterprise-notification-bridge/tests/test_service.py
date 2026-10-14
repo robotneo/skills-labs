@@ -359,6 +359,52 @@ class DeliverAutoTests(unittest.TestCase):
         self.assertEqual(self.provider.send_calls, [])
         self.assertEqual(self.provider.auth_calls, [])
 
+    def test_auto_gate_uses_static_floor_even_when_latest_is_newer(self):
+        # The send path must gate on the static trusted floor, never on the
+        # live latest-release resolver. Otherwise a DWS already at the trusted
+        # floor would be silently skipped as soon as a newer release ships, and
+        # delivering a report would touch the network.
+        from notification_bridge.versioning import MINIMUM_DWS_VERSION
+
+        class FloorRecording(ReadyDependency):
+            def __init__(self):
+                self.discover_minimums = []
+                self.verify_minimums = []
+
+            def discoverer(self, environment, platform, which,
+                           minimum_version=None):
+                self.discover_minimums.append(minimum_version)
+                return _Dependency("discovered", "dependency_discovered")
+
+            def verifier(self, executable, runner, minimum_version=None):
+                self.verify_minimums.append(minimum_version)
+                return _Dependency("ready", "dependency_ready", executable)
+
+        resolver_calls = []
+
+        def resolver():
+            resolver_calls.append(1)
+            return "1.0.64"
+
+        dependency = FloorRecording()
+        service = BridgeService(
+            BridgeConfig(enabled=True, channels=[]), [self.provider], self.ledger,
+            state_store=self.state_store,
+            dependency_discoverer=dependency.discoverer,
+            dependency_verifier=dependency.verifier,
+            environment={"DWS_EXE": "/verified/bin/dws"},
+            platform_name="darwin",
+            which=lambda name: "/verified/bin/dws" if name == "dws" else None,
+            version_resolver=resolver,
+        )
+
+        result = service.deliver_auto(make_envelope())
+
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(dependency.discover_minimums, [MINIMUM_DWS_VERSION])
+        self.assertEqual(dependency.verify_minimums, [MINIMUM_DWS_VERSION])
+        self.assertEqual(resolver_calls, [])
+
     def test_explicit_unique_recipient_overrides_default(self):
         envelope = make_envelope()
         self.provider.resolve_routes = {

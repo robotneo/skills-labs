@@ -15,7 +15,7 @@ if ROOT not in sys.path:
 
 from wifi_health.diagnose import diagnose
 from wifi_health.cli import apply_quality, build_parser
-from wifi_health.collectors import MacCollector
+from wifi_health.collectors import AIRPORT, MacCollector
 from wifi_health.command import CommandResult
 from wifi_health.models import Field, Report, unavailable
 from wifi_health.output import (
@@ -134,6 +134,40 @@ default            fe80::%utun3       UGcIg           utun3
 
 
 class CollectorTests(unittest.TestCase):
+    PROFILER_WITH_RADIO = """
+          Card Type: Wi-Fi  (0x14E4, 0x170)
+          Country Code: CN
+          Current Network Information:
+            Office:
+              PHY Mode: 802.11ac
+              BSSID: 38:f9:d3:5f:4b:77
+              Channel: 153 (5GHz, 20MHz)
+              Security: WPA2 Personal
+              Signal / Noise: -61 dBm / -98 dBm
+              Transmit Rate: 174
+              MCS Index: 8
+        """
+
+    def _collect_wireless(self, profiler, airport_stdout="", airport_exists=True):
+        class Runner(object):
+            def __init__(self):
+                self.calls = []
+
+            def run(self, args, timeout=None):
+                self.calls.append(list(args))
+                if args[:2] == ["/usr/sbin/system_profiler", "SPAirPortDataType"]:
+                    return CommandResult(args, 0, stdout=profiler)
+                if args[:2] == [AIRPORT, "-I"]:
+                    return CommandResult(args, 0, stdout=airport_stdout)
+                return CommandResult(args, 0, stdout="")
+
+        runner = Runner()
+        report = Report.empty()
+        with patch("wifi_health.collectors.os.path.exists",
+                   side_effect=lambda path: airport_exists if path == AIRPORT else True):
+            MacCollector(runner)._collect_wireless(report)
+        return runner, report
+
     def test_macos_uses_full_profiler_for_width_and_explains_missing_rx_rate(self):
         profiler = """
           Current Network Information:
@@ -163,6 +197,36 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(report.get("connection", "channel_width").value, 20)
         self.assertEqual(report.get("connection", "ssid").value, "Office")
         self.assertEqual(report.get("link", "rx_rate").reason, "macOS does not expose the current receive PHY rate")
+
+    def test_profiler_supplies_radio_metrics_when_airport_is_silent(self):
+        # Newer macOS (e.g. Sequoia): the deprecated airport -I emits nothing,
+        # but system_profiler still exposes Signal/Noise and Transmit Rate.
+        _, report = self._collect_wireless(self.PROFILER_WITH_RADIO, airport_stdout="", airport_exists=True)
+        self.assertEqual(report.get("radio", "rssi").value, -61)
+        self.assertEqual(report.get("radio", "noise").value, -98)
+        self.assertEqual(report.get("radio", "snr").value, 37)
+        self.assertEqual(report.get("link", "tx_rate").value, 174.0)
+        self.assertEqual(report.get("link", "mcs").value, 8)
+        self.assertEqual(report.get("radio", "signal_level").value, "good")
+        # The receive PHY rate is genuinely not exposed by macOS.
+        self.assertEqual(report.get("link", "rx_rate").availability, "unavailable")
+
+    def test_live_airport_overrides_profiler_radio_metrics(self):
+        airport = """
+             agrCtlRSSI: -55
+             agrCtlNoise: -90
+             lastTxRate: 433
+             MCS: 9
+             SSID: Office
+             channel: 153
+        """
+        _, report = self._collect_wireless(self.PROFILER_WITH_RADIO, airport_stdout=airport, airport_exists=True)
+        # Live association values win over the profiler snapshot.
+        self.assertEqual(report.get("radio", "rssi").value, -55)
+        self.assertEqual(report.get("radio", "noise").value, -90)
+        self.assertEqual(report.get("radio", "snr").value, 35)
+        self.assertEqual(report.get("link", "tx_rate").value, 433.0)
+        self.assertEqual(report.get("link", "mcs").value, 9)
 
 
 class DiagnosisTests(unittest.TestCase):

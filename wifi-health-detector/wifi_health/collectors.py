@@ -126,6 +126,10 @@ class MacCollector(object):
                     same, adjacent = _count_macos_channels(scan.stdout, values["channel"])
                     values["same_channel_networks"] = same
                     values["adjacent_channel_networks"] = adjacent
+        # SNR is always rssi - noise, regardless of which source supplied them
+        # (live airport or the system_profiler backfill on newer macOS).
+        if values.get("rssi") is not None and values.get("noise") is not None:
+            values["snr"] = values["rssi"] - values["noise"]
         if not values:
             wdutil = self.runner.run(["/usr/bin/wdutil", "info"])
             reason = wdutil.stderr or wdutil.stdout or "wireless details unavailable"
@@ -247,6 +251,21 @@ def _parse_macos_profiler(text):
             channel = re.search(r"(\d+)", channel_text.group(1)); width = re.search(r"(\d+)MHz", channel_text.group(1), re.I)
             if channel: values["channel"] = int(channel.group(1)); values["band"] = band_for_channel(values["channel"])
             if width: values["channel_width"] = int(width.group(1))
+        # Radio metrics are also present in the current-network block. The
+        # deprecated `airport -I` is the preferred live source, but it returns
+        # nothing on newer macOS (e.g. Sequoia); system_profiler stays available
+        # there, so parse it as the backfill. Mirrors the native JXA engine.
+        signal_noise = re.search(
+            r"Signal\s*/\s*Noise:\s*(-?\d+)\s*dBm\s*/\s*(-?\d+)", body, re.I)
+        if signal_noise:
+            values["rssi"] = int(signal_noise.group(1))
+            values["noise"] = int(signal_noise.group(2))
+        transmit_rate = re.search(r"Transmit Rate:\s*([\d.]+)", body, re.I)
+        if transmit_rate:
+            values["tx_rate"] = float(transmit_rate.group(1))
+        mcs = re.search(r"MCS Index:\s*(-?\d+)", body, re.I)
+        if mcs:
+            values["mcs"] = int(mcs.group(1))
     return values
 
 
