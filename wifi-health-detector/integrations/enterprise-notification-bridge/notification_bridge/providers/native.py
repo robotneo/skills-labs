@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 try:
     from collections.abc import Mapping
-except ImportError:  # pragma: no cover - Python 3.7 compatibility
+except ImportError:  # pragma: no cover - legacy stdlib alias (pre-3.3 layout)
     from collections import Mapping
 
 from .base import Provider, ProviderResult

@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 name = "enterprise-notification-bridge"
 dynamic = ["version"]
 description = "Optional enterprise IM report delivery bridge (DingTalk/Feishu/WeCom) bundled with the Wi-Fi health skill."
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 # Deliberately empty: standard library only at runtime. Add any future runtime
 # requirement here explicitly so dependency/vulnerability scans can see it.
 dependencies = []

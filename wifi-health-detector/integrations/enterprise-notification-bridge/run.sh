@@ -10,7 +10,7 @@ python_works() {
   candidate=$1
   [ -n "$candidate" ] || return 1
   [ -x "$candidate" ] || command -v "$candidate" >/dev/null 2>&1 || return 1
-  version_output=$("$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 3)' 2>&1)
+  version_output=$("$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 3)' 2>&1)
   status=$?
   if [ "$status" -eq 0 ]; then
     PYTHON_BIN=$candidate
@@ -40,7 +40,7 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 if [ -z "$PYTHON_BIN" ]; then
-  echo "Enterprise Notification Bridge cannot start: a working Python 3.7+ runtime was not found." >&2
+  echo "Enterprise Notification Bridge cannot start: a working Python 3.10+ runtime was not found." >&2
   if [ -n "$PYTHON_ERROR" ]; then echo "$PYTHON_ERROR" >&2; fi
   exit 3
 fi

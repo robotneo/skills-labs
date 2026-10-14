@@ -15,10 +15,10 @@ $PythonPrefix = @()
 foreach ($Candidate in $Candidates) {
     try {
         if ($Candidate -eq "py") {
-            & py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,7) else 3)" 2>$null
+            & py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 3)" 2>$null
             if ($LASTEXITCODE -eq 0) { $PythonCommand = "py"; $PythonPrefix = @("-3"); break }
         } else {
-            & $Candidate -c "import sys; raise SystemExit(0 if sys.version_info >= (3,7) else 3)" 2>$null
+            & $Candidate -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 3)" 2>$null
             if ($LASTEXITCODE -eq 0) { $PythonCommand = $Candidate; break }
         }
     } catch {
@@ -27,7 +27,7 @@ foreach ($Candidate in $Candidates) {
 }
 
 if (-not $PythonCommand) {
-    Write-Error "Enterprise Notification Bridge cannot start: a working Python 3.7+ runtime was not found."
+    Write-Error "Enterprise Notification Bridge cannot start: a working Python 3.10+ runtime was not found."
     exit 3
 }
 

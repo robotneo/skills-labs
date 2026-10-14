@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 name = "wifi-health-detector"
 dynamic = ["version"]
 description = "Zero-dependency, cross-platform local Wi-Fi health diagnostics skill (macOS/Windows)."
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 # Deliberately empty: the runtime uses only the Python standard library and the
 # OS-native engines. Add future runtime requirements here deliberately.
 dependencies = []

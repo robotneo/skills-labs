@@ -21,7 +21,7 @@ probe() {
 python_works() {
   [ -n "$1" ] || return 1
   command -v "$1" >/dev/null 2>&1 || [ -x "$1" ] || return 1
-  probe "$1" -c 'import sys, json, ctypes, concurrent.futures; raise SystemExit(0 if sys.version_info >= (3,7) else 3)'
+  probe "$1" -c 'import sys, json, ctypes, concurrent.futures; raise SystemExit(0 if sys.version_info >= (3,10) else 3)'
 }
 if [ "$ENGINE" = auto ] || [ "$ENGINE" = python ]; then
   for candidate in "${WIFI_HEALTH_PYTHON:-}" "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}" "${CONDA_PREFIX:+$CONDA_PREFIX/bin/python}" python3 python /opt/homebrew/bin/python3 /usr/local/bin/python3 "$HOME"/.pyenv/shims/python3 /Library/Frameworks/Python.framework/Versions/Current/bin/python3; do
@@ -37,6 +37,6 @@ if [ "$ENGINE" = auto ] || [ "$ENGINE" = native ]; then
   fi
 fi
 
-echo "Wi-Fi Health Detector cannot start: no usable $ENGINE engine (Python 3.7+, macOS native JXA)." >&2
+echo "Wi-Fi Health Detector cannot start: no usable $ENGINE engine (Python 3.10+, macOS native JXA)." >&2
 echo 'This is a runtime/capability problem, not a Wi-Fi disconnected diagnosis. Set WIFI_HEALTH_PYTHON to an executable path.' >&2
 exit 3

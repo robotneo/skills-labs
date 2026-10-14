@@ -653,7 +653,7 @@ class DependencyMetadataTests(unittest.TestCase):
         with open(MANIFEST_PATH, "r") as handle:
             manifest = json.load(handle)
 
-        self.assertEqual(manifest["requirements"], ["python>=3.7"])
+        self.assertEqual(manifest["requirements"], ["python>=3.10"])
         self.assertEqual(
             manifest["conditional_requirements"],
             {"dingtalk:dws-cli": ["dws>=1.0.63"]},
@@ -663,7 +663,7 @@ class DependencyMetadataTests(unittest.TestCase):
         with open(SKILL_YAML_PATH, "r") as handle:
             lines = [line.rstrip("\n") for line in handle]
 
-        self.assertIn("requirements: [python>=3.7]", lines)
+        self.assertIn("requirements: [python>=3.10]", lines)
         section = lines.index("conditional_requirements:")
         self.assertEqual(
             lines[section + 1], "  dingtalk:dws-cli: [dws>=1.0.63]"

@@ -1,7 +1,7 @@
 # Enterprise Notification Bridge
 
 The Enterprise Notification Bridge delivers a validated Wi-Fi Health Detector
-report to enabled, configured enterprise channels. It is a Python 3.7+
+report to enabled, configured enterprise channels. It is a Python 3.10+
 standard-library package with no third-party runtime dependency.
 
 The Bridge preserves the detector's standard Markdown and JSON report. The
@@ -174,10 +174,10 @@ cross-Agent setup, upgrade/uninstall guidance, and a gated real-environment
 runbook. The runbook sends nothing unless an exact Profile, fixed recipient,
 and separate first-send approval have all been supplied.
 
-Local verification covers Python 3.7-compatible source and launcher behavior.
-Release CI should also run the suite with Python 3.7 and on Windows with
-PowerShell available; the local PowerShell launcher test is skipped when that
-runtime is absent.
+Local verification covers Python 3.10-compatible source and launcher behavior.
+Release CI runs the suite on the supported Python matrix (3.10/3.12/3.13) and on
+Windows with PowerShell available; the local PowerShell launcher test is
+skipped when that runtime is absent.
 
 See [OPERATIONS.md](OPERATIONS.md) for the complete cross-agent handoff recipe for Codex,
 Claude Code, WorkBuddy, OpenClaw, and generic compatible Agents.

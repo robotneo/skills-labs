@@ -304,10 +304,11 @@ class AgentInstructionContractTests(unittest.TestCase):
     # The metadata-only pyproject.toml files exist for tooling and future
     # dependency/vulnerability scans. They must not introduce a second version
     # literal and must keep the zero-third-party runtime stance explicit. Parsed
-    # as text (not tomllib) so the assertion itself runs on Python 3.7.
+    # as text (not tomllib) so the assertion itself runs on the supported
+    # floor Python 3.10, which predates tomllib (added in 3.11).
     def _assert_metadata_only_pyproject(self, path, package_name, expect_packages):
         text = _read(path)
-        self.assertRegex(text, r"(?m)^requires-python\s*=\s*\">=3\.7\"\s*$")
+        self.assertRegex(text, r"(?m)^requires-python\s*=\s*\">=3\.10\"\s*$")
         self.assertRegex(text, r"(?m)^dependencies\s*=\s*\[\]\s*$")
         self.assertRegex(
             text,
@@ -337,7 +338,7 @@ class AgentInstructionContractTests(unittest.TestCase):
             manifest = json.load(handle)
         self.assertEqual(manifest["id"], "enterprise-notification-bridge")
         self.assertEqual(manifest["entry"]["macos"], "run.sh")
-        self.assertIn("python>=3.7", manifest["requirements"])
+        self.assertIn("python>=3.10", manifest["requirements"])
         self.assertNotIn("dependencies", manifest)
         self.assertIn("--format json", _read(README_PATH))
 

@@ -17,7 +17,7 @@ if($Engine -in 'auto','python'){
     }
     foreach($Candidate in @($Candidates|Where-Object {$_}|Select-Object -Unique)){
         $prefix=if($Candidate -eq 'py'){@('-3')}else{@()}
-        $probe=Invoke-WifiBatch @{python=(@($Candidate)+$prefix+@('-c','import sys,json,ctypes,concurrent.futures; raise SystemExit(0 if sys.version_info >= (3,7) else 3)'))} 2 ([datetime]::UtcNow.AddSeconds(2))
+        $probe=Invoke-WifiBatch @{python=(@($Candidate)+$prefix+@('-c','import sys,json,ctypes,concurrent.futures; raise SystemExit(0 if sys.version_info >= (3,10) else 3)'))} 2 ([datetime]::UtcNow.AddSeconds(2))
         if($probe.python.status -eq 0){$env:PYTHONUTF8='1';& $Candidate @prefix (Join-Path $ScriptDir 'main.py') @args;exit $LASTEXITCODE}
     }
 }

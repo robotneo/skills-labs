@@ -4,7 +4,7 @@ version: 1.0.4
 author: hua
 description: Route validated Wi-Fi health reports to configured enterprise channels; the unattended `deliver --auto` path sends DingTalk/DWS direct messages to a built-in default recipient with conversation override.
 support_os: [macos-10.12+, windows-10, windows-11, linux]
-requirements: [python>=3.7]
+requirements: [python>=3.10]
 conditional_requirements:
   dingtalk:dws-cli: [dws>=1.0.63]
 entry: run.sh (macOS/Unix) / run.bat (Windows)
