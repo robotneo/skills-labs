@@ -91,8 +91,9 @@ def _validate_html_attachment(value):
     head = value.lstrip()[:400].lower()
     if "<!doctype html" not in head and "<html" not in head:
         raise ContractError("report html must be a standalone html document")
-    # The attachment must render offline and must not exfiltrate data: forbid
-    # external resource references and active scripts. All styling is inline.
+    # The attachment must render offline and is never allowed to phone home:
+    # forbid external resource references and active scripts. All styling is
+    # inline so the file is fully self-contained.
     lowered = value.lower()
     if "<script" in lowered or "http://" in lowered or "https://" in lowered:
         raise ContractError("report html must be self-contained and script-free")

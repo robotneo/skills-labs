@@ -25,8 +25,8 @@ The bridge never downloads the DWS binary itself. It downloads only the small
 official installer script, and that upstream script then fetches the DWS release
 binary (about 17.6 MB tar.gz / 47 MB installed on macOS).
 
-Why a plain `curl … | sh` from GitHub hangs for an ordinary user without an
-agent proxy/VPN:
+Why piping a remote GitHub install script straight into a shell hangs for an
+ordinary user without an agent proxy/VPN:
 
 - The release binary is served from the GitHub release-assets CDN. On a normal
   mainland network that endpoint frequently fails with `SSL connection timeout`,

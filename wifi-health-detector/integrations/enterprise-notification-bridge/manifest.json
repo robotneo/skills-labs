@@ -1,7 +1,7 @@
 {
   "id": "enterprise-notification-bridge",
   "name": "企业通知桥接",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "author": "hua",
   "description": "将经过验证的标准 Wi-Fi 健康报告发送到已配置的企业通知渠道，并保持报告内容不变；deliver --auto 提供以默认接收人为兜底的钉钉 DWS 无人值守直发。",
   "platforms": ["codex", "claude", "workbuddy", "openclaw", "generic"],

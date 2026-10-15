@@ -276,11 +276,24 @@ class DwsProvider(Provider):
         # the upload with that directory as cwd, and remove it immediately
         # afterwards (a dry-run never reads the network either).
         outbox = tempfile.mkdtemp(prefix="dws-outbox-")
+        attachment = _ATTACHMENT_PREFIX + _ATTACHMENT_NAME + _ATTACHMENT_SUFFIX
+        # The attachment name is a compile-time constant, never derived from
+        # recipient or report input, so the child path cannot escape the
+        # private outbox. Build it by simple concatenation under the outbox and
+        # reject anything that does not resolve back inside that directory.
+        target = outbox + os.sep + attachment
+        resolved_outbox = os.path.realpath(outbox)
+        if os.path.dirname(os.path.realpath(target)) != resolved_outbox:
+            shutil.rmtree(outbox, ignore_errors=True)
+            return ProviderResult("failed", "provider_send_failed")
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
         try:
             os.chmod(outbox, 0o700)
-            file_name = _ATTACHMENT_PREFIX + _ATTACHMENT_NAME + _ATTACHMENT_SUFFIX
-            file_path = os.path.join(outbox, file_name)
-            descriptor = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            descriptor = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | no_follow,
+                0o600,
+            )
             try:
                 with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                     handle.write(html_text)
@@ -289,7 +302,7 @@ class DwsProvider(Provider):
             command = [
                 self.executable, "chat", "+messages-send",
                 "--as", "user", "--user-query", name,
-                "--msg-type", "file", "--file", file_name,
+                "--msg-type", "file", "--file", attachment,
                 "--format", "json",
             ]
             if dry_run:

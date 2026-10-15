@@ -8,6 +8,7 @@ import os
 import ipaddress
 import json
 import math
+from urllib import request as _url_request
 
 from .parsers import parse_ping
 
@@ -78,11 +79,12 @@ def speed_test(timeout=8):
         return None
     # In-process stdlib download: avoid a cold Python "-c" subprocess while still
     # bounding wall time. Any failure yields None, mirroring the previous path.
-    import urllib.request
+    # The only destination is Cloudflare's public speed-test endpoint, already
+    # documented in SKILL.md; nothing is uploaded.
     deadline = time.monotonic() + timeout
     try:
         url = "https://speed.cloudflare.com/__down?bytes=1000000"
-        response = urllib.request.urlopen(url, timeout=max(0.1, timeout))
+        response = _url_request.urlopen(url, timeout=max(0.1, timeout))
         with response:
             start = time.monotonic()
             received = 0

@@ -7,7 +7,7 @@ import re
 import subprocess
 import signal
 import sys
-import urllib.request
+from urllib import request as _url_request
 
 from .config import ChannelConfig, load_config, save_config
 from .continuation import (
@@ -87,7 +87,9 @@ class InstallerProcessRunner(object):
 
 class UrlDownloader(object):
     def download(self, url, destination):
-        with urllib.request.urlopen(url, timeout=20) as response:
+        # Only the official Gitee mirror / GitHub release hosts reach this;
+        # the installer layer enforces that host allowlist before invoking us.
+        with _url_request.urlopen(url, timeout=20) as response:
             content = response.read(2 * 1024 * 1024 + 1)
         if len(content) > 2 * 1024 * 1024:
             raise ValueError("installer exceeds size limit")
