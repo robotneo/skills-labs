@@ -114,6 +114,43 @@ class NotificationIntegrationTests(unittest.TestCase):
         self.assertEqual(result.reason, "bridge_unavailable")
         self.assertFalse(result.requires_attention)
 
+    def test_html_render_failure_falls_back_to_markdown_and_warns(self):
+        record_path = os.path.join(self.directory.name, "envelope.json")
+        bridge_command = self._bridge_command(
+            {"status": "delivered", "reason": "sent"}, record_path=record_path
+        )
+        stderr = io.StringIO()
+        with patch(
+            "wifi_health.notification.render_html",
+            side_effect=RuntimeError("boom"),
+        ), contextlib.redirect_stderr(stderr):
+            result = trigger_notification(
+                self.markdown, self.report_json, bridge_command=bridge_command
+            )
+
+        self.assertEqual(result.status, "delivered")
+        self.assertIn("HTML attachment unavailable", stderr.getvalue())
+        with open(record_path, encoding="utf-8") as handle:
+            envelope = json.load(handle)
+        self.assertNotIn("html", envelope["report"])
+        self.assertTrue(envelope["report"]["markdown"])
+
+    def test_require_html_fails_closed_when_render_fails(self):
+        bridge_command = self._bridge_command({"status": "delivered", "reason": "sent"})
+        stderr = io.StringIO()
+        with patch(
+            "wifi_health.notification.render_html",
+            side_effect=RuntimeError("boom"),
+        ), patch.dict(os.environ, {"WIFI_HEALTH_REQUIRE_HTML": "1"}), contextlib.redirect_stderr(stderr):
+            result = trigger_notification(
+                self.markdown, self.report_json, bridge_command=bridge_command
+            )
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "html_attachment_unavailable")
+        self.assertIn("HTML attachment unavailable", stderr.getvalue())
+
+
     def test_absent_successful_and_failed_bridge_never_change_standard_output(self):
         report = self._sample_report()
         expected = render_text(report, language="en")

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 
 from . import __version__
@@ -105,7 +106,21 @@ def trigger_notification(markdown, report_json, summary=None, bridge_command=Non
     language = _report_language(markdown)
     validate_standard_report(markdown, language)
     validate_standard_json(report_json)
-    html_attachment = _render_html_attachment(report_json, language)
+    html_attachment, html_error = _render_html_attachment(report_json, language)
+    if html_error is not None:
+        # The Markdown fallback keeps a notification flowing, but a failed HTML
+        # render must never be invisible: the recipient would otherwise get a
+        # plain-text bubble with no clue why the file attachment is missing.
+        print(
+            "Wi-Fi notification: HTML attachment unavailable ({0}); "
+            "falling back to a Markdown message.".format(html_error),
+            file=sys.stderr,
+        )
+        if _html_required():
+            # Verification/acceptance mode: surface the failure instead of
+            # silently delivering Markdown, so a broken renderer cannot masquerade
+            # as a successful file send.
+            return NotificationResult("skipped", "html_attachment_unavailable")
     envelope = _build_envelope(markdown, report_json, summary, html_attachment)
     envelope_path = None
     try:
@@ -170,14 +185,25 @@ def _recipient_name(recipient):
 def _render_html_attachment(report_json, language):
     """Render the standalone, fixed-layout HTML carried as a DingTalk file.
 
-    Failure is non-fatal: returning an empty string makes the bridge fall back
-    to the legacy Markdown direct message, so a renderer problem never blocks
-    notification delivery or the on-screen report.
+    Returns ``(html, error)``: on success ``(document, None)``; on failure
+    ``("", reason)`` so the caller can both log the degraded path and, when
+    ``WIFI_HEALTH_REQUIRE_HTML`` is set, refuse to silently deliver Markdown.
+    A renderer problem never blocks the on-screen report; by default an empty
+    HTML string makes the bridge fall back to the legacy Markdown direct
+    message.
     """
     try:
-        return render_html(report_json, language)
-    except Exception:
-        return ""
+        return render_html(report_json, language), None
+    except Exception as error:
+        reason = "{0}: {1}".format(type(error).__name__, error)
+        return "", reason[:200]
+
+
+def _html_required():
+    """Whether a failed HTML render must fail closed instead of using Markdown."""
+    return os.environ.get("WIFI_HEALTH_REQUIRE_HTML", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 def _build_envelope(markdown, report_json, summary, html_attachment=""):
