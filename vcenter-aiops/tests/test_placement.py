@@ -22,9 +22,6 @@ class Stub:
 class PlacementTests(unittest.TestCase):
     def make(self, template=False):
         stub = Stub()
-        vm = vim.VirtualMachine("vm-1", stub)
-        folder = vim.Folder("group-v1", stub)
-        pool = vim.ResourcePool("resgroup-1", stub)
         datastore = vim.Datastore("datastore-1", stub)
         host = vim.HostSystem("host-1", stub)
         stub.values.update({

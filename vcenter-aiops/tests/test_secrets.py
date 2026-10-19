@@ -42,8 +42,10 @@ class SecretTests(unittest.TestCase):
 
     def cli(self, *args, value=""):
         out, err = io.StringIO(), io.StringIO()
+        # Non-tty automation: existing handler-level tests opt into the risk
+        # gate via --yes; handler validations (scope/input) still run after it.
         with patch("sys.stdin", io.StringIO(value)), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = main(list(args))
+            code = main(["--yes", *args])
         return code, json.loads(out.getvalue()), out.getvalue() + err.getvalue()
 
     def error(self, code, call):
@@ -432,12 +434,12 @@ v.rotate('shared', 'replacement')
         stream = io.TextIOWrapper(io.BytesIO(b"\xff\n"), encoding="utf-8")
         output = io.StringIO()
         with patch("sys.stdin", stream), contextlib.redirect_stdout(output):
-            status = main(["secret", "set", "one", "--stdin"])
+            status = main(["--yes", "secret", "set", "one", "--stdin"])
         self.assertEqual(status, 2)
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "secret_value_invalid")
         stream = io.TextIOWrapper(io.BytesIO(b"x" * 4096 + b"\r\n"), encoding="utf-8")
         with patch("sys.stdin", stream), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(main(["secret", "set", "one", "--stdin"]), 0)
+            self.assertEqual(main(["--yes", "secret", "set", "one", "--stdin"]), 0)
         self.assertEqual(self.vault().resolve("one"), "x" * 4096)
 
     def test_secret_auth_failure_and_sdk_failure_emit_no_logs_or_secrets(self):

@@ -10,13 +10,24 @@ import ipaddress
 import re
 
 from ...domain.models import OperationError, SubmissionRejected, fail
+from ...domain.naming import valid_name
 from .clusters import Clusters
 from .hosts import Hosts
+from .mor import existing, check_privileges
 
 # Fixed-IP clones boot and run Linux guest customization; off clones do not.
 TOOLS_HINT = "克隆任务成功仅表示 VM 已创建；静态 IP 克隆已开机并下发定制，VMware Tools/IP 就绪请用 vm wait-tools 或 task wait 核对，不假定已就绪"
-NAME_RE = re.compile(r"[/\\%\x00-\x1f]")
 IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+# Structured pre-write failure codes for a dangling placement MoRef (H-3). The
+# vocabulary matches placement._NOT_FOUND / ovf_deploy._NOT_FOUND.
+_NOT_FOUND = {
+    "folder": ("folder_not_found", "指定文件夹不存在或已被删除: "),
+    "pool": ("resource_pool_not_found", "指定资源池不存在或已被删除: "),
+    "host": ("host_not_found", "指定主机不存在或已被删除: "),
+    "datastore": ("datastore_not_found", "指定数据存储不存在或已被删除: "),
+    "network": ("network_not_found", "指定网络不存在或已被删除: "),
+}
 
 
 class TemplateClone:
@@ -45,20 +56,55 @@ class TemplateClone:
     def _vm(self, vm_id):
         if not re.fullmatch(r"vm-\d+", vm_id):
             fail("target_invalid", "必须提供精确 vm-N 模板对象 ID，不支持名称或通配符", 2)
-        vm = self.resolver("vm", vm_id)
-        if vm._moId != vm_id or getattr(vm, "config", None) is None or not vm.config.instanceUuid:
+
+        def probe():
+            # Resolve and the first server-side read live in one probe: an
+            # injected resolver may raise MONF at construction, while the real
+            # lazy resolver raises it on the first property fetch (H-3).
+            vm = self.resolver("vm", vm_id)
+            return vm, getattr(vm, "config", None)
+
+        vm, config = existing(probe, vm_id, "vm_not_found",
+                              "指定 VM 模板不存在或已被删除: " + vm_id)
+        if vm._moId != vm_id or config is None or not config.instanceUuid:
             fail("target_unavailable", "模板对象身份不可读或不匹配", 4)
         if getattr(vm, "runtime", None) is not None and vm.runtime.connectionState != "connected":
             fail("target_unavailable", "模板不处于已连接状态", 4)
-        if vm.config.template is not True:
+        if config.template is not True:
             fail("precondition_failed", "clone-template 要求源对象为模板；普通 VM 克隆请用 vm clone", 4)
         return vm
 
     def _resolve_id(self, kind, object_id, pattern, typename):
-        obj = self.resolver(kind, object_id)
-        if self._id(obj, pattern, typename) != object_id:
+        if not re.fullmatch(pattern, object_id):
+            fail("target_invalid", typename + " 必须使用精确对象 ID", 2)
+        code, message = _NOT_FOUND.get(kind, ("target_not_found", "指定目标对象不存在或已被删除: "))
+
+        def probe():
+            # Same resolve+first-fetch envelope as _vm so a stale id fails with a
+            # structured *_not_found/4 whether the MONF fires at resolve or read.
+            obj = self.resolver(kind, object_id)
+            # Force one server round-trip (._moId/_wsdlName are construction-time
+            # and never fetch); .name is the canonical liveness read used by the
+            # shared placement.resource helper.
+            return obj, self._id(obj, pattern, typename), getattr(obj, "name", None)
+
+        obj, resolved_id, name = existing(probe, object_id, code, message + object_id)
+        if resolved_id != object_id:
             fail("placement_invalid", typename + " 精确 ID 不匹配", 4)
+        if not name:
+            fail("placement_invalid", typename + " 名称不可读", 4)
         return obj
+
+    @staticmethod
+    def _is_vm_child(child):
+        # A VM folder's direct children can include nested Folders/vApps; only a
+        # direct VirtualMachine occupies the clone's namespace/identity set.
+        cid = getattr(child, "_moId", None)
+        return (getattr(child, "_wsdlName", type(child).__name__) == "VirtualMachine"
+                and isinstance(cid, str) and re.fullmatch(r"vm-\d+", cid))
+
+    def _vm_child_ids(self, children):
+        return {c._moId for c in children if self._is_vm_child(c)}
 
     def _ip(self, value, field):
         if not isinstance(value, str) or not IPV4.fullmatch(value):
@@ -108,7 +154,7 @@ class TemplateClone:
         vm = self._vm(p["vm_id"])
 
         # Name rules (same vocabulary as the rest of the product).
-        if NAME_RE.search(p["name"]) or len(p["name"]) > 80 or p["name"].strip() != p["name"]:
+        if not valid_name(p["name"]):
             fail("name_invalid", "VM 名称须为 1–80 字符，不含路径、百分号、控制符或边缘空白", 2)
 
         # Placement: pool/ds/folder mandatory; host optional -> cluster DRS.
@@ -134,7 +180,7 @@ class TemplateClone:
         if not any(str(t).rsplit(".", 1)[-1].lower() == "virtualmachine" for t in self._list(folder, "childType")):
             fail("placement_invalid", "目标不是 VM 文件夹", 4)
         children = self._list(folder, "childEntity")
-        if any(getattr(c, "name", None) == p["name"] for c in children):
+        if any(getattr(c, "name", None) == p["name"] for c in children if self._is_vm_child(c)):
             fail("target_exists", "目标文件夹已有同名对象", 4)
 
         # Datastore accessibility + capacity for the template's disks.
@@ -165,10 +211,24 @@ class TemplateClone:
         # Network remap (optional). When absent the clone keeps template NICs.
         nic_evidence = None
         if p.get("network_id"):
-            network = self.resolver("network", p["network_id"])
+            network_id = p["network_id"]
+            is_dvpg = network_id.startswith("dvportgroup-")
             pattern = r"(?:network|dvportgroup)-\d+"
-            if self._id(network, pattern, "Network" if not p["network_id"].startswith("dvportgroup-") else "DistributedVirtualPortgroup") != p["network_id"]:
+            typename = "DistributedVirtualPortgroup" if is_dvpg else "Network"
+
+            def probe_network():
+                # H-3: resolve + a first server-side read in one probe so a stale
+                # network/dvpg id yields network_not_found/4, not an exit-5 MONF.
+                network = self.resolver("network", network_id)
+                return network, self._id(network, pattern, typename), getattr(network, "name", None)
+
+            network, network_resolved, network_name = existing(
+                probe_network, network_id, "network_not_found",
+                "指定网络不存在或已被删除: " + network_id)
+            if network_resolved != network_id:
                 fail("placement_invalid", "网络精确 ID 不匹配", 4)
+            if not network_name:
+                fail("placement_invalid", "网络名称不可读", 4)
             if host is not None and network._moId not in [n._moId for n in self._list(host, "network")]:
                 fail("placement_invalid", "目标主机不能使用指定网络", 4)
             source_nic = self._source_nic(vm)
@@ -207,11 +267,16 @@ class TemplateClone:
         self.privileges(pool, ("Resource.AssignVMToPool",))
         self.privileges(ds, ("Datastore.AllocateSpace",))
         if nic_evidence:
-            self.privileges(self.resolver("network", p["network_id"]), ("Network.Assign",))
+            # Reuse the already-proven network object (single resolved, liveness-
+            # checked instance) instead of re-resolving a second raw MoRef.
+            self.privileges(network, ("Network.Assign",))
 
-        before_ids = {self._id(c, r"vm-\d+", "VirtualMachine") for c in children}
+        before_ids = self._vm_child_ids(children)
         # ResourcePool has no .vm inventory; enumerate the compute resource (DRS)
         # or the explicitly chosen host so a result cannot masquerade as "new".
+        # Every member of a compute/host .vm inventory must be a VirtualMachine,
+        # so that enumeration stays strict (unlike folder childEntity, which may
+        # legitimately contain nested Folders/vApps).
         vm_scope = host if host is not None else owner
         try:
             before_ids.update(self._id(x, r"vm-\d+", "VirtualMachine") for x in self._list(vm_scope, "vm"))
@@ -255,13 +320,9 @@ class TemplateClone:
         return self._id(obj, r"datacenter-\d+", "Datacenter")
 
     def privileges(self, entity, required):
-        session = self.content.sessionManager.currentSession
-        if not session:
-            fail("session_missing", "服务端会话不可用", 3)
-        granted = self.content.authorizationManager.HasPrivilegeOnEntity(
-            entity=entity, sessionId=session.key, privId=list(required))
-        if len(granted) != len(required) or not all(granted):
-            fail("permission_denied", "账户缺少此操作所需权限", 4)
+        check_privileges(self.content, entity, required,
+                         denied="账户缺少此操作所需权限",
+                         unable="无法核对操作权限")
 
     def bind_steps(self, steps):
         if len(steps) != 1:
@@ -294,7 +355,11 @@ class TemplateClone:
         ds = self.resolver("datastore", p["datastore_id"])
         host = self.resolver("host", p["host_id"]) if p.get("host_id") else None
 
-        location = vim.vm.RelocateSpec(datastore=ds, pool=(host.parent.resourcePool if host is not None else pool))
+        # Always honour the explicitly validated pool: preflight already proved the
+        # host and pool belong to the same compute resource. Using host.parent's
+        # default resourcePool here would silently move the clone out of the
+        # requested pool (breaks non-default pool / vApp placement).
+        location = vim.vm.RelocateSpec(datastore=ds, pool=pool)
         if host is not None:
             location.host = host
 

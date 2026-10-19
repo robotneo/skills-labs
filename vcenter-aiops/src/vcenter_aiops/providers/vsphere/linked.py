@@ -2,26 +2,63 @@
 import re
 
 from ...domain.models import OperationError, fail
+from .mor import existing
 from .placement import preflight as placement, resolve, relocation
 
 
 WARNING = "链接克隆长期依赖父快照/磁盘；无法排除外部依赖时禁止删除、快照清理/恢复和存储迁移。许可证未能独立证明，最终由服务端校验；不回退完整克隆"
 STRICT_COMMANDS = frozenset(("vm delete", "vm snapshot-delete", "vm snapshot-revert"))
+# Snapshot cleanup/revert and storage migration stay globally fail-closed:
+# unlike whole-VM delete there is no bounded inventory predicate that proves
+# them safe, so they deliberately have no attestation channel at all.
+UNPROVEN_COMMANDS = frozenset(("vm snapshot-delete", "vm snapshot-revert"))
+DELETE_ATTESTATION = "allow_shared_datastore"
+DELETE_ATTESTATION_HINT = (
+    "全 vCenter 清单扫描未发现其他 VM/模板或快照引用其磁盘链；但共享数据存储可能被"
+    "本 vCenter 之外的其他 vCenter 或独立 ESXi 主机挂载，这一外部消费者不可见。"
+    "如已确认该数据存储未被外部挂载引用，须显式加 --allow-shared-datastore 担保后，"
+    "再经 plan apply 的双重确认方可删除")
 
 
 def guarded(command, params):
     return command in STRICT_COMMANDS or (command == "vm migrate" and "datastore_id" in params)
 
 
-def guard(provider, vm, command, params):
-    if not guarded(command, params):
-        return
+def _local_dependency_present(provider, vm):
     records = getattr(provider, "parent_dependencies", None)
-    if records and records(provider.server_uuid, vm.config.instanceUuid):
+    return bool(records and records(provider.server_uuid, vm.config.instanceUuid))
+
+
+def guard(provider, vm, command, params):
+    """Return delete-safety evidence for vm delete; fail closed otherwise.
+
+    Raises on any present/unproven dependency. For vm delete a successful
+    return is the durable whole-vCenter scan evidence bound into the plan and
+    re-checked at submission (any added consumer changes the evidence and
+    rejects a stale plan before the write).
+    """
+    if not guarded(command, params):
+        return None
+    if _local_dependency_present(provider, vm):
         fail("dependency_present", "父对象存在已提交或结果未知的链接克隆依赖；禁止破坏父磁盘链", 4)
-    # Neither an empty Store nor any inventory/layout scan proves that no
-    # consumer exists outside our visibility. There is deliberately no bypass.
-    fail("dependency_unproven", "严格保护：无法排除外部链接磁盘依赖，拒绝删除、快照清理/恢复或存储迁移；本地无记录不构成安全证明", 4)
+    # vm delete has a controlled channel: a complete whole-vCenter inventory
+    # scan proving no *managed* consumer shares any of the VM's disk files, plus
+    # an explicit operator attestation for the unobservable external case.
+    if command == "vm delete":
+        from .consumers import scan
+        evidence = scan(provider, vm)
+        if evidence["consumers"]:
+            detail = "、".join("%s(%s)" % (name, mo_id) for mo_id, name in evidence["consumers"][:10])
+            fail("dependency_present",
+                 "发现其他 VM/模板或其快照引用目标磁盘链，禁止删除父磁盘: " + detail, 4)
+        if not params.get(DELETE_ATTESTATION, False):
+            fail("dependency_unproven",
+                 "严格保护：" + DELETE_ATTESTATION_HINT, 4)
+        return {"dependency_scan": {"protected": evidence["protected"], "scanned": evidence["scanned"]}}
+    # Snapshot revert/delete and storage relocation remain globally forbidden.
+    # Neither an empty store nor any layout scan proves no consumer exists
+    # outside our visibility, and these paths have no attestation channel.
+    fail("dependency_unproven", "严格保护：无法排除外部链接磁盘依赖，拒绝快照清理/恢复或存储迁移；本地无记录不构成安全证明", 4)
 
 
 def chain(backing):
@@ -92,12 +129,32 @@ def mount(provider, datastore_id, hosts):
     ds = provider.resolver("datastore", datastore_id)
     if ds._moId != datastore_id:
         fail("target_changed", "数据存储身份变化", 4)
+    existing(lambda: ds.summary, datastore_id, "datastore_not_found",
+             "指定数据存储不存在或已被删除: " + datastore_id)
     if (ds.summary.accessible is not True or ds.summary.maintenanceMode != "normal"
             or getattr(ds.summary, "type", None) not in ("VMFS", "NFS", "NFS41")):
         fail("placement_invalid", "链接磁盘的数据存储不可访问", 4)
+    # Second-level fetch: enumerating the datastore's host-mount list round-trips
+    # independently of ds.summary. A datastore deleted after resolution faults on
+    # itself (or an unnamed object) -> structured not_found; a fault naming some
+    # other member propagates untouched (fail closed).
+    host_mounts = existing(
+        lambda: list(getattr(ds, "host", None) or []),
+        datastore_id, "datastore_not_found",
+        "指定数据存储不存在或已被删除: " + datastore_id)
     for host in hosts:
-        mounts = [m.mountInfo for m in ds.host if m.key._moId == host._moId]
-        if (datastore_id not in [d._moId for d in host.datastore] or len(mounts) != 1
+        def host_probe():
+            # m.key._moId is a construction-time MoRef (no fetch); m.mountInfo and
+            # host.datastore are the second-level reads that can raise MONF when
+            # the required source/target host was removed concurrently.
+            mounts = [m.mountInfo for m in host_mounts if m.key._moId == host._moId]
+            attached = [d._moId for d in (host.datastore or [])]
+            return mounts, attached
+
+        mounts, attached = existing(
+            host_probe, host._moId, "host_not_found",
+            "指定主机不存在或已被删除: " + host._moId)
+        if (datastore_id not in attached or len(mounts) != 1
                 or mounts[0].accessible is not True or mounts[0].mounted is False
                 or mounts[0].accessMode != "readWrite"):
             fail("placement_invalid", "源与目标主机须可读写访问完整磁盘链", 4)

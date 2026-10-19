@@ -11,6 +11,22 @@ from .locking import exclusive
 from .credentials import validate_reference
 
 
+def _fsync_directory(directory):
+    """Best-effort fsync of a directory fd so a rename is durable on POSIX."""
+    if os.name != "posix":
+        return
+    fd = None
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+        os.fsync(fd)
+    except OSError:
+        # Directory fsync is an optional durability hint; never fail a save over it.
+        pass
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 class Profiles:
     def __init__(self, home: Path):
         self.path = home / "config.yaml"
@@ -74,6 +90,9 @@ class Profiles:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.path)
+            # Flush the directory entry too, so a crash at the replace instant
+            # cannot orphan the new file name. POSIX only; best-effort elsewhere.
+            _fsync_directory(self.path.parent)
         finally:
             if temporary and os.path.exists(temporary):
                 os.unlink(temporary)

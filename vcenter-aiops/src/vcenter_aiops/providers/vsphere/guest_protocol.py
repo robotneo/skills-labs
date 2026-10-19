@@ -13,6 +13,28 @@ from ...infrastructure.store import canonical
 from . import guest_wrapper
 
 
+# Module-level cache for the packaged wrapper source. The wrapper ships with the
+# package and does not change at runtime, so a long guest wait (which rebuilds the
+# run descriptor every poll) must not re-read/hash the same ~330-line file dozens
+# of times. Keyed on (path, mtime_ns, size): the first execution still computes
+# the anti-tamper wrapper_sha256, and any on-disk replacement invalidates the
+# cache immediately. Tests are unaffected since mtime/size change together.
+_WRAPPER_CACHE = {}
+
+
+def _wrapper_source():
+    path = Path(guest_wrapper.__file__)
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    cached = _WRAPPER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    source = path.read_text(encoding="utf-8")
+    _WRAPPER_CACHE.clear()
+    _WRAPPER_CACHE[key] = source
+    return source
+
+
 def validate_path(value, family):
     if not isinstance(value, str) or not value or len(value) > 512 or any(ord(c) < 32 for c in value):
         fail("guest_path_invalid", "Guest 路径须为明确的绝对路径", 2)
@@ -45,7 +67,7 @@ def build_run(identity, params, run_id=None, capture=False, mode="exec"):
     payload.update({"capture_output": capture, "run_id": run_id,
                     "mode": mode, "protocol": "guest-wrapper-v1",
                     **identity})
-    source = Path(guest_wrapper.__file__).read_text(encoding="utf-8")
+    source = _wrapper_source()
     payload["wrapper_sha256"] = hashlib.sha256(source.encode()).hexdigest()
     digest = hashlib.sha256(canonical(payload).encode()).hexdigest()
     payload["digest"] = digest

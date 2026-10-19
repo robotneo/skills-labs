@@ -7,6 +7,7 @@ import time
 from ...domain.models import OperationError, fail
 from .datastores import Datastores, valid_task_id
 from .devices import datastore, is_integer, layout
+from .mor import existing
 
 
 WARNING = "ISO 仅依据最近搜索观察的路径元数据；不能保证内容不可变或消除外部替换竞态；后置仅核对光驱配置，不验证启动或内容完整性"
@@ -55,7 +56,10 @@ def evidence(provider, params, ds):
     task_id = receipt.get("task_id")
     if not valid_task_id(task_id):
         fail("task_identity_mismatch", "原搜索任务身份无效", 4)
-    info = provider.resolver("task", task_id).info
+    task = provider.resolver("task", task_id)
+    existing(lambda: task.info, task_id, "task_not_found",
+             "原搜索任务已不存在，无法复核 ISO 证据: " + str(task_id))
+    info = task.info
     if info.key != task_id or str(info.state) != "success" or info.result is None:
         fail("search_evidence_changed", "无法核对原成功搜索任务", 4)
     wanted_folder, _, wanted_name = params["path"].rpartition("/")

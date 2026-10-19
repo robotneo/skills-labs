@@ -1,7 +1,8 @@
 """Create a powered-off empty VM; task result supplies the new VM identity."""
 import re
 
-from ...domain.models import fail
+from ...domain.models import OperationError, SubmissionRejected, fail
+from ...domain.naming import valid_name
 from .clusters import Clusters
 from .hosts import Hosts
 from . import hardware, placement
@@ -59,7 +60,7 @@ class Creation:
         if command != "vm create":
             fail("invalid_arguments", "创建 Provider 仅接受 vm create", 2)
         p = lookup(command).validate(params)
-        if re.search(r"[/\\%\x00-\x1f]", p["name"]) or len(p["name"]) > 80 or p["name"].strip() != p["name"]:
+        if not valid_name(p["name"]):
             fail("name_invalid", "VM 名称须为 1–80 字符，不含路径、百分号、控制符或边缘空白", 2)
         if not re.fullmatch(r"vmx-\d+", p["hardware_version"]):
             fail("invalid_arguments", "必须指定精确 vmx-N 硬件版本", 2)
@@ -125,9 +126,15 @@ class Creation:
         return [{**step, "binding": self.preflight(step["command"], step["params"])} for step in steps]
 
     def submit(self, command, params, binding):
-        if not self.matches(binding, self.preflight(command, params)):
-            fail("plan_stale", "创建的身份、放置或能力前提变化，请重新预览", 4)
-        objects = self._objects(params)
+        try:
+            if not self.matches(binding, self.preflight(command, params)):
+                fail("plan_stale", "创建的身份、放置或能力前提变化，请重新预览", 4)
+            objects = self._objects(params)
+        except OperationError as exc:
+            # Read-only recheck/resolution only: CreateVM_Task has not been
+            # issued, so this is a retryable pre-write rejection (exit 4).
+            raise SubmissionRejected(exc.code, str(exc), exc.exit_code) from exc
+        # From here the remote create may have happened: failures stay unknown/6.
         task = objects["folder"].CreateVM_Task(config=hardware.spec(params, objects, binding["hardware"]),
                                                pool=objects["pool"], host=objects["host"])
         task_id = getattr(task, "_moId", None)

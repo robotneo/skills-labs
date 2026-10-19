@@ -256,3 +256,36 @@ class DeviceTests(unittest.TestCase):
         f.disk.nativeUnmanagedLinkedClone = True
         with self.assertRaises(OperationError):
             f.provider().preflight("vm reconfigure", dict(vm_id="vm-1", disks=[EXPAND]))
+
+    def test_multiple_equivalent_disk_options_allow_expand_d1(self):
+        # vCenter 8.0.3 returns 4 capability-equivalent VirtualDiskOptions;
+        # disk expand preflight must select by capability, not assert len==1.
+        import copy as _copy
+        f = Fixture()
+        options = f.option.hardwareOptions.virtualDeviceOption
+        disk_index = next(i for i, o in enumerate(options)
+                          if isinstance(o, vim.vm.device.VirtualDiskOption))
+        original = options[disk_index]
+        equivalents = [_copy.deepcopy(original) for _ in range(4)]
+        f.option.hardwareOptions.virtualDeviceOption = (
+            options[:disk_index] + equivalents + options[disk_index + 1:])
+        binding = f.provider().preflight("vm reconfigure", dict(vm_id="vm-1", disks=[EXPAND]))
+        self.assertEqual(binding["disks"][0]["after_kb"], 16 * 1024**2)
+        self.assertEqual(f.calls, [])
+
+    def test_no_qualified_flatver2_blocks_expand_d1(self):
+        import copy as _copy
+        f = Fixture()
+        options = f.option.hardwareOptions.virtualDeviceOption
+        disk_index = next(i for i, o in enumerate(options)
+                          if isinstance(o, vim.vm.device.VirtualDiskOption))
+        original = options[disk_index]
+        equivalents = [_copy.deepcopy(original) for _ in range(4)]
+        f.option.hardwareOptions.virtualDeviceOption = (
+            options[:disk_index] + equivalents + options[disk_index + 1:])
+        for option in f.option.hardwareOptions.virtualDeviceOption:
+            if isinstance(option, vim.vm.device.VirtualDiskOption):
+                option.backingOption.clear()
+        with self.assertRaises(OperationError) as error:
+            f.provider().preflight("vm reconfigure", dict(vm_id="vm-1", disks=[EXPAND]))
+        self.assertEqual(error.exception.code, "capability_unsupported")

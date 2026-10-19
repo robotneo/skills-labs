@@ -3,6 +3,9 @@
 A ping result is only a signal; inconclusive evidence must never be reported
 as "free". Dependencies are injected so the logic is testable without a host.
 """
+import functools
+import ipaddress
+import os
 import re
 import subprocess
 import sys
@@ -11,24 +14,78 @@ import time
 from ..domain.models import fail
 
 
-def ping_probe(address):
+# L-8: the ping wall-clock budget was a hard-coded subprocess timeout. It is now
+# a configurable ceiling (env override, clamped). The per-reply ping wait (-W/-w)
+# is capped to this budget so the subprocess timeout stays the binding limit;
+# an expired/launch failure still yields an inconclusive (None) signal.
+DEFAULT_PING_TIMEOUT = 4
+MIN_PING_TIMEOUT = 1
+MAX_PING_TIMEOUT = 30
+_PING_TIMEOUT_ENV = "VCENTER_AIOPS_PING_TIMEOUT"
+
+
+def resolve_ping_timeout():
+    """Ping wall-clock budget in seconds from the env, clamped to a safe window.
+
+    Invalid / non-positive values fall back to the default so a misconfiguration
+    cannot disable the ceiling or force an unbounded probe.
+    """
+    raw = os.environ.get(_PING_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return DEFAULT_PING_TIMEOUT
+    try:
+        seconds = int(float(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_PING_TIMEOUT
+    return max(MIN_PING_TIMEOUT, min(seconds, MAX_PING_TIMEOUT))
+
+
+def require_ip_address(address):
+    """Reject anything that is not a literal IPv4/IPv6 address.
+
+    The address is later passed as an argv element to ``ping`` (never through a
+    shell), but a value beginning with ``-`` would still be parsed by ping as an
+    option. Validating at this boundary prevents option/argument injection.
+    """
+    if not isinstance(address, str):
+        fail("invalid_arguments", "address 必须是字面 IPv4/IPv6 地址", 2)
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        fail("invalid_arguments", "address 必须是合法的字面 IPv4/IPv6 地址，不接受主机名或选项", 2)
+    return address
+
+
+def ping_probe(address, timeout=DEFAULT_PING_TIMEOUT):
     """Return True/False for a clear result, None when probing is unavailable."""
-    count = "-n" if sys.platform.startswith("win") else "-c"
-    wait = ["-w", "2000"] if sys.platform.startswith("win") else ["-W", "2"]
+    require_ip_address(address)
+    is_win = sys.platform.startswith("win")
+    count = "-n" if is_win else "-c"
+    if is_win:
+        # -w is the per-reply timeout in milliseconds; cap it at the hard budget.
+        wait = ["-w", str(max(MIN_PING_TIMEOUT * 1000, min(timeout * 1000, 2000)))]
+    else:
+        # -W is the per-reply wait in whole seconds; never exceed the hard budget.
+        wait = ["-W", str(max(MIN_PING_TIMEOUT, min(timeout, 2)))]
     command = ["ping", count, "1"] + wait + [address]
     try:
-        completed = subprocess.run(command, capture_output=True, timeout=4)
+        completed = subprocess.run(command, capture_output=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
     return completed.returncode == 0
 
 
 class IpSignals:
-    def __init__(self, store, vm_items, pinger=ping_probe, now=time.time):
+    def __init__(self, store, vm_items, pinger=ping_probe, now=time.time,
+                 ping_timeout=None):
         self.store = store
         self.vm_items = vm_items
-        self.pinger = pinger
         self.now = now
+        self.ping_timeout = ping_timeout or resolve_ping_timeout()
+        # Bind the configurable budget only around the built-in probe; an
+        # injected pinger (offline seam) keeps its single-argument contract.
+        self.pinger = (functools.partial(ping_probe, timeout=self.ping_timeout)
+                       if pinger is ping_probe else pinger)
 
     def _inventory_use(self, address):
         output = []
@@ -52,6 +109,7 @@ class IpSignals:
         return None
 
     def check(self, address, scope):
+        require_ip_address(address)
         ping = self.pinger(address)
         return {
             "address": address, "scope": scope,
@@ -63,6 +121,7 @@ class IpSignals:
         }
 
     def available(self, address, scope):
+        require_ip_address(address)
         inventory_use = self._inventory_use(address)
         lease = self._active_lease(scope, address)
         ping = self.pinger(address)

@@ -3,7 +3,8 @@ from copy import deepcopy
 import re
 
 from ...domain.models import OperationError, fail
-from .hardware import bounds
+from .hardware import bounds, select_new_disk_option
+from .mor import existing
 
 
 def is_integer(value):
@@ -39,6 +40,8 @@ def datastore(provider, vm, object_id):
     ds = provider.resolver("datastore", object_id)
     if ds._moId != object_id or getattr(ds, "_wsdlName", None) != "Datastore":
         fail("target_changed", "数据存储对象身份或类型错误", 4)
+    existing(lambda: ds.summary, object_id, "datastore_not_found",
+             "指定数据存储不存在或已被删除: " + object_id)
     host = vm.runtime.host
     if not host or object_id not in [d._moId for d in host.datastore]:
         fail("datastore_unavailable", "VM 所在主机不能访问指定数据存储", 4)
@@ -61,11 +64,11 @@ def preflight(provider, vm, requests):
     if option is None or option.version != vm.config.version or option.hardwareOptions is None:
         fail("capability_unsupported", "目标没有返回 VM 硬件版本能力", 4)
     options = list(option.hardwareOptions.virtualDeviceOption or [])
-    disk_options = [o for o in options if isinstance(o, vim.vm.device.VirtualDiskOption)
-                    and o.type == vim.vm.device.VirtualDisk and o.deprecated is not True]
-    if len(disk_options) != 1:
-        fail("capability_unsupported", "磁盘能力不可确定", 4)
-    disk_option = disk_options[0]
+    # Capability-based selection (shared with vm create): a target may expose
+    # several equivalent disk options (8.0.3 returns 4). Expand only ever edits an
+    # existing disk and never shrinks/removes, so we only need a representative
+    # option whose FlatVer2 new-disk bounds are valid; zero qualified -> failure.
+    disk_option, _, _ = select_new_disk_option(options)
     output, keys, slots, allocations = [], set(), set(), {}
     controllers = (vim.vm.device.VirtualBusLogicController, vim.vm.device.VirtualLsiLogicController,
                    vim.vm.device.VirtualLsiLogicSASController, vim.vm.device.ParaVirtualSCSIController)

@@ -272,12 +272,38 @@ class Engine:
             if state == "failed" and observation.get("cancelled") is True:
                 state = "cancelled"
             with self.store.transaction():
-                current = self.store.operation(operation_id)["state"]
+                row = self.store.db.execute(
+                    "SELECT o.state, e.observation FROM operations o "
+                    "JOIN execution_steps e ON e.operation_id=o.id "
+                    "WHERE e.plan_id=? AND e.position=?", (plan_id, index)).fetchone()
+                current = row["state"]
+                try:
+                    observation_text = canonical(observation)
+                    # SQLite binds TEXT as UTF-8: a lone surrogate survives
+                    # json.dumps but fails the bind, so probe the encoding too.
+                    observation_text.encode("utf-8")
+                except (TypeError, ValueError, UnicodeEncodeError):
+                    # The remote write was already submitted and this evidence
+                    # cannot be durably stored: unprovable result, never a reason
+                    # to resubmit. Replace it with a structured unknown and route
+                    # the plan to reconciliation (exit 6), keeping operation id.
+                    observation = {"state": "unknown", "error": {
+                        "code": "observation_unserializable",
+                        "message": "写后观测无法序列化保存，远端结果不可证明；请核对，不自动重发",
+                        "retryable": False}}
+                    observation_text = canonical(observation)
+                    state = "unknown"
                 if current in ("succeeded", "failed", "cancelled"):
                     state = current
-                else:
+                # M-1 (plan A): skip the three fsync-bearing writes while neither
+                # the operation state nor its observation changed. State
+                # transitions and the first terminal write still persist; this is
+                # safe because the reconciliation model never relies on a
+                # per-poll running heartbeat (no WAL/-shm side files introduced).
+                unchanged = state == current and observation_text == (row["observation"] if row else None)
+                if not unchanged:
                     self.store.db.execute("UPDATE operations SET state=? WHERE id=?", (state, operation_id))
-                    self.store.db.execute("UPDATE execution_steps SET observation=? WHERE plan_id=? AND position=?", (canonical(observation), plan_id, index))
+                    self.store.db.execute("UPDATE execution_steps SET observation=? WHERE plan_id=? AND position=?", (observation_text, plan_id, index))
                     self.store.audit("operation_" + state, operation_id)
             if state == "succeeded":
                 return True

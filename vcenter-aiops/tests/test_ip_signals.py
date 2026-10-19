@@ -1,9 +1,11 @@
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
-from vcenter_aiops.application.ipsignals import IpSignals
+from vcenter_aiops.application.commands import local as local_commands
+from vcenter_aiops.application.ipsignals import IpSignals, require_ip_address
 from vcenter_aiops.domain.models import OperationError
 from vcenter_aiops.infrastructure.store import Store
 
@@ -77,6 +79,100 @@ class IpSignalTests(unittest.TestCase):
         with self.assertRaises(OperationError) as error:
             self.signals(lambda address: False).expire_release(lease["lease_id"])
         self.assertEqual(error.exception.code, "lease_not_expired")
+
+    def test_require_ip_address_accepts_literal_ips(self):
+        for value in ("10.0.0.7", "192.168.1.1", "::1", "2001:db8::1"):
+            self.assertEqual(require_ip_address(value), value)
+
+    def test_check_rejects_ping_option_injection(self):
+        # A leading dash would be parsed by ping as an option; it must be
+        # rejected before the pinger is ever invoked (argv list, but option
+        # injection still applies).
+        calls = []
+
+        def pinger(address):
+            calls.append(address)
+            return None
+
+        for bad in ("-c10", "-D", "--adaptive", "example.com", "10.0.0.0/24",
+                    "10.0.0.1 extra", 1234):
+            with self.assertRaises(OperationError) as error:
+                self.signals(pinger).check(bad, "net-a")
+            self.assertEqual(error.exception.code, "invalid_arguments")
+            with self.assertRaises(OperationError):
+                self.signals(pinger).available(bad, "net-a")
+        self.assertEqual(calls, [])
+
+
+class IpExpireCommandTests(unittest.TestCase):
+    """Regression for D5: ``ip expire --apply`` without a lease_id must surface
+    a structured ``invalid_arguments`` error instead of raising a KeyError that
+    the CLI swallows into a generic ``internal_error`` (exit 5)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.temp.name) / "state.db")
+        self.moment = [time.time()]
+
+        @contextmanager
+        def store_cm():
+            try:
+                yield self.store
+            finally:
+                pass
+
+        class Ctx:
+            pass
+
+        self.ctx = Ctx()
+        self.ctx.store = store_cm
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def _patched_signals(self):
+        # Pin the clock used by expire_release so an expired lease is recognised.
+        return IpSignals(self.store, [], pinger=lambda a: False,
+                         now=lambda: self.moment[0])
+
+    def test_apply_without_lease_id_is_invalid_arguments(self):
+        with self.assertRaises(OperationError) as error:
+            local_commands.ip_expire(self.ctx, {"apply": True})
+        self.assertEqual(error.exception.code, "invalid_arguments")
+
+    def test_apply_with_empty_lease_id_is_invalid_arguments(self):
+        with self.assertRaises(OperationError) as error:
+            local_commands.ip_expire(self.ctx, {"apply": True, "lease_id": ""})
+        self.assertEqual(error.exception.code, "invalid_arguments")
+
+    def test_apply_with_lease_id_still_reaches_domain_logic(self):
+        # An explicit, non-expired lease must hit the domain rule unchanged.
+        lease = self.store.reserve("net-a", "10.0.0.9", "owner", minutes=60)
+        with self.assertRaises(OperationError) as error:
+            local_commands.ip_expire(self.ctx, {"apply": True,
+                                                "lease_id": lease["lease_id"]})
+        self.assertEqual(error.exception.code, "lease_not_expired")
+
+    def test_apply_releases_expired_lease(self):
+        lease = self.store.reserve("net-a", "10.0.0.9", "owner", minutes=1)
+        self.moment[0] += 5 * 60
+        # The handler imports IpSignals lazily from ..ipsignals, so patch there.
+        from vcenter_aiops.application import ipsignals
+        real = ipsignals.IpSignals
+        ipsignals.IpSignals = lambda store, vms, **kw: self._patched_signals()
+        try:
+            result = local_commands.ip_expire(
+                self.ctx, {"apply": True, "lease_id": lease["lease_id"]})
+            self.assertEqual(result.data["released"], lease["lease_id"])
+            self.assertEqual(self.store.leases(), [])
+        finally:
+            ipsignals.IpSignals = real
+
+    def test_listing_without_apply_ignores_lease_id(self):
+        self.store.reserve("net-a", "10.0.0.9", "owner", minutes=1)
+        result = local_commands.ip_expire(self.ctx, {"apply": False})
+        self.assertEqual(result.data["count"], 0)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,71 @@
+# vcenter-aiops 交互式创建/克隆向导 —— 标准虚拟机规格 preset
+#
+# 用途：向导 Q2「规格」回车默认选 standard；也可按业务挑档位。
+#       仅映射 deploy clone-template 的三个可选硬件参数：
+#         --cpu <n> --memory-gb <n> --disk-gb <n>
+# 约束（工具真实行为，务必遵守）：
+#   * disk_gb 只扩不缩：必须严格大于模板首盘当前容量。standard=100 要求模板首盘 ≤ 100GB。
+#     例：模板 Centos7.9_2c4g60g 首盘 60GB -> 可扩到 100GB；若模板盘已 120GB，则 100GB 非法，
+#     向导应改选更大档位或换更小盘模板（不得试图缩容）。
+#   * 省略 cpu/memory_gb/disk_gb = 原样继承模板（inherit）。
+#   * 不在这里放网络/IP：那是 Q7 与 clone-template 的 ip_* / network_id 参数职责。
+#
+# 对齐：references/INTERACTIVE-VM-CREATION-WIZARD.md Q2
+#       references/TEMPLATE-CLONE-PROVISIONING-PLAN.md 第 3 章
+
+schema_version: 1
+kind: vm-size-presets
+default: standard
+
+presets:
+  - name: inherit
+    title: 继承模板
+    description: 不下发任何硬件改配，CPU/内存/盘完全沿用源模板（最稳、跨 OS 通用）
+    cpu: null
+    memory_gb: null
+    disk_gb: null
+    cli: ""                           # 三个参数都省略
+
+  - name: standard
+    title: 标准（默认 4C/8G/100G）
+    description: 团队标准基础规格；要求源模板首盘 ≤ 100GB
+    cpu: 4
+    memory_gb: 8
+    disk_gb: 100
+    cli: "--cpu 4 --memory-gb 8 --disk-gb 100"
+    requires_template_max_disk_gb: 100
+
+  - name: compact
+    title: 轻量 2C/4G/60G
+    description: 测试/轻负载/小工具机
+    cpu: 2
+    memory_gb: 4
+    disk_gb: 60
+    cli: "--cpu 2 --memory-gb 4 --disk-gb 60"
+    requires_template_max_disk_gb: 60
+
+  - name: large
+    title: 增强 8C/16G/200G
+    description: 中等业务负载/构建机
+    cpu: 8
+    memory_gb: 16
+    disk_gb: 200
+    cli: "--cpu 8 --memory-gb 16 --disk-gb 200"
+    requires_template_max_disk_gb: 200
+
+  - name: xlarge
+    title: 大型 16C/32G/400G
+    description: 重负载/数据库/缓存主机
+    cpu: 16
+    memory_gb: 32
+    disk_gb: 400
+    cli: "--cpu 16 --memory-gb 32 --disk-gb 400"
+    requires_template_max_disk_gb: 400
+
+# ── 选型与校验规则（向导执行，不改工具行为）────────────────────────────────
+selection_rules:
+  - 回车默认 standard；用户可报档位名（compact/large/xlarge/inherit）或逐字段自定义。
+  - 选模板后先 `template inspect --id <tpl>` 读首盘容量，再校验 disk_gb > 模板首盘；
+    不满足时自动把可选档位夹到合法区间，并提示「只能扩，不能缩」。
+  - cpu/memory 受目标集群许可与 EVC 约束；放置阶段写前命令会强校验，预检失败停在 S4。
+  - 自定义三个字段都为正整数 GiB/核；内存以 GiB 计（clone-template 按 GiB 入参）。

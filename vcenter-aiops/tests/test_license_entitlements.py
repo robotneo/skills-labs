@@ -45,13 +45,54 @@ class LicenseEntitlementTests(unittest.TestCase):
         self.assertNotIn(SECRET, str(error.exception))
         self.assertEqual(error.exception.code, "license_unknown")
 
-    def test_missing_mismatched_ambiguous_or_missing_feature_evidence_is_rejected(self):
-        cases = (None, [], [assignment("host-2")], [assignment(), assignment()],
+    def test_missing_mismatched_or_missing_feature_evidence_is_rejected(self):
+        # H-6 relaxation: multiple in-scope rows now aggregate features, so only
+        # absent/foreign rows and genuinely missing features are rejected.
+        cases = (None, [], [assignment("host-2")],
                  [assignment(features=("vmotion",))])
         for rows in cases:
             with self.subTest(rows=rows):
                 with self.assertRaises(OperationError):
                     self.checker(rows).require("host-1", ("drs",), "server-1")
+
+    def test_zero_rows_is_license_unverifiable_not_granted(self):
+        # "查不到就允许" must remain impossible.
+        with self.assertRaises(OperationError) as error:
+            self.checker([]).require("host-1", ("drs",), "server-1")
+        self.assertEqual(error.exception.code, "license_unverifiable")
+        self.assertEqual(error.exception.exit_code, 4)
+
+    def test_multiple_inscope_rows_aggregate_features(self):
+        # Cluster/suite features commonly arrive across two rows; union grants.
+        drs_row = assignment(features=("drs",))
+        vmotion_row = assignment(features=("vmotion",))
+        evidence = self.checker([drs_row, vmotion_row]).require(
+            "host-1", ("drs", "vmotion"), "server-1")
+        self.assertEqual(evidence["features"], ["drs", "vmotion"])
+        self.assertEqual(len(evidence["licenses"]), 2)
+
+    def test_foreign_scope_rows_never_contribute(self):
+        # A row scoped to a different vCenter must not be aggregated into a grant.
+        with self.assertRaises(OperationError):
+            self.checker([assignment(features=("drs",))]).require(
+                "host-1", ("drs",), "server-other")
+
+    def test_perpetual_license_without_expiration_is_accepted(self):
+        row = assignment(features=("drs", "vmotion"))
+        row.assignedLicense.properties = [
+            NS(key="feature", value=vim.KeyValue(key=key, value=key))
+            for key in ("drs", "vmotion")]
+        evidence = self.checker([row]).require("host-1", ("drs",), "server-1")
+        self.assertEqual(evidence["features"], ["drs"])
+        term = evidence["licenses"][0]
+        self.assertTrue(term["perpetual"])
+        self.assertIsNone(term["expires_at"])
+
+    def test_unknown_property_keys_are_ignored(self):
+        row = assignment(features=("drs",))
+        row.assignedLicense.properties.append(NS(key="SomeFuture803Key", value="x"))
+        evidence = self.checker([row]).require("host-1", ("drs",), "server-1")
+        self.assertEqual(evidence["features"], ["drs"])
 
     def test_invalid_expired_diagnostic_and_unsupported_shapes_are_rejected(self):
         def expire(row):
@@ -60,10 +101,13 @@ class LicenseEntitlementTests(unittest.TestCase):
             row.assignedLicense.properties[0].value = "drs"
         def diagnostic(row):
             row.assignedLicense.properties.append(NS(key="diagnostic", value=SECRET))
-        for mutate in (expire, malformed, diagnostic,
+        def unparseable_expiry(row):
+            # A concrete expiry that cannot parse must stay fail-closed and must
+            # never be mistaken for a perpetual (no-key) license.
+            row.assignedLicense.properties[-1].value = "not-a-date"
+        for mutate in (expire, malformed, diagnostic, unparseable_expiry,
                        lambda row: setattr(row, "scope", "server-2"),
                        lambda row: setattr(row.assignedLicense, "total", 0),
-                       lambda row: row.assignedLicense.properties.pop(),
                        lambda row: row.assignedLicense.properties.append(NS(key="license_not_set", value=1))):
             with self.subTest(mutate=mutate):
                 row = assignment()

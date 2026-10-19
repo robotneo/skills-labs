@@ -99,10 +99,16 @@ class Command:
         return output
 
     def describe(self):
+        from .risk import risk_level, risk_tags
+        sensitive, irreversible = risk_tags(self)
         return {"path": self.path, "operation_id": self.operation_id, "category": self.category,
                 "description": self.description, "input_schema": self.input_schema(),
                 "result_schema": {"type": "object", "required": ["schema_version", "operation_id", "status", "target", "data", "warnings", "error", "next_action"]},
-                "privileges": list(self.privileges), "risk": self.risk, "asynchronous": self.asynchronous,
+                "privileges": list(self.privileges), "risk": self.risk,
+                "risk_level": risk_level(self),
+                "sensitive_categories": list(sensitive),
+                "irreversible_categories": list(irreversible),
+                "asynchronous": self.asynchronous,
                 "compensation": self.compensation, "mcp": self.mcp, "implemented": True,
                 "provider_kind": self.provider_kind,
                 "idempotency": "request_id_bound_to_target_and_parameters" if self.category == "remote_write" else "not_applicable",

@@ -49,6 +49,11 @@ class FakePool:
                   info=NS(entity=NS(_moId="vm-100", name="imported-vm")))
 
 
+class FakeAuthz:
+    def HasPrivilegeOnEntity(self, entity, sessionId, privId):
+        return [True] * len(list(privId))
+
+
 class FakeSi:
     def __init__(self, reject=False):
         self.pool = FakePool()
@@ -56,10 +61,37 @@ class FakeSi:
         self._stub = object()
         self.content = NS(
             about=NS(instanceUuid="uuid-1"),
-            ovfManager=self.ovf_manager)
+            ovfManager=self.ovf_manager,
+            sessionManager=NS(currentSession=NS(key="session-1")),
+            authorizationManager=FakeAuthz())
 
     def RetrieveContent(self):
         return self.content
+
+
+def healthy_topology():
+    """Build a coherent placement topology for deploy preflight (M-6).
+
+    datacenter-1 owns both the compute resource (domain-c9 via compute-res-1)
+    and the VM folder (group-v1); host-1 belongs to compute-res-1, sees
+    datastore-1 and network-1. The returned dict lets individual tests mutate a
+    single fact to exercise each preflight rejection.
+    """
+    dc = NS(_moId="datacenter-1", _wsdlName="Datacenter", parent=None)
+    compute = NS(_moId="domain-c9", _wsdlName="ClusterComputeResource", parent=dc)
+    pool = NS(_moId="resgroup-1", name="Resources", owner=compute,
+              parent=compute, imports=[])
+    datastore = NS(_moId="datastore-1", name="ds-1",
+                   summary=NS(accessible=True, maintenanceMode="normal", freeSpace=10**12))
+    network = NS(_moId="network-1", name="VM Network")
+    host = NS(_moId="host-1", name="esxi-1", parent=compute,
+              runtime=NS(connectionState="connected", inMaintenanceMode=False),
+              datastore=[datastore], network=[network])
+    folder = NS(_moId="group-v1", name="vm", parent=dc,
+                childType=["vim.VirtualMachine"], childEntity=[])
+    return {"dc": dc, "compute": compute, "pool": pool, "host": host,
+            "folder": folder, "datastore": datastore, "network": network}
+
 
 
 class OvfDeployTests(unittest.TestCase):
@@ -76,16 +108,24 @@ class OvfDeployTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make(self):
-        resolved = {"pool": self.si.pool, "host": NS(_moId="host-1"),
-                    "folder": NS(_moId="group-v1"), "datastore": NS(_moId="datastore-1"),
-                    "network": NS(_moId="network-1"),
-                    "vm": None}
+    def make(self, topology=None):
+        self.topo = topology or healthy_topology()
+        t = self.topo
+
+        def import_vapp(spec, folder, host):
+            t["pool"].imports.append({"spec": spec, "folder": folder, "host": host})
+            return NS(_moId="HttpNfcLease-1",
+                      info=NS(entity=NS(_moId="vm-100", name="imported-vm")))
+
+        t["pool"].ImportVApp = import_vapp
 
         def resolver(kind, object_id):
             if kind == "vm":
                 return self.vm_obj
-            return resolved[kind]
+            return {
+                "pool": t["pool"], "host": t["host"], "folder": t["folder"],
+                "datastore": t["datastore"], "network": t["network"],
+            }[kind]
 
         driven = []
 
@@ -99,25 +139,31 @@ class OvfDeployTests(unittest.TestCase):
                                       for name, target in validated["network_mapping"].items()])
 
         provider = OvfDeploy(self.si, resolver=resolver,
-                             upload=lambda t, i: None, driver=driver,
+                             upload=lambda q, i: None, driver=driver,
                              cisp_builder=builder)
         provider._driven = driven
         return provider
 
+    def _params(self):
+        return base_params(str(self.ovf_dir), self.work)
+
     def test_preflight_returns_scope_and_warnings(self):
         provider = self.make()
-        binding = provider.preflight("deploy ovf", base_params(str(self.ovf_dir), self.work))
+        binding = provider.preflight("deploy ovf", self._params())
         self.assertEqual(binding["kind"], "ovf")
         self.assertEqual(binding["before"]["files"], ["disk1.vmdk"])
         self.assertEqual(binding["scope"]["datastore_id"], "datastore-1")
+        # M-6: remote placement evidence is captured in the preview scope.
+        self.assertEqual(binding["scope"]["placement"]["datacenter_id"], "datacenter-1")
+        self.assertEqual(binding["scope"]["placement"]["folder"]["id"], "group-v1")
+        self.assertEqual(binding["scope"]["placement"]["networks"]["network-1"], "VM Network")
         self.assertTrue(binding["warnings"])
 
     def test_submit_drives_import_and_returns_terminal_receipt(self):
         provider = self.make()
         self.vm_obj = NS(_moId="vm-100")
-        binding = provider.preflight("deploy ovf", base_params(str(self.ovf_dir), self.work))
-        receipt = provider.submit("deploy ovf",
-                                  base_params(str(self.ovf_dir), self.work), binding)
+        binding = provider.preflight("deploy ovf", self._params())
+        receipt = provider.submit("deploy ovf", self._params(), binding)
         self.assertEqual(receipt["state"], "success")
         self.assertEqual(receipt["result_id"], "vm-100")
         # Server import spec created with explicit network mapping.
@@ -126,30 +172,41 @@ class OvfDeployTests(unittest.TestCase):
         self.assertEqual(cisp.networkMapping[0].name, "VM Network")
         # Lease driven once with descriptor files.
         self.assertEqual(provider._driven[0]["files"], ["disk1.vmdk"])
-        # ImportVApp invoked with folder/host.
-        self.assertEqual(len(self.si.pool.imports), 1)
+        # ImportVApp invoked with folder/host exactly once.
+        self.assertEqual(len(self.topo["pool"].imports), 1)
 
     def test_submit_rejects_incomplete_mapping_before_remote_write(self):
         provider = self.make()
-        params = base_params(str(self.ovf_dir), self.work)
+        params = self._params()
         params["network_mapping"] = {}
         with self.assertRaises(SubmissionRejected) as ctx:
             provider.submit("deploy ovf", params, {})
         self.assertEqual(ctx.exception.code, "ovf_network_mapping_incomplete")
-        self.assertEqual(self.si.pool.imports, [])  # no remote write attempted
+        self.assertEqual(self.topo["pool"].imports, [])  # no remote write attempted
 
     def test_server_spec_error_is_uncertainty_not_rejection(self):
         si = FakeSi(reject=True)
+        topo = healthy_topology()
+
+        def resolver(kind, object_id):
+            if kind == "vm":
+                return NS(_moId="vm-100", config=NS(instanceUuid="x"),
+                          runtime=NS(powerState="poweredOff"))
+            return {
+                "pool": topo["pool"], "host": topo["host"], "folder": topo["folder"],
+                "datastore": topo["datastore"], "network": topo["network"],
+            }[kind]
 
         def builder(params, host, validated):
-            return NS(networkMapping=list(validated["network_mapping"]))
+            return NS(entityName=params["name"], hostSystem=host,
+                      networkMapping=[NS(name=name, network=target)
+                                      for name, target in validated["network_mapping"].items()])
 
-        provider = OvfDeploy(si,
-                             resolver=lambda k, i: NS(_moId=i),
+        provider = OvfDeploy(si, resolver=resolver,
                              upload=lambda t, i: None,
                              driver=lambda l, f, u, deadline=None: None,
                              cisp_builder=builder)
-        params = base_params(str(self.ovf_dir), self.work)
+        params = self._params()
         binding = provider.preflight("deploy ovf", params)
         # This happens after validation; it surfaces as a plain OperationError.
         from vcenter_aiops.domain.models import OperationError

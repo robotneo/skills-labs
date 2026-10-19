@@ -2,8 +2,11 @@
 import os
 import re
 
+from pyVmomi import vmodl
+
 from ...domain.models import OperationError, SubmissionRejected, fail
 from ...infrastructure.credentials import resolve_credential, validate_reference
+from .mor import check_privileges
 from .guest_customize import validate_spec
 from .guest_protocol import build_run, parse_markers, validate_path
 
@@ -55,6 +58,13 @@ class Guest:
         self.content = si.RetrieveContent()
         self.resolver = resolver or self.object
         self._tls = tls or {}
+        # M-2: per-run record that the (expensive) HasPrivilege SOAP already
+        # succeeded for a fixed binding. Only the observe() poll loop consults it
+        # (one privilege SOAP per run); the live VM/vCenter identity reads inside
+        # _identity still run on every poll, so a replaced/deleted VM or changed
+        # vCenter is still caught fail-closed. submit/recover/fetch/transfer never
+        # use the cache and always re-check privileges.
+        self._privilege_verified = set()
 
     def object(self, kind, object_id):
         from pyVmomi import vim
@@ -69,7 +79,7 @@ class Guest:
                 "GuestComponentsOutOfDate": "guest_tools_unavailable", "FileNotFound": "guest_result_missing"}.get(type(exc).__name__.split(".")[-1], "guest_sdk_failed")
         return OperationError(code, "Guest 调用未获得可验证结果；请核对身份、权限、Tools 或运行记录", 6)
 
-    def _identity(self, params, execute=False):
+    def _identity(self, params, execute=False, privilege_cache_key=None):
         about = self.content.about
         if about.apiType != "VirtualCenter" or not re.match(r"^(6\.[57]|7\.0|8\.0)(\.|$)", about.apiVersion):
             fail("capability_unsupported", "Guest 仅支持目标范围内的 vCenter", 4)
@@ -77,8 +87,23 @@ class Guest:
             fail("guest_identity_invalid", "无法确定 vCenter 身份", 4)
         if not re.fullmatch(r"vm-\d+", params["vm_id"]):
             fail("target_invalid", "Guest 要求精确 vm-N 对象 ID", 2)
-        vm = self.resolver("vm", params["vm_id"])
-        if vm._moId != params["vm_id"] or not vm.config or not vm.config.instanceUuid:
+        try:
+            # Resolve + force one fetch of the exact MoRef. A real resolver
+            # constructs lazily (the fault fires on the config read); an injected
+            # resolver may raise directly -- both are covered. A dangling VM at
+            # preflight is a deterministic precondition failure (vm_not_found/4),
+            # not a post-write "unknown result" (guest_sdk_failed/6) which would
+            # wrongly push the operator toward reconciliation. Exact-object rule.
+            vm = self.resolver("vm", params["vm_id"])
+            config = vm.config
+        except vmodl.fault.ManagedObjectNotFound as fault:
+            missing = getattr(getattr(fault, "obj", None), "_moId", None)
+            if missing in (params["vm_id"], None):
+                fail("vm_not_found", "指定 VM 不存在或已被删除: " + params["vm_id"], 4)
+            raise
+        if vm._moId != params["vm_id"]:
+            fail("guest_identity_invalid", "VM 对象身份与请求不匹配", 4)
+        if not config or not config.instanceUuid:
             fail("guest_identity_invalid", "无法确定 VM 唯一身份", 4)
         if vm.config.template or vm.runtime.connectionState != "connected" or vm.runtime.powerState != "poweredOn":
             fail("guest_unavailable", "Guest 要求已连接、已开机的普通 VM", 4)
@@ -86,16 +111,25 @@ class Guest:
             fail("guest_os_mismatch", "实际 Guest 系统与显式选择不匹配", 4)
         if vm.guest.toolsRunningStatus != "guestToolsRunning" or vm.guest.guestOperationsReady is not True:
             fail("guest_tools_unavailable", "Tools 或 Guest Operations 未就绪", 4)
-        session = self.content.sessionManager.currentSession
-        if not session:
-            fail("session_missing", "服务端会话不可用", 3)
         privileges = ["VirtualMachine.GuestOperations.Query"]
         if execute:
             privileges.append("VirtualMachine.GuestOperations.Execute")
-        granted = self.content.authorizationManager.HasPrivilegeOnEntity(entity=vm, sessionId=session.key, privId=privileges)
-        if len(granted) != len(privileges) or any(x is not True for x in granted):
-            fail("permission_denied", "账户缺少 Guest 操作权限", 4)
-        return {"server_uuid": about.instanceUuid, "object_id": vm._moId, "instance_uuid": vm.config.instanceUuid}
+        # M-2: a read-only poll (execute=False) may reuse the one-time privilege
+        # proof for the exact same bound identity/digest. The execute grant is
+        # never cached, and live VM/tools/session reads above still run every
+        # tick, so privilege caching can neither widen a grant nor mask a changed
+        # or deleted target.
+        cache_key = None
+        if privilege_cache_key is not None and not execute:
+            cache_key = privilege_cache_key + (tuple(privileges),)
+        if cache_key is None or cache_key not in self._privilege_verified:
+            check_privileges(self.content, vm, privileges,
+                             denied="账户缺少 Guest 操作权限",
+                             unable="无法核对 Guest 操作权限")
+            if cache_key is not None:
+                self._privilege_verified.add(cache_key)
+        return {"server_uuid": about.instanceUuid, "object_id": vm._moId,
+                "instance_uuid": vm.config.instanceUuid}
 
     @staticmethod
     def _options(params):
@@ -182,7 +216,7 @@ class Guest:
     def matches(expected, actual):
         return {k: v for k, v in expected.items() if k != "run"} == {k: v for k, v in actual.items() if k != "run"}
 
-    def _binding(self, binding):
+    def _binding(self, binding, use_cache=False):
         run = binding["run"]
         mode = run.get("mode", "exec")
         if mode == "customize":
@@ -191,13 +225,23 @@ class Guest:
             params = self._options(binding["params"])
         else:
             fail("guest_identity_invalid", "未知的 Guest 运行模式", 4)
-        identity = self._identity(params)
+        # Only the observe() poll loop passes a privilege cache key; this skips
+        # the repeated HasPrivilege SOAP while _identity still re-reads live VM
+        # identity/tools every tick (fail-closed against replacement/deletion).
+        privilege_key = self._privilege_cache_key(binding) if use_cache else None
+        identity = self._identity(params, privilege_cache_key=privilege_key)
         if any(binding.get(k) != v for k, v in identity.items()):
             fail("guest_identity_changed", "固定 vCenter 或 VM 身份已改变", 4)
         if run != build_run(identity, params, run["run_id"],
                             capture=run.get("capture_output", False), mode=mode):
             fail("guest_identity_invalid", "固定包装器描述不匹配，请人工核对版本与计划", 4)
         return params, run
+
+    @staticmethod
+    def _privilege_cache_key(binding):
+        run = binding["run"]
+        return (run.get("run_id"), binding.get("server_uuid"), binding.get("object_id"),
+                binding.get("instance_uuid"), run.get("digest"))
 
     def _auth(self, params):
         from pyVmomi import vim
@@ -358,7 +402,7 @@ class Guest:
     def observe(self, receipt, binding):
         auth = None
         try:
-            params, run = self._binding(binding)
+            params, run = self._binding(binding, use_cache=True)
             pid = receipt.get("pid")
             if receipt != self._receipt(binding, pid) or (pid is not None and (type(pid) is not int or pid <= 0)):
                 fail("guest_receipt_invalid", "Guest 回执身份不匹配", 6)

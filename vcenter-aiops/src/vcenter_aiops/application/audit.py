@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import tempfile
 
 from ..domain.models import fail
@@ -38,6 +39,18 @@ class AuditLog:
         payload = self.list(after_id, limit, snapshot_max_id)
         target = Path(path).absolute()
         encoded = (json.dumps({"schema_version": "1", **payload}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        # Publish only to a name that does not yet exist. If the name is present
+        # it must not be a symlink or special file: never publish through a link
+        # (which could redirect the export outside the intended directory). lstat
+        # does not follow the terminal component, so a planted link is seen as-is.
+        try:
+            preexisting = target.lstat()
+        except FileNotFoundError:
+            preexisting = None
+        except OSError:
+            fail("export_failed", "无法安全检查导出目标；请检查目录权限", 5)
+        if preexisting is not None and (stat.S_ISLNK(preexisting.st_mode) or not stat.S_ISREG(preexisting.st_mode)):
+            fail("export_target_unsafe", "导出目标是符号链接或非常规文件，拒绝写入", 3)
         temporary = None
         warnings = []
         try:

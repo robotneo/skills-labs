@@ -78,7 +78,10 @@ def ip_expire(ctx, p):
     with ctx.store() as store:
         signals = IpSignals(store, [])
         if p.get("apply"):
-            return Result(data=signals.expire_release(p["lease_id"]))
+            lease_id = p.get("lease_id")
+            if not lease_id:
+                fail("invalid_arguments", "--apply 释放过期租约必须显式提供位置参数 lease_id；不带 lease_id 的 ip expire 仅列出过期租约", 2)
+            return Result(data=signals.expire_release(lease_id))
         return Result(data=signals.expired())
 
 

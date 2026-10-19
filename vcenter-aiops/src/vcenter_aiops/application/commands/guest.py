@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from ...domain.models import fail
+from ...domain.models import Result, fail
 from ..execution import Engine
 from ..providers import ProviderRouter
 from .changes import preview
@@ -49,7 +49,9 @@ def guest_output(ctx, params):
     with ctx.session() as si, ctx.store() as store:
         located = store.guest_run(params["run_id"], ctx.profile)
         guest = _router(ctx, si)._provider("guest")
-        return guest.fetch_output(located["binding"])
+        # The provider dict carries its own ``state`` (running/succeeded); wrap it
+        # in a Result so the CLI post-processing chain never sees a bare mapping.
+        return Result(data=guest.fetch_output(located["binding"]))
 
 
 def guest_download(ctx, params):
@@ -75,7 +77,7 @@ def guest_download(ctx, params):
     finally:
         os.close(descriptor)
     result["file"] = str(target)
-    return {"data": result}
+    return Result(data=result)
 
 
 def guest_upload(ctx, params):
@@ -98,7 +100,7 @@ def guest_upload(ctx, params):
             params["vm_id"], params["guest_username"],
             params["credential_ref"], params["guest_path"],
             params["os_family"], payload, params["overwrite"])
-    return {"data": result}
+    return Result(data=result)
 
 
 def guest_customize(ctx, params):

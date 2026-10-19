@@ -28,8 +28,11 @@ class HistoryPresetPolicyTests(unittest.TestCase):
 
     def cli(self, *args):
         output = io.StringIO()
+        # Non-tty automation: opt into the direct-effect risk gate via --yes;
+        # profile/parameter validations inside the handler still run normally.
+        argv = ["--yes", *args]
         with patch.object(Context, "session", side_effect=AssertionError("unexpected remote connection")), contextlib.redirect_stdout(output):
-            code = main(list(args))
+            code = main(list(argv))
         return code, json.loads(output.getvalue())
 
     def plan(self, profile="lab", command="vm power-on", params=None):
@@ -223,7 +226,7 @@ class HistoryPresetPolicyTests(unittest.TestCase):
              patch("vcenter_aiops.providers.vsphere.mutations.Mutations.vm", side_effect=AssertionError("SDK object crossed boundary")):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                code = main(["--profile", "lab", "preset", "from-vm", "plain",
+                code = main(["--yes", "--profile", "lab", "preset", "from-vm", "plain",
                              "--source-vm-id", "vm-1", "--target-vm-id", "vm-2"])
             result = json.loads(output.getvalue())
         self.assertEqual(code, 0)

@@ -3,6 +3,8 @@ import re
 from dataclasses import dataclass
 
 from ...domain.models import OperationError, SubmissionRejected, fail
+from ...domain.naming import valid_name, valid_snapshot_name
+from .mor import check_privileges
 
 
 @dataclass(frozen=True)
@@ -56,22 +58,30 @@ class Mutations:
         return classes[kind](object_id, self.si._stub)
 
     def vm(self, object_id):
+        from pyVmomi import vmodl
         if not re.fullmatch(r"vm-\d+", object_id):
             fail("target_invalid", "必须提供精确 vm-N 对象 ID，不支持通配符", 2)
         vm = self.resolver("vm", object_id)
         if vm._moId != object_id:
             fail("target_changed", "解析返回的 VM 对象 ID 与请求不一致", 4)
-        if vm.config is None or not vm.config.instanceUuid:
+        try:
+            # Reading a property forces an SDK fetch of the exact MoRef; a dangling
+            # reference raises ManagedObjectNotFound on real vCenter (offline stubs
+            # construct the object without fetching, so they are unaffected).
+            config = vm.config
+        except vmodl.fault.ManagedObjectNotFound as fault:
+            missing = getattr(fault, "obj", None)
+            if getattr(missing, "_moId", None) == object_id:
+                fail("vm_not_found", "指定 VM 不存在或已被删除: " + object_id, 4)
+            raise
+        if config is None or not config.instanceUuid:
             fail("target_unavailable", "无法获取 VM 唯一身份", 4)
         return vm
 
     def privileges(self, vm, required):
-        session = self.content.sessionManager.currentSession
-        if not session:
-            fail("session_missing", "服务端会话不可用", 3)
-        granted = self.content.authorizationManager.HasPrivilegeOnEntity(entity=vm, sessionId=session.key, privId=list(required))
-        if len(granted) != len(required) or not all(granted):
-            fail("permission_denied", "账户缺少此操作所需权限", 4)
+        check_privileges(self.content, vm, required,
+                         denied="账户缺少此操作所需权限",
+                         unable="无法核对操作权限")
 
     def snapshots(self, vm):
         roots = vm.snapshot.rootSnapshotList if vm.snapshot else []
@@ -83,13 +93,23 @@ class Mutations:
         return result
 
     def snapshot(self, vm, snapshot_id):
-        nodes = [n for n in self.snapshots(vm) if n.snapshot._moId == snapshot_id]
+        from pyVmomi import vmodl
+        try:
+            nodes = [n for n in self.snapshots(vm) if n.snapshot._moId == snapshot_id]
+        except vmodl.fault.ManagedObjectNotFound as fault:
+            # The snapshot tree (or the matched snapshot ref) was removed
+            # externally after the VM was resolved. A fault naming the requested
+            # snapshot is a deterministic not_found; any other object propagates.
+            missing = getattr(getattr(fault, "obj", None), "_moId", None)
+            if missing in (snapshot_id, None):
+                fail("snapshot_not_found", "快照已被外部删除: " + snapshot_id, 4)
+            raise
         if len(nodes) != 1:
             fail("snapshot_not_found", "快照不属于此 VM 或不存在", 4)
         return nodes[0]
 
     def preflight(self, command, params, projected=None):
-        if command in ("vm reconfigure", "deploy iso", "deploy unmount-iso", "template convert", "deploy linked-clone", "vm migrate"):
+        if command in ("vm reconfigure", "deploy iso", "deploy unmount-iso", "template convert", "deploy linked-clone", "vm migrate", "vm delete"):
             from ...application.registry import lookup
             params = lookup(command).validate(params)
         if command == "alarm acknowledge":
@@ -100,6 +120,13 @@ class Mutations:
             return Alarms(self.si).preflight_reset(params)
         if command not in ACTIONS:
             fail("capability_unsupported", "此变更尚未实现", 4)
+        # Deterministic name vocabulary before any remote read. Rename shares the
+        # managed-object rules; snapshot labels are more permissive but still
+        # bounded and free of control/zero-width/edge-whitespace characters.
+        if command == "vm rename" and not valid_name(params.get("new_name")):
+            fail("name_invalid", "VM 名称须为 1–80 字符，不含路径、百分号、控制符或边缘空白", 2)
+        if command == "vm snapshot-create" and not valid_snapshot_name(params.get("snapshot_name")):
+            fail("name_invalid", "快照名称须为 1–80 字符，不含控制符或边缘空白", 2)
         if self.content.about.apiType != "VirtualCenter" or not re.match(r"^(6\.[57]|7\.0|8\.0)(\.|$)", self.content.about.apiVersion):
             fail("capability_unsupported", "当前只允许目标范围内的 vCenter 6.5/6.7/7.0/8.0", 4)
         action = ACTIONS[command]
@@ -119,7 +146,7 @@ class Mutations:
         if action.powers and before["power"] not in action.powers:
             fail("precondition_failed", "电源状态不满足操作要求；不会隐式执行其他电源操作", 4)
         from .linked import guard
-        guard(self, vm, command, params)
+        guard_evidence = guard(self, vm, command, params)
         obj = vm
         if command in ("vm snapshot-revert", "vm snapshot-delete"):
             node = self.snapshot(vm, params["snapshot_id"])
@@ -149,6 +176,10 @@ class Mutations:
         binding = {"target": self.server_uuid + ":" + vm._moId, "server_uuid": self.server_uuid,
                 "object_id": vm._moId, "instance_uuid": vm.config.instanceUuid, "before": before,
                 "risk": "destructive" if action.destructive else "change"}
+        if guard_evidence:
+            # Whole-vCenter delete-safety scan; re-derived and compared at
+            # submission, so a consumer appearing after preview forces re-preview.
+            binding.update(guard_evidence)
         if command == "template convert":
             from .templates import conversion_placement
             binding["placement"] = conversion_placement(self, vm, params)
@@ -234,11 +265,23 @@ class Mutations:
             if not self.matches(binding, self.preflight(command, params)):
                 fail("plan_stale", "提交前目标身份或状态变化", 4)
             vm = self.vm(params["vm_id"])
+            snapshot_ref = None
+            if command in ("vm snapshot-revert", "vm snapshot-delete"):
+                # Re-resolve the snapshot inside the pre-write guarantee so a
+                # snapshot deleted between preview and submit is a deterministic
+                # SubmissionRejected (exit 4, safe to retry after re-preview)
+                # rather than a post-write "result unknown" that invites
+                # resending a destructive revert/delete.
+                snapshot_ref = self.snapshot(vm, params["snapshot_id"]).snapshot
         except OperationError as exc:
             # This scope contains validation/reads only. The write method and
             # its response handling below must never emit this guarantee.
             raise SubmissionRejected(exc.code, str(exc), exc.exit_code) from exc
-        task = getattr(self, "submit_" + command.replace(" ", "_").replace("-", "_"))(vm, params)
+        if command in ("vm snapshot-revert", "vm snapshot-delete"):
+            task = getattr(self, "submit_" + command.replace(" ", "_").replace("-", "_"))(
+                vm, params, snapshot_ref)
+        else:
+            task = getattr(self, "submit_" + command.replace(" ", "_").replace("-", "_"))(vm, params)
         return {"task_id": self.server_uuid + ":" + task._moId} if task is not None else {"acknowledged": True, "command": command}
 
     def submit_vm_power_on(self, vm, p):
@@ -277,11 +320,11 @@ class Mutations:
     def submit_vm_snapshot_create(self, vm, p):
         return vm.CreateSnapshot_Task(name=p["snapshot_name"], description=p.get("description", ""), memory=p.get("memory", False), quiesce=p.get("quiesce", False))
 
-    def submit_vm_snapshot_revert(self, vm, p):
-        return self.snapshot(vm, p["snapshot_id"]).snapshot.RevertToSnapshot_Task(suppressPowerOn=True)
+    def submit_vm_snapshot_revert(self, vm, p, snapshot_ref=None):
+        return snapshot_ref.RevertToSnapshot_Task(suppressPowerOn=True)
 
-    def submit_vm_snapshot_delete(self, vm, p):
-        return self.snapshot(vm, p["snapshot_id"]).snapshot.RemoveSnapshot_Task(removeChildren=False)
+    def submit_vm_snapshot_delete(self, vm, p, snapshot_ref=None):
+        return snapshot_ref.RemoveSnapshot_Task(removeChildren=False)
 
     def submit_deploy_mark_template(self, vm, p):
         return vm.MarkAsTemplate()
@@ -335,7 +378,21 @@ class Mutations:
         prefix, task_id = receipt["task_id"].split(":", 1)
         if prefix != self.server_uuid or not re.fullmatch(r"task-\d+", task_id):
             fail("task_identity_mismatch", "任务身份不匹配", 4)
-        info = self.resolver("task", task_id).info
+        task = self.resolver("task", task_id)
+        try:
+            # Post-write evidence: the task can be removed after submit. A
+            # dangling receipt task means the result cannot be proven (unknown/6,
+            # reconcile), never a deterministic not_found (exit 4) that would risk
+            # resending the mutation. A fault naming another object propagates.
+            info = task.info
+        except vmodl.fault.ManagedObjectNotFound as fault:
+            missing = getattr(getattr(fault, "obj", None), "_moId", None)
+            if missing in (task_id, None):
+                return {"state": "unknown", "error": {
+                    "code": "task_state_unknown",
+                    "message": "任务在写后取证时已不存在，远端结果未知需人工核对，不自动重发: " + task_id,
+                    "retryable": False}}
+            raise
         error = info.error
         result = info.result
         observation = {"state": str(info.state), "cancelled": isinstance(error, vmodl.fault.RequestCanceled),
@@ -359,6 +416,10 @@ class Mutations:
         from pyVmomi import vmodl
         try:
             vm = self.vm(params["vm_id"])
+        except OperationError as exc:
+            # vm() normalises a dangling MoRef to vm_not_found; a deleted VM is the
+            # only command whose success postcondition is "the object is gone".
+            return command == "vm delete" and exc.code == "vm_not_found"
         except vmodl.fault.ManagedObjectNotFound:
             return command == "vm delete"
         if vm.config.instanceUuid != binding["instance_uuid"]:

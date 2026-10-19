@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 import re
+import stat
 import sqlite3
 import time
 import uuid
@@ -30,11 +31,13 @@ class Store:
     def __init__(self, path):
         self.path = path
         ensure_private(path.parent)
-        if not path.exists():
+        if path.exists():
+            self._verify_private_db(path)
+        else:
             try:
                 fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             except FileExistsError:
-                pass  # Another process created it before us.
+                self._verify_private_db(path)  # Raced with another process creating it.
             else:
                 os.close(fd)
         self.db = sqlite3.connect(path, timeout=10, isolation_level=None)
@@ -55,10 +58,48 @@ class Store:
             CREATE TABLE IF NOT EXISTS audit (
                 id INTEGER PRIMARY KEY, event TEXT NOT NULL,
                 subject TEXT NOT NULL, created REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_operations_target
+                ON operations(target);
         ''')
 
     def close(self):
         self.db.close()
+
+    @staticmethod
+    def _verify_private_db(path):
+        """Refuse to open a state DB reached through a symlink or unsafe target.
+
+        On POSIX open with O_NOFOLLOW so the kernel rejects a pre-planted link,
+        then validate on the opened descriptor that it is a single-link regular
+        file owned by the current user. Loose group/other bits are tightened to
+        0600 rather than fatal (an older install may carry a permissive umask);
+        a symlink, non-regular file, foreign owner or extra hard link is refused.
+        Non-POSIX keeps the historical connect path.
+        """
+        if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+            return
+        flags = os.O_RDONLY | os.O_NOFOLLOW
+        if hasattr(os, "O_NONBLOCK"):
+            flags |= os.O_NONBLOCK
+        try:
+            fd = os.open(path, flags)
+        except OSError:
+            fail("state_db_unsafe", "状态库路径不可安全打开（拒绝符号链接或非常规文件）", 3)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                fail("state_db_unsafe", "状态库必须是普通文件，拒绝符号链接或特殊文件", 3)
+            if info.st_uid != os.getuid():
+                fail("state_db_unsafe", "状态库不属于当前用户，拒绝打开", 3)
+            if info.st_nlink != 1:
+                fail("state_db_unsafe", "状态库存在额外硬链接，拒绝打开", 3)
+            if info.st_mode & 0o077:
+                try:
+                    os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)  # tighten to 0600
+                except OSError:
+                    fail("state_db_unsafe", "状态库权限过宽且无法收紧为 0600", 3)
+        finally:
+            os.close(fd)
 
     @contextmanager
     def transaction(self):
@@ -176,7 +217,7 @@ class Store:
             busy = self.db.execute("SELECT id FROM operations WHERE target=? AND state IN ('submitting','running','unknown','cancel_requested')",
                                    (op["target"],)).fetchone()
             if busy:
-                fail("target_busy", "目标存在进行中或待核对的操作")
+                fail("target_busy", "目标存在进行中或待核对的操作", 4)
             scope = parent_scope(op["payload"])
             if scope:
                 # The same transaction covers lookup and claim. Profile and

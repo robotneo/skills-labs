@@ -1,4 +1,5 @@
 """Empty VM creation through real SDK methods and offline transport only."""
+import copy
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -318,6 +319,66 @@ class CreationTests(unittest.TestCase):
         self.assertEqual((backing.port.portgroupKey, backing.port.switchUuid), ("pg-key", "switch-uuid"))
         backing.port.switchUuid = "other-switch"
         self.assertFalse(provider.verify("vm create", p, b, observation))
+
+    def _set_disk_option_count(self, fixture, count):
+        """Replace the single VirtualDiskOption with ``count`` equivalent copies.
+
+        Mirrors vCenter 8.0.3 which returns 4 non-deprecated, capability-equivalent
+        VirtualDiskOptions (one per attachable bus). The controller/NIC options at
+        fixed indices are preserved.
+        """
+        options = fixture.option.hardwareOptions.virtualDeviceOption
+        disk_index = next(i for i, o in enumerate(options)
+                          if isinstance(o, vim.vm.device.VirtualDiskOption))
+        original = options[disk_index]
+        equivalent = [copy.deepcopy(original) for _ in range(max(count, 1))]
+        fixture.option.hardwareOptions.virtualDeviceOption = (
+            options[:disk_index] + equivalent + options[disk_index + 1:])
+
+    def test_multiple_equivalent_disk_options_select_one_not_fail(self):
+        # Real 8.0.3 returns 4 equivalent VirtualDiskOptions (D1 regression).
+        f = Fixture()
+        self._set_disk_option_count(f, 4)
+        provider = f.provider()
+        binding = provider.preflight("vm create", PARAMS)
+        hw = binding["hardware"]
+        # Capability-based selection: pick one qualified option, record the basis.
+        self.assertEqual(hw["disk_option_candidates"], 4)
+        self.assertEqual(hw["disk_option_qualified"], 4)
+        self.assertEqual(hw["disk_mode"], "persistent")
+        self.assertEqual(hw["disk_kb"]["max"], 64 * 1024**2)
+        # Plan still builds and submits a single FlatVer2 persistent disk.
+        provider.submit("vm create", PARAMS, binding)
+        devices = [c.device for c in f.calls[0][1][0].deviceChange]
+        disk = devices[1]
+        self.assertIsInstance(disk.backing, vim.vm.device.VirtualDisk.FlatVer2BackingInfo)
+        self.assertEqual((disk.backing.diskMode, disk.backing.thinProvisioned), ("persistent", False))
+
+    def test_zero_qualified_flatver2_backing_is_capability_unsupported(self):
+        # Equivalent multiplicity is fine; removing FlatVer2 from every candidate
+        # is a genuine inability to create a normal disk and must still fail.
+        f = Fixture()
+        self._set_disk_option_count(f, 4)
+        for option in f.option.hardwareOptions.virtualDeviceOption:
+            if isinstance(option, vim.vm.device.VirtualDiskOption):
+                option.backingOption.clear()
+        with self.assertRaises(OperationError) as error:
+            f.provider().preflight("vm create", PARAMS)
+        self.assertEqual(error.exception.code, "capability_unsupported")
+        self.assertEqual(error.exception.exit_code, 4)
+        self.assertEqual(f.calls, [])
+
+    def test_deprecated_disk_options_are_excluded_from_candidates(self):
+        # All disk options deprecated -> no candidate -> capability_unsupported,
+        # proving the helper does not silently fall back to a deprecated option.
+        f = Fixture()
+        self._set_disk_option_count(f, 4)
+        for option in f.option.hardwareOptions.virtualDeviceOption:
+            if isinstance(option, vim.vm.device.VirtualDiskOption):
+                option.deprecated = True
+        with self.assertRaises(OperationError) as error:
+            f.provider().preflight("vm create", PARAMS)
+        self.assertEqual(error.exception.code, "capability_unsupported")
 
     def test_missing_optional_new_fields_use_legacy_constraints(self):
         f = Fixture()

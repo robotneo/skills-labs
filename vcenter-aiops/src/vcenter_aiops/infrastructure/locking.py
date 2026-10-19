@@ -22,12 +22,33 @@ def open_private(path, flags, *, dir_fd=None):
         raise
 
 
+def open_lock(path):
+    """Open the downgrade lock without following a symlink.
+
+    The lock lives in a 0700 user-private directory, but aligning it with the
+    secure path costs nothing: on POSIX refuse a pre-planted symlink and verify,
+    on the opened descriptor, that the target is a single-link regular file.
+    Non-POSIX keeps the historical open (Windows uses a separate locking API).
+    """
+    if os.name == "posix" and hasattr(os, "O_NOFOLLOW"):
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                fail("lock_target_unsafe", "锁文件必须是单一硬链接的普通文件，拒绝符号链接", 3)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+    return os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+
+
 @contextmanager
 def exclusive(path, blocking=True, *, secure=False, dir_fd=None):
     if dir_fd is None:
         ensure_private(path.parent)
     fd = (open_private(path, os.O_CREAT | os.O_RDWR, dir_fd=dir_fd) if secure
-          else os.open(path, os.O_CREAT | os.O_RDWR, 0o600))
+          else open_lock(path))
     with os.fdopen(fd, "r+b") as handle:
         if os.name == "nt":
             import msvcrt

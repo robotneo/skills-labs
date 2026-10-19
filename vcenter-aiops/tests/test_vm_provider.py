@@ -2,7 +2,26 @@ import importlib.util
 from types import SimpleNamespace as NS
 import unittest
 
+from pyVmomi import vim, vmodl
 from vcenter_aiops.domain.models import OperationError
+
+
+def missing_vm(object_id):
+    """Stand-in for a dangling MoRef.
+
+    Mutations.vm() reads ``_moId`` then fetches ``config``; real vCenter raises
+    ManagedObjectNotFound on that first property read of a deleted reference.
+    """
+    fault = vmodl.fault.ManagedObjectNotFound(obj=vim.VirtualMachine(object_id, object()))
+
+    class _MissingVM:
+        def __init__(self):
+            self._moId = object_id
+
+        def __getattr__(self, name):
+            raise fault
+
+    return _MissingVM()
 
 
 class VmProviderTests(unittest.TestCase):
@@ -80,6 +99,32 @@ class VmProviderTests(unittest.TestCase):
         provider.submit("vm snapshot-create", p, provider.preflight("vm snapshot-create", p))
         self.assertEqual(self.calls, [("snapshot-create", {"name": "baseline", "description": "", "memory": False, "quiesce": False})])
 
+    def test_rename_rejects_bad_new_name_before_remote_read(self):
+        provider = self.make()
+        for bad in ("", "a/b", "a\\b", "100%", " leading", "trailing ", "x" * 81,
+                    "vm\u200b", "a\x00b", None):
+            with self.subTest(name=repr(bad)):
+                with self.assertRaises(OperationError) as ctx:
+                    provider.preflight("vm rename", {"vm_id": "vm-1", "new_name": bad})
+                self.assertEqual(ctx.exception.code, "name_invalid")
+                self.assertEqual(ctx.exception.exit_code, 2)
+        # Rejected deterministically before any remote call / task.
+        self.assertEqual(self.calls, [])
+
+    def test_snapshot_create_rejects_bad_label_before_remote_read(self):
+        provider = self.make()
+        for bad in ("", "  x", "x  ", "x" * 81, "vm\u200b", "a\x00b", None):
+            with self.subTest(name=repr(bad)):
+                with self.assertRaises(OperationError) as ctx:
+                    provider.preflight("vm snapshot-create",
+                                       {"vm_id": "vm-1", "snapshot_name": bad})
+                self.assertEqual(ctx.exception.code, "name_invalid")
+                self.assertEqual(ctx.exception.exit_code, 2)
+        # Separators remain legal in a snapshot label.
+        provider.preflight("vm snapshot-create",
+                           {"vm_id": "vm-1", "snapshot_name": "pre/upgrade 100%"})
+        self.assertEqual(self.calls, [])
+
     def test_task_identity_from_other_server_is_rejected(self):
         provider = self.make()
         with self.assertRaises(OperationError):
@@ -125,3 +170,47 @@ class VmProviderTests(unittest.TestCase):
             {"command": "vm power-on", "params": {"vm_id": "vm-1"}},
         ])
         self.assertEqual(steps[1]["binding"]["before"]["memory_mb"], 512)
+
+    def test_dangling_mor_preflight_is_structured_vm_not_found_d3(self):
+        # All four batch power commands on a deleted vm must return vm_not_found
+        # (exit 4), not a top-level internal_error (exit 5).
+        provider = self.make()
+        provider.resolver = lambda kind, oid: missing_vm(oid)
+        for command in ("vm power-on", "vm power-off", "vm shutdown", "vm reset"):
+            with self.subTest(command=command):
+                with self.assertRaises(OperationError) as error:
+                    provider.preflight(command, {"vm_id": "vm-99999999"})
+                self.assertEqual(error.exception.code, "vm_not_found")
+                self.assertEqual(error.exception.exit_code, 4)
+                self.assertIn("vm-99999999", str(error.exception))
+        self.assertEqual(self.calls, [])
+
+    def test_batch_bind_steps_reports_first_missing_vm_d3(self):
+        provider = self.make()
+        def resolver(kind, oid):
+            return missing_vm(oid) if oid == "vm-99999999" else self.vm
+        provider.resolver = resolver
+        with self.assertRaises(OperationError) as error:
+            provider.bind_steps([
+                {"command": "vm power-on", "params": {"vm_id": "vm-1"}},
+                {"command": "vm power-on", "params": {"vm_id": "vm-99999999"}},
+            ])
+        self.assertEqual(error.exception.code, "vm_not_found")
+        self.assertIn("vm-99999999", str(error.exception))
+        self.assertEqual(self.calls, [])
+
+    def test_malformed_vm_id_is_target_invalid_not_not_found_d3(self):
+        provider = self.make()
+        with self.assertRaises(OperationError) as error:
+            provider.preflight("vm power-on", {"vm_id": "not-a-mor"})
+        self.assertEqual(error.exception.code, "target_invalid")
+        self.assertEqual(error.exception.exit_code, 2)
+
+    def test_delete_verify_succeeds_when_vm_gone_d3(self):
+        provider = self.make()
+        binding = provider.preflight("vm power-on", {"vm_id": "vm-1"})
+        provider.resolver = lambda kind, oid: missing_vm(oid)
+        # Only vm delete treats "object is gone" as a satisfied postcondition.
+        self.assertTrue(provider.verify("vm delete", {"vm_id": "vm-1"}, binding, {}))
+        # A non-delete command must not treat a dangling MoRef as success.
+        self.assertFalse(provider.verify("vm power-on", {"vm_id": "vm-1"}, binding, {}))

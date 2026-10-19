@@ -1,12 +1,24 @@
 """Explicit placement, no implicit power-on or network remapping."""
 import re
 from ...domain.models import fail
+from ...domain.naming import valid_name
+from .mor import existing
+
+
+_NOT_FOUND = {
+    "pool": ("resource_pool_not_found", "指定资源池不存在或已被删除: "),
+    "datastore": ("datastore_not_found", "指定数据存储不存在或已被删除: "),
+    "host": ("host_not_found", "指定主机不存在或已被删除: "),
+    "folder": ("folder_not_found", "指定文件夹不存在或已被删除: "),
+}
 
 
 def resource(provider, kind, object_id, pattern):
     if not re.fullmatch(pattern, object_id):
         fail("placement_invalid", "目标资源必须使用精确对象 ID", 2)
     obj = provider.resolver(kind, object_id)
+    code, message = _NOT_FOUND.get(kind, ("target_not_found", "指定目标对象不存在或已被删除: "))
+    existing(lambda: obj.name, object_id, code, message + object_id)
     if not obj.name:
         fail("placement_invalid", "目标资源不可读", 4)
     return obj
@@ -54,8 +66,8 @@ def preflight(provider, vm, params, command):
         folder = objects["folder"]
         if not any(x.rsplit(".", 1)[-1].lower() == "virtualmachine" for x in folder.childType):
             fail("placement_invalid", "目标不是 VM 文件夹", 4)
-        if re.search(r"[/\\%\x00-\x1f]", params["name"]) or len(params["name"]) > 80:
-            fail("name_invalid", "名称须为 1–80 字符，不含路径、百分号和控制字符", 2)
+        if not valid_name(params["name"]):
+            fail("name_invalid", "名称须为 1–80 字符，不含路径、百分号、控制字符或边缘空白", 2)
         if any(child.name == params["name"] for child in folder.childEntity):
             fail("target_exists", "目标文件夹已有同名对象", 4)
         provider.privileges(folder, ("VirtualMachine.Inventory.CreateFromExisting",))

@@ -1,4 +1,4 @@
-# 命令 ↔ Skill 交互核对清单（vcenter-aiops 3.0.0b4）
+# 命令 ↔ Skill 交互核对清单（vcenter-aiops 3.0.0b6）
 
 > **受版本控制的 Skill 交付物**。真值来源：`src/vcenter_aiops/application/registry.py` 的 `COMMANDS`（运行时实测 **112** 条）。本文档由 `scripts/generate_command_interaction.py` 从注册表与 `tests/` 自动生成；**每次增删命令或修改命令契约/参数后必须重跑该脚本并随版本一起提交**，不要手工编辑正文。CLI 示例值均为占位，不代表真实环境。
 
@@ -36,6 +36,12 @@
 ```
 **退出码**：0 成功 / 2 参数错误 / 3 依赖·配置·连接 / 4 前置·身份 / 5 失败·部分 / 6 需核对。远端写命令**不直接提交**：先返回 `awaiting_confirmation`，再用 `plan apply <id> --confirm <digest>` 执行；不可逆操作另需 `--confirm-destruction`。
 
+**风险分级与分级管控（CLI 交互门，真值来源 `domain/risk.py`）**：
+- **低 risk_level=low**：只读/预览，直接执行，无确认。
+- **中 medium**：敏感但可逆/增量（权限·凭据变更、数据外发/导出、系统配置修改、对外发送/来宾执行、终止进程）。执行前打印影响范围与精确目标，终端须键入确认值；非交互须显式 `--yes/-y`（动词前后均可）。
+- **高 high**：不可逆（删除/清空/覆盖/批量/终止）。除确认外，先逐条列出**精确目标**（具体资源、路径、范围、数量），拒绝通配/模糊匹配与过宽范围；终端须先逐字输入精确目标、再输入动作关键字（DELETE/CLEAR/OVERWRITE/TERMINATE）二次确认；`--yes` 仅跳过交互提示，**不放宽**精确目标校验。
+- 经计划引擎的远端写仍以 `digest`（不可逆再加 `DESTROY:<digest>`）为确认值；`batch power-*` 属高风险批量，终端会先枚举每个精确 `vm-N` 与数量，再走 digest/DESTROY。
+
 **离线测试状态分级**：
 - ① **行为级**：测试以 CLI 词元/命令字面量/精确 handler 名直接驱动并断言。
 - ② **逻辑级**：底层纯函数或 Provider 方法被直接单测，命令薄包装层未逐字走 CLI（覆盖等价逻辑）。
@@ -43,7 +49,7 @@
 - ④ **仅契约基线**：仅被全量 schema/`--help` 基线覆盖。
 - 所有远端命令的 6.5/6.7/7.0/8.0 兼容性在 capabilities 中均为 `not_lab_verified`，离线测试**不等于实机验收**。
 
-**覆盖汇总**：总 112 = ①行为级 **74** + ②逻辑级 **34** + ③共享轨 **3** + ④仅契约 **1**。
+**覆盖汇总**：总 112 = ①行为级 **81** + ②逻辑级 **27** + ③共享轨 **3** + ④仅契约 **1**。
 
 > 复核方法：运行 `vcenter-aiops capabilities list`（机器契约）或 `vcenter-aiops capabilities show "领域 动词"`（单条 schema）；离线测试用 `python -m unittest discover -s tests -p "test_*.py" < /dev/null`。再生成/校验本文档：`PYTHONPATH=src python scripts/generate_command_interaction.py`（加 `--check` 仅校验是否最新）。实机验收时建议优先覆盖 ③ 的 3 条与 ② 中的新增写命令。
 
@@ -52,7 +58,7 @@
 
 ## 领域 `version`
 
-### `version`  ·  本地只读
+### `version`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`version`
 - **handler**：`application.commands.local:version`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -65,7 +71,7 @@
 ```text
 vcenter-aiops version
 ```
-- **预期结果**：data={version, product}；当前 version=3.0.0b4。不联网、不建状态。
+- **预期结果**：data={version, product}；当前 version=3.0.0b6。不联网、不建状态。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
   - 备注：test_version_and_doctor_do_not_create_state 以元组词元遍历调用 version/doctor
@@ -75,7 +81,7 @@ vcenter-aiops version
 
 ## 领域 `doctor`
 
-### `doctor`  ·  本地只读
+### `doctor`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`doctor`
 - **handler**：`application.commands.local:doctor`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -98,7 +104,7 @@ vcenter-aiops doctor
 
 ## 领域 `capabilities`
 
-### `capabilities list`  ·  本地只读
+### `capabilities list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`capabilities.list`
 - **handler**：`application.commands.local:capabilities_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -115,7 +121,7 @@ vcenter-aiops capabilities list
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
 
-### `capabilities show`  ·  本地只读
+### `capabilities show`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`capabilities.show`
 - **handler**：`application.commands.local:capabilities_show`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -137,9 +143,10 @@ vcenter-aiops capabilities show alarm reset
 
 ## 领域 `profile`
 
-### `profile add`  ·  本地写入
+### `profile add`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`profile.add`
 - **handler**：`application.commands.local:profile_add`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：permission_change/system_config
 - **所需特权**：—
 - **说明**：添加连接配置
 - **输入参数**：
@@ -160,9 +167,10 @@ vcenter-aiops profile add demo-vm --host <host> --user <user> --password-ref env
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
 
-### `profile delete`  ·  本地写入
+### `profile delete`  ·  本地写入  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`profile.delete`
 - **handler**：`application.commands.local:profile_delete`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：permission_change；不可逆：delete
 - **所需特权**：—
 - **说明**：删除本地配置
 - **输入参数**：
@@ -177,7 +185,7 @@ vcenter-aiops profile delete demo-vm
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
 
-### `profile list`  ·  本地只读
+### `profile list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`profile.list`
 - **handler**：`application.commands.local:profile_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -194,7 +202,7 @@ vcenter-aiops profile list
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
 
-### `profile show`  ·  本地只读
+### `profile show`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`profile.show`
 - **handler**：`application.commands.local:profile_show`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -211,7 +219,7 @@ vcenter-aiops profile show demo-vm
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
 
-### `profile test`  ·  远端只读
+### `profile test`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`profile.test`
 - **handler**：`application.commands.queries:profile_test`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -229,9 +237,10 @@ vcenter-aiops profile test
   - 覆盖文件：`test_secrets.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `profile update`  ·  本地写入
+### `profile update`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`profile.update`
 - **handler**：`application.commands.local:profile_update`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：permission_change/system_config
 - **所需特权**：—
 - **说明**：只更新指定字段
 - **输入参数**：
@@ -257,7 +266,7 @@ vcenter-aiops profile update demo-vm --host <host> --user <user> --password-ref 
 
 ## 领域 `ip`
 
-### `ip available`  ·  远端只读
+### `ip available`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`ip.available`
 - **handler**：`application.commands.queries:ip_available`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -273,10 +282,10 @@ vcenter-aiops --profile lab ip available --address 10.10.50.21 --scope vlan50
 ```
 - **预期结果**：仅在有正向空闲证据时 available=true，否则 false 并给 reasons/inconclusive。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`
+  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `ip check`  ·  远端只读
+### `ip check`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`ip.check`
 - **handler**：`application.commands.queries:ip_check`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -292,10 +301,10 @@ vcenter-aiops --profile lab ip check --address 10.10.50.21 --scope vlan50
 ```
 - **预期结果**：data 汇总 inventory_use + active_lease + ping 三路信号；ping 不通只标记 inconclusive，不判空闲。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`
+  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `ip expire`  ·  本地只读
+### `ip expire`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`ip.expire`
 - **handler**：`application.commands.local:ip_expire`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -310,10 +319,10 @@ vcenter-aiops --profile lab ip check --address 10.10.50.21 --scope vlan50
 vcenter-aiops ip expire --lease-id <lease-id>
 ```
 - **预期结果**：data.items 列已过期租约；仅 --apply + 精确 lease_id 才释放。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_ip_signals.py`, `test_risk_classification.py`
 
-### `ip list`  ·  本地只读
+### `ip list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`ip.list`
 - **handler**：`application.commands.local:ip_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -328,11 +337,12 @@ vcenter-aiops ip list --scope vlan50
 ```
 - **预期结果**：data.items 为租约列表（token/scope/ip/owner/expires）。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`
+  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`
 
-### `ip release`  ·  本地写入
+### `ip release`  ·  本地写入  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`ip.release`
 - **handler**：`application.commands.local:ip_release`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：不可逆：delete
 - **所需特权**：—
 - **说明**：释放精确租约
 - **输入参数**：
@@ -345,11 +355,12 @@ vcenter-aiops ip release <lease-id>
 ```
 - **预期结果**：按精确 lease_id 释放；非过期/不存在返回 lease_not_expired。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`
+  - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`
 
-### `ip reserve`  ·  本地写入
+### `ip reserve`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`ip.reserve`
 - **handler**：`application.commands.local:ip_reserve`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：system_config
 - **所需特权**：—
 - **说明**：事务预留网络作用域内 IP
 - **输入参数**：
@@ -365,16 +376,17 @@ vcenter-aiops ip reserve --scope vlan50 --ip <ip> --owner ops --minutes 1
 ```
 - **预期结果**：在 scope 内事务预留 IP，返回租约 token/到期；冲突被唯一约束拒绝。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_contracts.py`
+  - 覆盖文件：`test_cache_invalidate_token_m4.py`, `test_contracts.py`
 
 
 ---
 
 ## 领域 `plan`
 
-### `plan apply`  ·  编排/恢复
+### `plan apply`  ·  编排/恢复  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`plan.apply`
 - **handler**：`application.commands.changes:plan_apply`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：system_config
 - **所需特权**：—
 - **说明**：确认并执行固定计划
 - **输入参数**：
@@ -390,10 +402,10 @@ vcenter-aiops --profile lab plan apply <plan-id>
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_guest_processes.py`, `test_linked_clone_strict.py`, `test_write_cli.py`
+  - 覆盖文件：`test_delete_guarded_channel.py`, `test_guest_processes.py`, `test_linked_clone_strict.py`, `test_tls_warning.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `plan archive`  ·  本地写入
+### `plan archive`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`plan.archive`
 - **handler**：`application.commands.plans:plan_archive`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -408,9 +420,9 @@ vcenter-aiops --profile lab plan archive <plan-id>
 ```
 - **预期结果**：本地写入：仅改本机状态（config.yaml/state.db/secrets.json），不联网；失败以错误信封返回。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
-### `plan create`  ·  编排/恢复
+### `plan create`  ·  编排/恢复  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.create`
 - **handler**：`application.commands.plans:plan_create`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -429,7 +441,7 @@ vcenter-aiops --profile lab plan create --file ./out.json
   - 覆盖文件：`test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `plan list`  ·  本地只读
+### `plan list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.list`
 - **handler**：`application.commands.local:plan_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -444,9 +456,9 @@ vcenter-aiops --profile lab plan list
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
-### `plan reconcile`  ·  远端只读
+### `plan reconcile`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.reconcile`
 - **handler**：`application.commands.changes:plan_reconcile`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -462,10 +474,10 @@ vcenter-aiops --profile lab plan reconcile <plan-id>
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `plan rollback`  ·  编排/恢复
+### `plan rollback`  ·  编排/恢复  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.rollback`
 - **handler**：`application.commands.plans:plan_rollback`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -480,10 +492,10 @@ vcenter-aiops --profile lab plan rollback <plan-id>
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `plan show`  ·  本地只读
+### `plan show`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.show`
 - **handler**：`application.commands.local:plan_show`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -498,9 +510,9 @@ vcenter-aiops --profile lab plan show <plan-id>
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
-### `plan validate`  ·  远端只读
+### `plan validate`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.validate`
 - **handler**：`application.commands.plans:plan_validate`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -524,9 +536,10 @@ vcenter-aiops --profile lab plan validate <plan-id>
 
 ## 领域 `audit`
 
-### `audit export`  ·  本地写入
+### `audit export`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`audit.export`
 - **handler**：`application.commands.local:audit_export`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：data_export
 - **所需特权**：—
 - **说明**：导出脱敏 JSON 证据，拒绝覆盖已有文件
 - **输入参数**：
@@ -542,9 +555,9 @@ vcenter-aiops --profile lab audit export --file ./out.json --limit 1 --after-id 
 ```
 - **预期结果**：本地写入：仅改本机状态（config.yaml/state.db/secrets.json），不联网；失败以错误信封返回。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_audit.py`
+  - 覆盖文件：`test_audit.py`, `test_hardening_r6.py`, `test_risk_classification.py`
 
-### `audit list`  ·  本地只读
+### `audit list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`audit.list`
 - **handler**：`application.commands.local:audit_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -568,9 +581,10 @@ vcenter-aiops --profile lab audit list --limit 1 --after-id 0 --snapshot-max-id 
 
 ## 领域 `inventory`
 
-### `inventory export`  ·  远端只读
+### `inventory export`  ·  远端只读  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`inventory.export`
 - **handler**：`application.commands.queries:inventory_export`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：data_export
 - **所需特权**：—
 - **说明**：导出资产到新文件，不覆盖已有文件；json/csv，外部字段转义
 - **输入参数**：
@@ -585,11 +599,11 @@ vcenter-aiops --profile lab audit list --limit 1 --after-id 0 --snapshot-max-id 
 vcenter-aiops --profile lab inventory export --file ./out.json --kind vm --format json --limit 1
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_risk_classification.py`, `test_risk_gate_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `inventory list`  ·  远端只读
+### `inventory list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`inventory.list`
 - **handler**：`application.commands.queries:inventory_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -613,7 +627,7 @@ vcenter-aiops --profile lab inventory list --limit 1 --kind vm
 
 ## 领域 `events`
 
-### `events list`  ·  远端只读
+### `events list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`events.list`
 - **handler**：`application.commands.queries:events_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -632,7 +646,7 @@ vcenter-aiops --profile lab events list --vm-id vm-101 --host-id host-21 --since
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cluster_lifecycle.py`, `test_contracts.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_guest_transfer.py`, `test_guest_windows.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_ip_signals.py`, `test_license_entitlements.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_ops_extensions.py`, `test_ovf.py`, `test_ovf_deploy.py`, `test_ovf_lease.py`, `test_placement.py`, `test_plans.py`, `test_provider.py`, `test_provider_routing.py`, `test_read_models.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cache_invalidate_token_m4.py`, `test_cache_refresh_m3.py`, `test_capacity_int_l11.py`, `test_cluster_lifecycle.py`, `test_contracts.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_debug_log_rotation_m6.py`, `test_delete_guarded_channel.py`, `test_diagnostics_m5.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_failure_category_l5.py`, `test_foundation.py`, `test_guest_customize.py`, `test_guest_customize_flow.py`, `test_guest_file_commands_h1.py`, `test_guest_http_tls_h2.py`, `test_guest_observe_cache.py`, `test_guest_processes.py`, `test_guest_transfer.py`, `test_guest_windows.py`, `test_hardening_r5.py`, `test_hardening_r6.py`, `test_history_presets_policy.py`, `test_host_dangling_mor.py`, `test_host_maintenance.py`, `test_ip_signals.py`, `test_license_entitlements.py`, `test_linked_clone_strict.py`, `test_linked_mount_m7.py`, `test_membership.py`, `test_name_vocabulary_r4.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_operation_state.py`, `test_ops_extensions.py`, `test_ovf.py`, `test_ovf_bomb_m8.py`, `test_ovf_deploy.py`, `test_ovf_http_m9.py`, `test_ovf_lease.py`, `test_ovf_placement_m6.py`, `test_ovf_verify_m8.py`, `test_paths.py`, `test_ping_timeout_l8.py`, `test_placement.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_privilege_helper_r4.py`, `test_provider.py`, `test_provider_routing.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_real_type_contracts.py`, `test_risk_classification.py`, `test_risk_gate_cli.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_search_submit_classify_r6.py`, `test_secrets.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_target_whitespace_m5.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_template_clone_h3.py`, `test_template_clone_hardening.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -640,7 +654,7 @@ vcenter-aiops --profile lab events list --vm-id vm-101 --host-id host-21 --since
 
 ## 领域 `quota`
 
-### `quota check`  ·  远端只读
+### `quota check`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`quota.check`
 - **handler**：`application.commands.queries:quota_check`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -660,7 +674,7 @@ vcenter-aiops --profile lab quota check --cluster-id domain-c7 --host-id host-21
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_ops_extensions.py`, `test_ovf_lease.py`, `test_real_type_contracts.py`
+  - 覆盖文件：`test_capacity_int_l11.py`, `test_dangling_mor_matrix.py`, `test_ops_extensions.py`, `test_ovf_lease.py`, `test_real_type_contracts.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -668,9 +682,10 @@ vcenter-aiops --profile lab quota check --cluster-id domain-c7 --host-id host-21
 
 ## 领域 `vm`
 
-### `vm clone`  ·  远端写（确认执行）
+### `vm clone`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.clone`
 - **handler**：`application.commands.changes:vm_clone`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Provisioning.Clone`
 - **说明**：克隆为关机 VM，不隐式预留 IP 或改网
 - **输入参数**：
@@ -694,9 +709,10 @@ vcenter-aiops --profile lab vm clone --vm-id vm-101 --pool-id resgroup-9 --datas
   - 覆盖文件：`test_placement.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm create`  ·  远端写（确认执行）
+### `vm create`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.create`
 - **handler**：`application.commands.creation:vm_create`　|　**provider_kind**：`creation`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Inventory.Create`, `VirtualMachine.Config.AddNewDisk`, `Resource.AssignVMToPool`, `Datastore.AllocateSpace`, `Network.Assign`
 - **说明**：创建关机空白 VM；容量单位 GiB，不分配 IP
 - **输入参数**：
@@ -722,33 +738,36 @@ vcenter-aiops --profile lab vm create --name demo-vm --folder-id group-v4 --pool
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_vm_creation.py`
+  - 覆盖文件：`test_submit_rejection_m2.py`, `test_vm_creation.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm delete`  ·  远端写（确认执行）
+### `vm delete`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`vm.delete`
 - **handler**：`application.commands.changes:vm_delete`　|　**provider_kind**：`vm`　|　**风险**：destructive　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：delete
 - **所需特权**：`VirtualMachine.Inventory.Delete`
-- **说明**：严格保护：无法排除外部链接磁盘依赖时拒绝销毁；当前无全局排除证据，不能执行
+- **说明**：受控销毁：先做全 vCenter 清单扫描证明本 vCenter 内无其他 VM/模板或快照引用其磁盘链；跨 vCenter/独立 ESXi 不可见，仍须显式 --allow-shared-datastore 担保并经 plan apply 双重确认，否则拒绝
 - **输入参数**：
 | 参数 | 类型 | 必填 | 形态 | 默认 | 约束 | 说明 |
 |---|---|---|---|---|---|---|
 | vm_id | string | 是 | 选项 | （必填） | — | 精确 VM 对象 ID，如 vm-123 |
+| allow_shared_datastore | boolean | 否 | 选项 | `false` | — | 操作者已确认该 VM 的共享数据存储未被本 vCenter 之外的其他 vCenter 或独立 ESXi 挂载引用；缺省不放行 |
 | dry_run | boolean | 否 | 选项 | `false` | — |  |
 | request_id | string | 否 | 选项 | 无默认 | — |  |
 | wait | boolean | 否 | 选项 | `true` | — |  |
 - **触发方式（CLI，占位值）**：
 ```text
-vcenter-aiops --profile lab vm delete --vm-id vm-101
+vcenter-aiops --profile lab vm delete --vm-id vm-101 --allow-shared-datastore
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_execution.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_cache_invalidate_token_m4.py`, `test_delete_guarded_channel.py`, `test_execution.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_risk_classification.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-customize`  ·  远端写（确认执行）
+### `vm guest-customize`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_customize`
 - **handler**：`application.commands.guest:guest_customize`　|　**provider_kind**：`guest`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.GuestOperations.Execute`, `VirtualMachine.GuestOperations.Query`
 - **说明**：按声明式规格（hostname/IP/掩码/网关/DNS）经固定包装器对已开机 VM 来宾定制；不隐式开机，提交成功不等同来宾配置完成
 - **输入参数**：
@@ -773,9 +792,10 @@ vcenter-aiops --profile lab vm guest-customize --vm-id vm-101 --guest-username r
   - 覆盖文件：`test_guest_customize.py`, `test_guest_customize_flow.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-download`  ·  远端只读
+### `vm guest-download`  ·  远端只读  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_download`
 - **handler**：`application.commands.guest:guest_download`　|　**provider_kind**：`guest`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：data_export
 - **所需特权**：`VirtualMachine.GuestOperations.Query`
 - **说明**：从 Guest 下载单个有界文件（≤4MiB）到本地新文件，拒绝覆盖与路径穿越
 - **输入参数**：
@@ -792,13 +812,14 @@ vcenter-aiops --profile lab vm guest-customize --vm-id vm-101 --guest-username r
 vcenter-aiops --profile lab vm guest-download --vm-id vm-101 --guest-username root --credential-ref env:GUEST_PASS --os-family linux
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_guest_transfer.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_guest_file_commands_h1.py`, `test_risk_classification.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-exec`  ·  远端写（确认执行）
+### `vm guest-exec`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_exec`
 - **handler**：`application.commands.guest:guest_exec`　|　**provider_kind**：`guest`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.GuestOperations.Execute`, `VirtualMachine.GuestOperations.Query`
 - **说明**：预览显式 Python 包装器；输出丢弃，完成由独立运行标识核对
 - **输入参数**：
@@ -822,12 +843,13 @@ vcenter-aiops --profile lab vm guest-exec --vm-id vm-101 --guest-username root -
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`
+  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_file_commands_h1.py`, `test_guest_observe_cache.py`, `test_guest_processes.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-exec-output`  ·  远端写（确认执行）
+### `vm guest-exec-output`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_exec_output`
 - **handler**：`application.commands.guest:guest_exec_output`　|　**provider_kind**：`guest`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.GuestOperations.Execute`, `VirtualMachine.GuestOperations.Query`
 - **说明**：执行并在 Guest 侧有界捕获 stdout/stderr（各 ≤64KiB）；完成绑定本次 run-id，不凭 PID 判定
 - **输入参数**：
@@ -850,11 +872,11 @@ vcenter-aiops --profile lab vm guest-exec --vm-id vm-101 --guest-username root -
 vcenter-aiops --profile lab vm guest-exec-output --vm-id vm-101 --guest-username root --credential-ref env:GUEST_PASS --os-family linux
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_guest_transfer.py`, `test_provider_routing.py`, `test_secrets.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_guest_file_commands_h1.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-output`  ·  远端只读
+### `vm guest-output`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.guest_output`
 - **handler**：`application.commands.guest:guest_output`　|　**provider_kind**：`guest`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：`VirtualMachine.GuestOperations.Query`
@@ -874,7 +896,7 @@ vcenter-aiops --profile lab vm guest-output <run_id>
   - 备注：凭 run-id 经 store.guest_run 反查只读；输出解码/标记解析由纯逻辑覆盖，无独立 CLI 字面用例
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-process-status`  ·  远端只读
+### `vm guest-process-status`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.guest_process_status`
 - **handler**：`application.commands.guest:guest_process_status`　|　**provider_kind**：`guest`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：`VirtualMachine.GuestOperations.Query`
@@ -893,9 +915,10 @@ vcenter-aiops --profile lab vm guest-process-status <op-id>
   - 覆盖文件：`test_guest_processes.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm guest-upload`  ·  远端写（确认执行）
+### `vm guest-upload`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_upload`
 - **handler**：`application.commands.guest:guest_upload`　|　**provider_kind**：`guest`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：outbound_send
 - **所需特权**：`VirtualMachine.GuestOperations.Execute`
 - **说明**：上传本地文件（≤4MiB）到 Guest 精确路径；默认拒绝覆盖，显式 overwrite 才覆盖
 - **输入参数**：
@@ -913,11 +936,11 @@ vcenter-aiops --profile lab vm guest-process-status <op-id>
 vcenter-aiops --profile lab vm guest-upload --vm-id vm-101 --guest-username root --credential-ref env:GUEST_PASS --os-family linux
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_guest_transfer.py`, `test_ovf_lease.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_guest_file_commands_h1.py`, `test_risk_classification.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm inspect`  ·  远端只读
+### `vm inspect`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.inspect`
 - **handler**：`application.commands.queries:vm_inspect`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -936,7 +959,7 @@ vcenter-aiops --profile lab vm inspect --id <id> --name demo-vm
   - 覆盖文件：`test_contracts.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm list`  ·  远端只读
+### `vm list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.list`
 - **handler**：`application.commands.queries:vm_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -951,12 +974,13 @@ vcenter-aiops --profile lab vm list --limit 1
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_membership.py`, `test_provider.py`, `test_read_models.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_membership.py`, `test_provider.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm migrate`  ·  远端写（确认执行）
+### `vm migrate`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.migrate`
 - **handler**：`application.commands.changes:vm_migrate`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`Resource.ColdMigrate`
 - **说明**：省略 datastore_id 仅允许明确无磁盘且无 NVDIMM 的计算迁移；带磁盘时缺 PBM 策略证据而拒绝；指定存储也拒绝
 - **输入参数**：
@@ -978,9 +1002,10 @@ vcenter-aiops --profile lab vm migrate --vm-id vm-101 --pool-id resgroup-9 --hos
   - 覆盖文件：`test_linked_clone_strict.py`, `test_placement.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm power-off`  ·  远端写（确认执行）
+### `vm power-off`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.power_off`
 - **handler**：`application.commands.changes:vm_power_off`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Interact.PowerOff`
 - **说明**：强制关机，可能丢失未保存数据
 - **输入参数**：
@@ -996,12 +1021,13 @@ vcenter-aiops --profile lab vm power-off --vm-id vm-101
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_provider_routing.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_provider_routing.py`, `test_risk_gate_cli.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm power-on`  ·  远端写（确认执行）
+### `vm power-on`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.power_on`
 - **handler**：`application.commands.changes:vm_power_on`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Interact.PowerOn`
 - **说明**：预览开机，不隐式创建 VM
 - **输入参数**：
@@ -1017,12 +1043,13 @@ vcenter-aiops --profile lab vm power-on --vm-id vm-101
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_execution.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_provider_routing.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_diagnostics_m5.py`, `test_execution.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_observation_serial_m10.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_tls_warning.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm reconfigure`  ·  远端写（确认执行）
+### `vm reconfigure`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.reconfigure`
 - **handler**：`application.commands.changes:vm_reconfigure`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Config.CPUCount`, `VirtualMachine.Config.Memory`, `VirtualMachine.Config.DiskExtend`, `VirtualMachine.Config.AddNewDisk`
 - **说明**：关机状态下修改 CPU/内存及显式磁盘列表；容量单位 GiB；磁盘不可补偿
 - **输入参数**：
@@ -1041,12 +1068,13 @@ vcenter-aiops --profile lab vm reconfigure --vm-id vm-101 --cpu 1 --memory-gb 1 
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_plans.py`, `test_provider_routing.py`, `test_vm_devices.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_capacity_int_l11.py`, `test_dangling_mor_matrix.py`, `test_plans.py`, `test_provider_routing.py`, `test_vm_devices.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm rename`  ·  远端写（确认执行）
+### `vm rename`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.rename`
 - **handler**：`application.commands.changes:vm_rename`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Config.Rename`
 - **说明**：只修改 VM 名称
 - **输入参数**：
@@ -1063,12 +1091,13 @@ vcenter-aiops --profile lab vm rename --vm-id vm-101 --new-name demo-vm-renamed
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_history_presets_policy.py`, `test_plans.py`
+  - 覆盖文件：`test_history_presets_policy.py`, `test_plans.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm reset`  ·  远端写（确认执行）
+### `vm reset`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.reset`
 - **handler**：`application.commands.changes:vm_reset`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Interact.Reset`
 - **说明**：硬重置 VM
 - **输入参数**：
@@ -1087,9 +1116,10 @@ vcenter-aiops --profile lab vm reset --vm-id vm-101
   - 备注：经 Engine+Mutations 共享写轨；专属 ResetVM_Task 分支无离线用例
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm shutdown`  ·  远端写（确认执行）
+### `vm shutdown`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.shutdown`
 - **handler**：`application.commands.changes:vm_shutdown`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Interact.PowerOff`
 - **说明**：优雅关机，不回退强制关机
 - **输入参数**：
@@ -1108,9 +1138,10 @@ vcenter-aiops --profile lab vm shutdown --vm-id vm-101
   - 覆盖文件：`test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm snapshot-create`  ·  远端写（确认执行）
+### `vm snapshot-create`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.snapshot_create`
 - **handler**：`application.commands.changes:vm_snapshot_create`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.State.CreateSnapshot`
 - **说明**：创建快照，不默认为内存快照
 - **输入参数**：
@@ -1133,9 +1164,10 @@ vcenter-aiops --profile lab vm snapshot-create --vm-id vm-101 --snapshot-name sn
   - 覆盖文件：`test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm snapshot-delete`  ·  远端写（确认执行）
+### `vm snapshot-delete`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`vm.snapshot_delete`
 - **handler**：`application.commands.changes:vm_snapshot_delete`　|　**provider_kind**：`vm`　|　**风险**：destructive　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：delete
 - **所需特权**：`VirtualMachine.State.RemoveSnapshot`
 - **说明**：严格保护：无法排除外部链接磁盘依赖时拒绝清理；当前不能执行
 - **输入参数**：
@@ -1152,10 +1184,10 @@ vcenter-aiops --profile lab vm snapshot-delete --vm-id vm-101 --snapshot-id snap
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_linked_clone_strict.py`
+  - 覆盖文件：`test_linked_clone_strict.py`, `test_risk_classification.py`, `test_snapshot_submit_m1.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm snapshot-list`  ·  远端只读
+### `vm snapshot-list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.snapshot_list`
 - **handler**：`application.commands.queries:vm_snapshot_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1174,9 +1206,10 @@ vcenter-aiops --profile lab vm snapshot-list --vm-id vm-101 --limit 1
   - 覆盖文件：`test_read_models.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm snapshot-revert`  ·  远端写（确认执行）
+### `vm snapshot-revert`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`vm.snapshot_revert`
 - **handler**：`application.commands.changes:vm_snapshot_revert`　|　**provider_kind**：`vm`　|　**风险**：destructive　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：delete
 - **所需特权**：`VirtualMachine.State.RevertToSnapshot`
 - **说明**：严格保护：无法排除外部链接磁盘依赖时拒绝恢复；当前不能执行
 - **输入参数**：
@@ -1193,12 +1226,13 @@ vcenter-aiops --profile lab vm snapshot-revert --vm-id vm-101 --snapshot-id snap
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_linked_clone_strict.py`
+  - 覆盖文件：`test_linked_clone_strict.py`, `test_risk_classification.py`, `test_snapshot_submit_m1.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm suspend`  ·  远端写（确认执行）
+### `vm suspend`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.suspend`
 - **handler**：`application.commands.changes:vm_suspend`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Interact.Suspend`
 - **说明**：挂起 VM
 - **输入参数**：
@@ -1217,7 +1251,7 @@ vcenter-aiops --profile lab vm suspend --vm-id vm-101
   - 备注：经 Engine+Mutations 共享写轨；专属 SuspendVM_Task 分支无离线用例
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm tools-status`  ·  远端只读
+### `vm tools-status`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.tools_status`
 - **handler**：`application.commands.queries:vm_tools_status`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1235,7 +1269,7 @@ vcenter-aiops --profile lab vm tools-status --vm-id vm-101
   - 覆盖文件：`test_read_models.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `vm wait-tools`  ·  远端只读
+### `vm wait-tools`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.wait_tools`
 - **handler**：`application.commands.queries:vm_wait_tools`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1250,7 +1284,7 @@ vcenter-aiops --profile lab vm wait-tools --vm-id vm-101
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_read_models.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_datastore_m3.py`, `test_delete_guarded_channel.py`, `test_execution.py`, `test_failure_category_l5.py`, `test_guest_customize_flow.py`, `test_guest_observe_cache.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_observation_serial_m10.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_read_models.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_snapshot_submit_m1.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_tls_warning.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1258,9 +1292,10 @@ vcenter-aiops --profile lab vm wait-tools --vm-id vm-101
 
 ## 领域 `template`
 
-### `template convert`  ·  远端写（确认执行）
+### `template convert`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`template.convert`
 - **handler**：`application.commands.changes:template_convert`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Provisioning.MarkAsVM`, `Resource.AssignVMToPool`
 - **说明**：将精确模板转换为 VM，不改名不开机
 - **输入参数**：
@@ -1281,7 +1316,7 @@ vcenter-aiops --profile lab template convert --vm-id vm-101 --pool-id resgroup-9
   - 覆盖文件：`test_templates_linked.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `template inspect`  ·  远端只读
+### `template inspect`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`template.inspect`
 - **handler**：`application.commands.queries:template_inspect`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1297,10 +1332,10 @@ vcenter-aiops --profile lab template inspect --id <id> --name demo-vm
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_delete_guarded_channel.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_snapshot_submit_m1.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_template_clone_h3.py`, `test_template_clone_hardening.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `template list`  ·  远端只读
+### `template list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`template.list`
 - **handler**：`application.commands.queries:template_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1315,7 +1350,7 @@ vcenter-aiops --profile lab template list --limit 1
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_delete_guarded_channel.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_snapshot_submit_m1.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_template_clone_h3.py`, `test_template_clone_hardening.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1323,9 +1358,10 @@ vcenter-aiops --profile lab template list --limit 1
 
 ## 领域 `deploy`
 
-### `deploy clone-template`  ·  远端写（确认执行）
+### `deploy clone-template`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.clone_template`
 - **handler**：`application.commands.changes:deploy_clone_template`　|　**provider_kind**：`template_clone`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Provisioning.DeployTemplate`, `VirtualMachine.Inventory.CreateFromExisting`, `Resource.AssignVMToPool`, `Datastore.AllocateSpace`, `Network.Assign`, `VirtualMachine.Interact.PowerOn`, `VirtualMachine.Provisioning.Customize`
 - **说明**：对齐 vcenter-ops 克隆模版标准流程：从模板一次性克隆；可选改网/CPU/内存/磁盘扩容/静态 IP（给 IP 即开机 Linux 定制，不给则关机）；host_id 省略走集群 DRS
 - **输入参数**：
@@ -1358,9 +1394,10 @@ vcenter-aiops --profile lab deploy clone-template --vm-id vm-101 --name demo-vm 
   - 备注：Provider preflight/submit/observe/verify 全链路 + Engine preview/apply/去重/取消/补偿边界被直接断言；命令仅为薄 preview 包装层，未逐字走 CLI（路径字面量仅作 preflight 实参）
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy iso`  ·  远端写（确认执行）
+### `deploy iso`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.iso`
 - **handler**：`application.commands.changes:deploy_iso`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Config.EditDevice`, `VirtualMachine.Interact.SetCDMedia`, `VirtualMachine.Interact.DeviceConnection`, `Datastore.Browse`
 - **说明**：编辑已有光驱装载 ISO；先 browse/scan + search-status 完成搜索，search_id 创建时间须在300秒内
 - **输入参数**：
@@ -1383,9 +1420,10 @@ vcenter-aiops --profile lab deploy iso --vm-id vm-101 --cdrom-key 1 --datastore-
   - 覆盖文件：`test_vm_media.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy linked-clone`  ·  远端写（确认执行）
+### `deploy linked-clone`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.linked_clone`
 - **handler**：`application.commands.linked:deploy_linked_clone`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Provisioning.Clone`, `VirtualMachine.Inventory.CreateFromExisting`, `Resource.AssignVMToPool`, `Datastore.AllocateSpace`, `Datastore.Browse`, `Network.Assign`
 - **说明**：从精确父 UUID/快照创建关机链接克隆；依赖长期保留，不能排除依赖时拒绝父磁盘清理；许可最终由服务端校验
 - **输入参数**：
@@ -1408,12 +1446,13 @@ vcenter-aiops --profile lab deploy linked-clone --vm-id vm-101 --parent-uuid <pa
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_linked_clone_strict.py`
+  - 覆盖文件：`test_delete_guarded_channel.py`, `test_linked_clone_strict.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy mark-template`  ·  远端写（确认执行）
+### `deploy mark-template`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.mark_template`
 - **handler**：`application.commands.changes:deploy_mark_template`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Provisioning.MarkAsTemplate`
 - **说明**：只转换为模板，不重命名
 - **输入参数**：
@@ -1432,9 +1471,10 @@ vcenter-aiops --profile lab deploy mark-template --vm-id vm-101
   - 备注：经 Engine+Mutations 共享写轨；专属 MarkAsTemplate 分支无离线用例
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy ova`  ·  远端写（确认执行）
+### `deploy ova`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.ova`
 - **handler**：`application.commands.ovf:deploy_ova`　|　**provider_kind**：`ovf`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VApp.Import`, `Datastore.AllocateSpace`, `Datastore.Browse`, `Network.Assign`, `Resource.AssignVMToPool`
 - **说明**：从本地单文件 OVA 导入关机 VM/ vApp：先安全解包（拒绝路径穿越）与描述符/网络/磁盘校验，再 OvfManager + NFC 上传；默认不开机、不隐式定制；中断须核对不重发
 - **输入参数**：
@@ -1457,12 +1497,13 @@ vcenter-aiops --profile lab deploy ova <source> --work-dir <work_dir> --name dem
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_foundation.py`
+  - 覆盖文件：`test_foundation.py`, `test_ovf_placement_m6.py`, `test_ovf_verify_m8.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy ovf`  ·  远端写（确认执行）
+### `deploy ovf`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.ovf`
 - **handler**：`application.commands.ovf:deploy_ovf`　|　**provider_kind**：`ovf`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VApp.Import`, `Datastore.AllocateSpace`, `Datastore.Browse`, `Network.Assign`, `Resource.AssignVMToPool`
 - **说明**：从本地 OVF 目录（descriptor.ovf + 引用磁盘）导入关机 VM/ vApp：校验映射后 OvfManager + NFC 上传；默认不开机、不隐式定制；中断须核对不重发
 - **输入参数**：
@@ -1485,12 +1526,13 @@ vcenter-aiops --profile lab deploy ovf <source> --work-dir <work_dir> --name dem
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_foundation.py`, `test_ovf_deploy.py`
+  - 覆盖文件：`test_foundation.py`, `test_ovf_deploy.py`, `test_ovf_placement_m6.py`, `test_ovf_verify_m8.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy template`  ·  远端写（确认执行）
+### `deploy template`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.template`
 - **handler**：`application.commands.changes:deploy_template`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Provisioning.DeployTemplate`
 - **说明**：从模板部署关机 VM
 - **输入参数**：
@@ -1514,9 +1556,10 @@ vcenter-aiops --profile lab deploy template --vm-id vm-101 --pool-id resgroup-9 
   - 覆盖文件：`test_placement.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `deploy unmount-iso`  ·  远端写（确认执行）
+### `deploy unmount-iso`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.unmount_iso`
 - **handler**：`application.commands.changes:deploy_unmount_iso`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`VirtualMachine.Config.EditDevice`, `VirtualMachine.Interact.SetCDMedia`, `VirtualMachine.Interact.DeviceConnection`
 - **说明**：断开并清除已有光驱介质，不删除 ISO
 - **输入参数**：
@@ -1541,7 +1584,7 @@ vcenter-aiops --profile lab deploy unmount-iso --vm-id vm-101 --cdrom-key 1
 
 ## 领域 `host`
 
-### `host info`  ·  远端只读
+### `host info`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`host.info`
 - **handler**：`application.commands.queries:host_info`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1557,12 +1600,13 @@ vcenter-aiops --profile lab host info --id <id> --name demo-vm
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_membership.py`, `test_provider.py`, `test_read_models.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_membership.py`, `test_provider.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `host maintenance-enter`  ·  远端写（确认执行）
+### `host maintenance-enter`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`host.maintenance_enter`
 - **handler**：`application.commands.hosts:host_maintenance_enter`　|　**provider_kind**：`host`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`Host.Config.Maintenance`
 - **说明**：显式预览 VM/DRS 影响后让精确主机进入维护模式
 - **输入参数**：
@@ -1581,12 +1625,13 @@ vcenter-aiops --profile lab host maintenance-enter --host-id host-21 --task-time
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_host_maintenance.py`
+  - 覆盖文件：`test_host_dangling_mor.py`, `test_host_maintenance.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `host maintenance-exit`  ·  远端写（确认执行）
+### `host maintenance-exit`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`host.maintenance_exit`
 - **handler**：`application.commands.hosts:host_maintenance_exit`　|　**provider_kind**：`host`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`Host.Config.Maintenance`
 - **说明**：让精确主机退出维护模式，不创建额外撤离操作
 - **输入参数**：
@@ -1603,7 +1648,7 @@ vcenter-aiops --profile lab host maintenance-exit --host-id host-21 --task-timeo
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_host_maintenance.py`
+  - 覆盖文件：`test_host_maintenance.py`, `test_submit_rejection_m2.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1611,9 +1656,10 @@ vcenter-aiops --profile lab host maintenance-exit --host-id host-21 --task-timeo
 
 ## 领域 `cluster`
 
-### `cluster configure`  ·  远端写（确认执行）
+### `cluster configure`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`cluster.configure`
 - **handler**：`application.commands.clusters:cluster_configure`　|　**provider_kind**：`cluster`　|　**风险**：change　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`Host.Inventory.EditCluster`
 - **说明**：只增量修改明确选择的 HA/DRS 字段
 - **输入参数**：
@@ -1636,9 +1682,10 @@ vcenter-aiops --profile lab cluster configure --cluster-id domain-c7 --ha-enable
   - 覆盖文件：`test_cluster_lifecycle.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `cluster create`  ·  远端写（确认执行）
+### `cluster create`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`cluster.create`
 - **handler**：`application.commands.clusters:cluster_create`　|　**provider_kind**：`cluster`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`Host.Inventory.CreateCluster`
 - **说明**：在精确 host folder 创建集群
 - **输入参数**：
@@ -1657,12 +1704,13 @@ vcenter-aiops --profile lab cluster create --folder-id group-v4 --name demo-vm -
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_cluster_lifecycle.py`
+  - 覆盖文件：`test_cluster_lifecycle.py`, `test_dangling_mor_matrix.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `cluster delete`  ·  远端写（确认执行）
+### `cluster delete`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`cluster.delete`
 - **handler**：`application.commands.clusters:cluster_delete`　|　**provider_kind**：`cluster`　|　**风险**：destructive　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：delete
 - **所需特权**：`Host.Inventory.DeleteCluster`
 - **说明**：二次确认后删除精确空集群
 - **输入参数**：
@@ -1678,10 +1726,10 @@ vcenter-aiops --profile lab cluster delete --cluster-id domain-c7
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_cluster_lifecycle.py`
+  - 覆盖文件：`test_cluster_lifecycle.py`, `test_risk_classification.py`, `test_submit_rejection_m2.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `cluster info`  ·  远端只读
+### `cluster info`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cluster.info`
 - **handler**：`application.commands.queries:cluster_info`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1697,10 +1745,10 @@ vcenter-aiops --profile lab cluster info --id <id> --name demo-vm
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `cluster list`  ·  远端只读
+### `cluster list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cluster.list`
 - **handler**：`application.commands.queries:cluster_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1715,12 +1763,13 @@ vcenter-aiops --profile lab cluster list --limit 1
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `cluster remove-host`  ·  远端写（确认执行）
+### `cluster remove-host`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`cluster.remove_host`
 - **handler**：`application.commands.clusters:cluster_remove_host`　|　**provider_kind**：`membership`　|　**风险**：destructive　|　**异步**：是　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：delete
 - **所需特权**：`Host.Inventory.EditCluster`, `Host.Inventory.MoveHost`, `Host.Inventory.AddStandaloneHost`
 - **说明**：保留在 vCenter，转为独立主机；需要二次确认
 - **输入参数**：
@@ -1738,7 +1787,7 @@ vcenter-aiops --profile lab cluster remove-host --cluster-id domain-c7 --host-id
 ```
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_enrollment_unavailable.py`, `test_membership.py`
+  - 覆盖文件：`test_enrollment_unavailable.py`, `test_membership.py`, `test_risk_classification.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -1746,7 +1795,7 @@ vcenter-aiops --profile lab cluster remove-host --cluster-id domain-c7 --host-id
 
 ## 领域 `datastore`
 
-### `datastore browse`  ·  远端只读
+### `datastore browse`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.browse`
 - **handler**：`application.commands.datastores:browse`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：是　|　**MCP 暴露**：是
 - **所需特权**：`Datastore.Browse`
@@ -1766,10 +1815,10 @@ vcenter-aiops --profile lab datastore browse --limit 1 --datastore-id datastore-
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_datastore_browser.py`
+  - 覆盖文件：`test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_search_submit_classify_r6.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `datastore inspect`  ·  远端只读
+### `datastore inspect`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.inspect`
 - **handler**：`application.commands.queries:datastore_inspect`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1785,10 +1834,10 @@ vcenter-aiops --profile lab datastore inspect --id <id> --name demo-vm
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_datastore_browser.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_vm_creation.py`, `test_vm_media.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_submit_classify_r6.py`, `test_vm_creation.py`, `test_vm_media.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `datastore list`  ·  远端只读
+### `datastore list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.list`
 - **handler**：`application.commands.queries:datastore_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1803,10 +1852,10 @@ vcenter-aiops --profile lab datastore list --limit 1
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_cache.py`, `test_datastore_browser.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_vm_creation.py`, `test_vm_media.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_submit_classify_r6.py`, `test_vm_creation.py`, `test_vm_media.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `datastore scan`  ·  远端只读
+### `datastore scan`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.scan`
 - **handler**：`application.commands.datastores:scan`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：是　|　**MCP 暴露**：是
 - **所需特权**：`Datastore.Browse`
@@ -1826,10 +1875,10 @@ vcenter-aiops --profile lab datastore scan --limit 1 --datastore-id datastore-30
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_datastore_browser.py`, `test_search_cli.py`
+  - 覆盖文件：`test_datastore_browser.py`, `test_delete_guarded_channel.py`, `test_search_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `datastore search-inspect`  ·  本地只读
+### `datastore search-inspect`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.search_inspect`
 - **handler**：`application.commands.datastores:search_inspect`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -1846,7 +1895,7 @@ vcenter-aiops --profile lab datastore search-inspect <search_id>
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_search_cli.py`
 
-### `datastore search-list`  ·  本地只读
+### `datastore search-list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.search_list`
 - **handler**：`application.commands.datastores:search_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -1863,7 +1912,7 @@ vcenter-aiops --profile lab datastore search-list --limit 1
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_search_cli.py`
 
-### `datastore search-status`  ·  远端只读
+### `datastore search-status`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.search_status`
 - **handler**：`application.commands.datastores:search_status`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1887,9 +1936,10 @@ vcenter-aiops --profile lab datastore search-status <search_id>
 
 ## 领域 `alarm`
 
-### `alarm acknowledge`  ·  远端写（确认执行）
+### `alarm acknowledge`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`alarm.acknowledge`
 - **handler**：`application.commands.changes:alarm_acknowledge`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：—
 - **说明**：确认精确实体上的告警，不代表故障恢复
 - **输入参数**：
@@ -1909,7 +1959,7 @@ vcenter-aiops --profile lab alarm acknowledge --entity-id vm-101 --alarm-id alar
   - 覆盖文件：`test_alarms.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `alarm list`  ·  远端只读
+### `alarm list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`alarm.list`
 - **handler**：`application.commands.queries:alarm_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -1929,9 +1979,10 @@ vcenter-aiops --profile lab alarm list --limit 1 --entity-id vm-101 --status red
   - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `alarm reset`  ·  远端写（确认执行）
+### `alarm reset`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`alarm.reset`
 - **handler**：`application.commands.changes:alarm_reset`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config
 - **所需特权**：`Alarm.SetStatus`
 - **说明**：按受管对象类型+状态批量清除触发告警（6.7+，只能 vm/host，不能精确定位单个告警/实体）；预览绑定精确告警集合
 - **输入参数**：
@@ -1956,9 +2007,10 @@ vcenter-aiops --profile lab alarm reset --entity-type vm --statuses '["red","yel
 
 ## 领域 `cache`
 
-### `cache invalidate`  ·  本地写入
+### `cache invalidate`  ·  本地写入  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`cache.invalidate`
 - **handler**：`application.commands.cache:invalidate`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：不可逆：clear
 - **所需特权**：—
 - **说明**：仅删除指定 Profile 和资产类型的所有已记录服务端缓存
 - **输入参数**：
@@ -1971,9 +2023,9 @@ vcenter-aiops --profile lab cache invalidate --kind vm
 ```
 - **预期结果**：本地写入：仅改本机状态（config.yaml/state.db/secrets.json），不联网；失败以错误信封返回。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_cache.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_invalidate_token_m4.py`, `test_guest_observe_cache.py`, `test_target_whitespace_m5.py`
 
-### `cache refresh`  ·  远端只读
+### `cache refresh`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cache.refresh`
 - **handler**：`application.commands.cache:refresh`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -1988,10 +2040,10 @@ vcenter-aiops --profile lab cache refresh --kind vm
 ```
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_cache.py`
+  - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `cache status`  ·  本地只读
+### `cache status`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cache.status`
 - **handler**：`application.commands.cache:status`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2006,16 +2058,17 @@ vcenter-aiops --profile lab cache status --kind vm
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cluster_lifecycle.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_plans.py`, `test_provider_routing.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cache_refresh_m3.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_execution.py`, `test_failure_category_l5.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_file_commands_h1.py`, `test_guest_http_tls_h2.py`, `test_guest_processes.py`, `test_hardening_r6.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_ovf_http_m9.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_search_submit_classify_r6.py`, `test_secrets.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_write_cli.py`
 
 
 ---
 
 ## 领域 `task`
 
-### `task cancel`  ·  编排/恢复
+### `task cancel`  ·  编排/恢复  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`task.cancel`
 - **handler**：`application.commands.plans:task_cancel`　|　**provider_kind**：`vm`　|　**风险**：change　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：process_termination
 - **所需特权**：—
 - **说明**：请求取消原任务，不将请求等同已取消
 - **输入参数**：
@@ -2032,7 +2085,7 @@ vcenter-aiops --profile lab task cancel <op-id>
   - 覆盖文件：`test_template_clone_flow.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `task inspect`  ·  本地只读
+### `task inspect`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`task.inspect`
 - **handler**：`application.commands.plans:task_inspect`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -2049,7 +2102,7 @@ vcenter-aiops --profile lab task inspect <op-id>
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_write_cli.py`
 
-### `task list`  ·  本地只读
+### `task list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`task.list`
 - **handler**：`application.commands.plans:task_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -2064,9 +2117,9 @@ vcenter-aiops --profile lab task list --limit 1
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_datastore_browser.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_operation_state.py`, `test_plans.py`, `test_provider_routing.py`, `test_real_type_contracts.py`, `test_search_recovery.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_hardening_r5.py`, `test_history_presets_policy.py`, `test_host_dangling_mor.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_operation_state.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_real_type_contracts.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
 
-### `task reconcile`  ·  远端只读
+### `task reconcile`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`task.reconcile`
 - **handler**：`application.commands.plans:task_reconcile`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -2085,7 +2138,7 @@ vcenter-aiops --profile lab task reconcile <op-id>
   - 备注：handler task_reconcile/Engine 核对路径被直接断言，不重复提交
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `task wait`  ·  远端只读
+### `task wait`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`task.wait`
 - **handler**：`application.commands.plans:task_wait`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
 - **所需特权**：—
@@ -2108,9 +2161,10 @@ vcenter-aiops --profile lab task wait <op-id>
 
 ## 领域 `batch`
 
-### `batch power-off`  ·  编排/恢复
+### `batch power-off`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.power_off`
 - **handler**：`application.commands.plans:batch_power_off`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：bulk_modify/terminate
 - **所需特权**：—
 - **说明**：只构建固定对象计划，不提交远端变更
 - **输入参数**：
@@ -2123,13 +2177,14 @@ vcenter-aiops --profile lab task wait <op-id>
 vcenter-aiops --profile lab batch power-off --vm-ids '["vm-1","vm-2"]'
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_foundation.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_provider_routing.py`, `test_templates_linked.py`, `test_vm_provider.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_risk_classification.py`, `test_risk_gate_cli.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `batch power-on`  ·  编排/恢复
+### `batch power-on`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.power_on`
 - **handler**：`application.commands.plans:batch_power_on`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：bulk_modify
 - **所需特权**：—
 - **说明**：只构建固定对象计划，不提交远端变更
 - **输入参数**：
@@ -2147,9 +2202,10 @@ vcenter-aiops --profile lab batch power-on --vm-ids '["vm-1","vm-2"]'
   - 备注：plans.batch_power_on 被直接调用，断言只构建固定对象计划不提交
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `batch reset`  ·  编排/恢复
+### `batch reset`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.reset`
 - **handler**：`application.commands.plans:batch_reset`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：bulk_modify/terminate
 - **所需特权**：—
 - **说明**：只构建固定对象计划，不提交远端变更
 - **输入参数**：
@@ -2162,13 +2218,14 @@ vcenter-aiops --profile lab batch power-on --vm-ids '["vm-1","vm-2"]'
 vcenter-aiops --profile lab batch reset --vm-ids '["vm-1","vm-2"]'
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
-- **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_foundation.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_provider_routing.py`, `test_templates_linked.py`, `test_vm_provider.py`
+- **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
+  - 覆盖文件：`test_risk_classification.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
-### `batch shutdown`  ·  编排/恢复
+### `batch shutdown`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.shutdown`
 - **handler**：`application.commands.plans:batch_shutdown`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：是
+- **管控类别**：敏感：system_config；不可逆：bulk_modify
 - **所需特权**：—
 - **说明**：只构建固定对象计划，不提交远端变更
 - **输入参数**：
@@ -2182,7 +2239,7 @@ vcenter-aiops --profile lab batch shutdown --vm-ids '["vm-1","vm-2"]'
 ```
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
-  - 覆盖文件：`test_alarm_reset.py`, `test_foundation.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_provider_routing.py`, `test_templates_linked.py`, `test_vm_provider.py`
+  - 覆盖文件：`test_alarm_reset.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_provider_routing.py`, `test_risk_classification.py`, `test_risk_gate_cli.py`, `test_templates_linked.py`, `test_vm_provider.py`
 - **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
 
 
@@ -2190,9 +2247,10 @@ vcenter-aiops --profile lab batch shutdown --vm-ids '["vm-1","vm-2"]'
 
 ## 领域 `secret`
 
-### `secret delete`  ·  本地写入
+### `secret delete`  ·  本地写入  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`secret.delete`
 - **handler**：`application.commands.secrets:delete_secret`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：permission_change；不可逆：delete
 - **所需特权**：—
 - **说明**：删除全局精确名称的秘密
 - **输入参数**：
@@ -2205,9 +2263,9 @@ vcenter-aiops secret delete demo-vm
 ```
 - **预期结果**：本地写入：仅改本机状态（config.yaml/state.db/secrets.json），不联网；失败以错误信封返回。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_secrets.py`
+  - 覆盖文件：`test_risk_gate_cli.py`, `test_secrets.py`
 
-### `secret list`  ·  本地只读
+### `secret list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`secret.list`
 - **handler**：`application.commands.secrets:list_secrets`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2224,9 +2282,10 @@ vcenter-aiops secret list
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_secrets.py`
 
-### `secret rotate`  ·  本地写入
+### `secret rotate`  ·  本地写入  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`secret.rotate`
 - **handler**：`application.commands.secrets:rotate_secret`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：permission_change；不可逆：overwrite
 - **所需特权**：—
 - **说明**：替换精确秘密值并递增修订号；不是主密钥轮换，最多 4096 UTF-8 字节
 - **输入参数**：
@@ -2242,9 +2301,10 @@ vcenter-aiops secret rotate demo-vm --stdin
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_secrets.py`
 
-### `secret set`  ·  本地写入
+### `secret set`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`secret.set`
 - **handler**：`application.commands.secrets:set_secret`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：敏感：permission_change
 - **所需特权**：—
 - **说明**：创建全局秘密，不覆盖已有项；值最多 4096 UTF-8 字节
 - **输入参数**：
@@ -2258,14 +2318,14 @@ vcenter-aiops secret set demo-vm --stdin
 ```
 - **预期结果**：本地写入：仅改本机状态（config.yaml/state.db/secrets.json），不联网；失败以错误信封返回。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_secrets.py`
+  - 覆盖文件：`test_risk_gate_cli.py`, `test_secrets.py`
 
 
 ---
 
 ## 领域 `history`
 
-### `history list`  ·  本地只读
+### `history list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`history.list`
 - **handler**：`application.commands.history_presets:history_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2284,7 +2344,7 @@ vcenter-aiops --profile lab history list --limit 1 --after-id 0 --snapshot-max-i
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`
 
-### `history show`  ·  本地只读
+### `history show`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`history.show`
 - **handler**：`application.commands.history_presets:history_show`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2306,9 +2366,10 @@ vcenter-aiops --profile lab history show <plan-id>
 
 ## 领域 `preset`
 
-### `preset delete`  ·  本地写入
+### `preset delete`  ·  本地写入  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`preset.delete`
 - **handler**：`application.commands.history_presets:preset_delete`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
+- **管控类别**：不可逆：delete
 - **所需特权**：—
 - **说明**：删除指定 Profile 内精确名称的预设；须 --profile
 - **输入参数**：
@@ -2323,7 +2384,7 @@ vcenter-aiops --profile lab preset delete demo-vm
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`
 
-### `preset from-history`  ·  本地写入
+### `preset from-history`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`preset.from_history`
 - **handler**：`application.commands.history_presets:preset_from_history`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2342,7 +2403,7 @@ vcenter-aiops --profile lab preset from-history demo-vm --plan-id <plan-id> --po
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`
 
-### `preset from-vm`  ·  本地写入
+### `preset from-vm`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`preset.from_vm`
 - **handler**：`application.commands.history_presets:preset_from_vm`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2361,7 +2422,7 @@ vcenter-aiops --profile lab preset from-vm demo-vm --source-vm-id <source_vm_id>
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`
 
-### `preset list`  ·  本地只读
+### `preset list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`preset.list`
 - **handler**：`application.commands.history_presets:preset_list`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2379,7 +2440,7 @@ vcenter-aiops --profile lab preset list --limit 1 --after-name <after_name>
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`
 
-### `preset save`  ·  本地写入
+### `preset save`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`preset.save`
 - **handler**：`application.commands.history_presets:preset_save`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2398,7 +2459,7 @@ vcenter-aiops --profile lab preset save demo-vm --command-path alarm reset --par
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`
 
-### `preset show`  ·  本地只读
+### `preset show`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`preset.show`
 - **handler**：`application.commands.history_presets:preset_show`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2420,7 +2481,7 @@ vcenter-aiops --profile lab preset show demo-vm
 
 ## 领域 `policy`
 
-### `policy check`  ·  本地只读
+### `policy check`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`policy.check`
 - **handler**：`application.commands.policy:check`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—
@@ -2436,9 +2497,9 @@ vcenter-aiops policy check alarm reset --params '{"key":"value"}'
 ```
 - **预期结果**：本地只读：status=succeeded，data 为本地计算/查询结果，不联网、不建状态。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
-  - 覆盖文件：`test_history_presets_policy.py`, `test_ip_signals.py`, `test_provider_routing.py`
+  - 覆盖文件：`test_capacity_int_l11.py`, `test_datastore_m3.py`, `test_hardening_r5.py`, `test_history_presets_policy.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`, `test_privilege_helper_r4.py`, `test_provider_routing.py`, `test_template_clone_hardening.py`
 
-### `policy inspect`  ·  本地只读
+### `policy inspect`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`policy.inspect`
 - **handler**：`application.commands.policy:inspect`　|　**provider_kind**：`vm`　|　**风险**：read_only　|　**异步**：否　|　**MCP 暴露**：否
 - **所需特权**：—

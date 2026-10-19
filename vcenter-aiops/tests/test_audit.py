@@ -120,7 +120,7 @@ class AuditTests(unittest.TestCase):
         with patch.dict(os.environ, {"VCENTER_AIOPS_HOME": self.temp.name}), patch.object(Store, "audit", side_effect=OSError("write failed")):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                code = main(["audit", "export", "--file", str(target)])
+                code = main(["--yes", "audit", "export", "--file", str(target)])
         payload = json.loads(output.getvalue())
         self.assertEqual(code, 5)
         self.assertEqual(payload["status"], "partial")

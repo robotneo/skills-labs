@@ -30,8 +30,10 @@ class FoundationTests(unittest.TestCase):
 
     def cli(self, *args):
         out = io.StringIO()
+        # Non-tty automation: opt into the direct-effect risk gate via --yes;
+        # read commands ignore the flag, and handler validations still run.
         with contextlib.redirect_stdout(out):
-            code = main(list(args))
+            code = main(["--yes", *args])
         return code, json.loads(out.getvalue())
 
     def test_version_and_doctor_do_not_create_state(self):

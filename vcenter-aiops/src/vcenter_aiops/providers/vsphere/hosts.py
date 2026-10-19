@@ -1,7 +1,8 @@
 """vCenter host-maintenance provider; SDK objects stay inside this boundary."""
 import re
 
-from ...domain.models import OperationError, fail
+from ...domain.models import OperationError, SubmissionRejected, fail
+from .mor import check_privileges
 
 
 ACTIONS = {
@@ -63,6 +64,29 @@ class Hosts:
             fail("target_unavailable", "无法确定主机连接或维护状态", 4)
         return hardware_uuid, parent, parent_id, connection, maintenance
 
+    def _existing_host(self, host_id):
+        """Resolve a host and prove it exists before any precondition work.
+
+        A well-formed but dangling MoRef (host-999999) is constructed without a
+        fetch; the first property read (inside ``_identity``) raises
+        ManagedObjectNotFound on real vCenter. Normalise that to a structured
+        preflight failure (exit 4) instead of letting it surface as a top-level
+        internal_error (exit 5). Only a fault naming the requested host is
+        swallowed; a fault for any other object must propagate.
+        """
+        from pyVmomi import vmodl
+        try:
+            # Real resolver constructs lazily (fault fires on first property read);
+            # an injected resolver may raise directly -- both are normalised here.
+            host = self._host(host_id)
+            identity = self._identity(host)
+        except vmodl.fault.ManagedObjectNotFound as fault:
+            missing = getattr(fault, "obj", None)
+            if host_id is not None and getattr(missing, "_moId", None) in (host_id, None):
+                fail("host_not_found", "指定主机不存在或已被删除: " + str(host_id), 4)
+            raise
+        return host, identity
+
     @staticmethod
     def _inventory(host):
         source = getattr(host, "vm", None)
@@ -107,17 +131,9 @@ class Hosts:
         return enabled if isinstance(enabled, bool) else None
 
     def _privileges(self, host):
-        session = getattr(getattr(self.content, "sessionManager", None), "currentSession", None)
-        session_key = getattr(session, "key", None)
-        if not isinstance(session_key, str) or not session_key:
-            fail("session_missing", "服务端会话不可用", 3)
-        manager = getattr(self.content, "authorizationManager", None)
-        check = getattr(manager, "HasPrivilegeOnEntity", None)
-        if not callable(check):
-            fail("permission_denied", "无法核对主机维护权限", 4)
-        granted = check(entity=host, sessionId=session_key, privId=list(PRIVILEGE))
-        if not isinstance(granted, (list, tuple)) or len(granted) != 1 or granted[0] is not True:
-            fail("permission_denied", "账户缺少 Host.Config.Maintenance 权限", 4)
+        check_privileges(self.content, host, PRIVILEGE,
+                         denied="账户缺少 Host.Config.Maintenance 权限",
+                         unable="无法核对主机维护权限")
 
     @staticmethod
     def _options(params):
@@ -167,8 +183,8 @@ class Hosts:
             fail("invalid_arguments", "参数必须为对象", 2)
         self._server()
         timeout, evacuate, allow_drs = self._options(params)
-        host = self._host(params.get("host_id"))
-        hardware_uuid, parent, parent_id, connection, maintenance = self._identity(host)
+        host, (hardware_uuid, parent, parent_id, connection, maintenance) = self._existing_host(
+            params.get("host_id"))
         if connection != "connected":
             fail("target_unavailable", "主机不处于 connected 状态", 4)
         method, required_maintenance = ACTIONS[command]
@@ -258,12 +274,19 @@ class Hosts:
         return expected == actual
 
     def submit(self, command, params, binding):
-        if command not in ACTIONS:
-            fail("capability_unsupported", "此主机变更尚未实现", 4)
-        if not self.matches(binding, self.preflight(command, params)):
-            fail("plan_stale", "提交前主机身份、状态或受影响 VM 集合发生变化", 4)
-        host = self._host(params["host_id"])
-        timeout, evacuate, _ = self._options(params)
+        try:
+            if command not in ACTIONS:
+                fail("capability_unsupported", "此主机变更尚未实现", 4)
+            if not self.matches(binding, self.preflight(command, params)):
+                fail("plan_stale", "提交前主机身份、状态或受影响 VM 集合发生变化", 4)
+            host = self._host(params["host_id"])
+            timeout, evacuate, _ = self._options(params)
+        except OperationError as exc:
+            # Validation/reads only: no maintenance task was issued, so this is a
+            # deterministic rejection safe to retry after a fresh preview.
+            raise SubmissionRejected(exc.code, str(exc), exc.exit_code) from exc
+        # From here the remote write may have happened: never raise
+        # SubmissionRejected; let failures surface as uncertainty (exit 6).
         if command == "host maintenance-enter":
             task = host.EnterMaintenanceMode_Task(
                 timeout=timeout,
@@ -277,6 +300,7 @@ class Hosts:
         return {"server_uuid": self.server_uuid, "task_id": task_id, "entity_id": host._moId}
 
     def _task(self, receipt, binding):
+        from pyVmomi import vmodl
         self._server()
         if not isinstance(receipt, dict) or not isinstance(binding, dict):
             fail("task_identity_mismatch", "任务回执或绑定格式无效", 4)
@@ -288,9 +312,15 @@ class Hosts:
                 or entity_id != binding.get("object_id")):
             fail("task_identity_mismatch", "任务的 vCenter、task-N 或主机绑定不匹配", 4)
         task = self.resolver("task", task_id)
-        info = getattr(task, "info", None)
-        key = getattr(info, "key", None)
-        owner = getattr(getattr(info, "entity", None), "_moId", None)
+        try:
+            # Post-write evidence: the task or its target host may have been
+            # removed after submit. A dangling MoRef here means the result cannot
+            # be proven (unknown/6), never a deterministic not_found (exit 4).
+            info = getattr(task, "info", None)
+            key = getattr(info, "key", None)
+            owner = getattr(getattr(info, "entity", None), "_moId", None)
+        except vmodl.fault.ManagedObjectNotFound:
+            fail("task_state_unknown", "任务或其目标主机在写后取证时已不存在，结果未知需人工核对", 6)
         if key != task_id or owner != entity_id:
             fail("task_identity_mismatch", "远端任务 key 或 entity 不属于固定主机", 4)
         return task, info
@@ -313,13 +343,19 @@ class Hosts:
         }
 
     def verify(self, command, params, binding, observation):
+        from pyVmomi import vmodl
         if command not in ACTIONS:
             return False
         try:
             self._server()
-            host = self._host(params.get("host_id"))
-            hardware_uuid, _, parent_id, connection, maintenance = self._identity(host)
+            host, (hardware_uuid, _, parent_id, connection, maintenance) = self._existing_host(
+                params.get("host_id"))
         except OperationError:
+            return False
+        except vmodl.fault.ManagedObjectNotFound:
+            # Post-write evidence expired (host or related object vanished): the
+            # maintenance outcome cannot be proven, so verification stays negative
+            # and reconciliation decides; never surface this as internal_error.
             return False
         expected = command == "host maintenance-enter"
         return (

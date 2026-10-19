@@ -24,7 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from vcenter_aiops.application.registry import COMMANDS  # noqa: E402
+from vcenter_aiops.domain import risk as risk_mod  # noqa: E402
 from vcenter_aiops import __version__  # noqa: E402
+
+RISK_LEVEL_CN = {"low": "低（只读，直接执行）",
+                 "medium": "中（敏感/可逆，影响说明+确认）",
+                 "high": "高（不可逆/批量/终止，精确目标+二次确认）"}
 
 TEST_DIR = ROOT / "tests"
 if not TEST_DIR.is_dir():
@@ -155,6 +160,9 @@ def cmd_dict(c):
                        for p in c.parameters],
         "privileges": list(c.privileges), "risk": c.risk, "asynchronous": c.asynchronous,
         "mcp": c.mcp, "provider_kind": c.provider_kind,
+        "risk_level": risk_mod.risk_level(c),
+        "sensitive": list(risk_mod.risk_tags(c)[0]),
+        "irreversible": list(risk_mod.risk_tags(c)[1]),
     }
 
 
@@ -286,6 +294,16 @@ def render():
       "远端写命令**不直接提交**：先返回 `awaiting_confirmation`，再用 `plan apply <id> --confirm <digest>` 执行；"
       "不可逆操作另需 `--confirm-destruction`。\n")
 
+    A("**风险分级与分级管控（CLI 交互门，真值来源 `domain/risk.py`）**：")
+    A("- **低 risk_level=low**：只读/预览，直接执行，无确认。")
+    A("- **中 medium**：敏感但可逆/增量（权限·凭据变更、数据外发/导出、系统配置修改、对外发送/来宾执行、终止进程）。"
+      "执行前打印影响范围与精确目标，终端须键入确认值；非交互须显式 `--yes/-y`（动词前后均可）。")
+    A("- **高 high**：不可逆（删除/清空/覆盖/批量/终止）。除确认外，先逐条列出**精确目标**（具体资源、路径、范围、数量），"
+      "拒绝通配/模糊匹配与过宽范围；终端须先逐字输入精确目标、再输入动作关键字（DELETE/CLEAR/OVERWRITE/TERMINATE）二次确认；"
+      "`--yes` 仅跳过交互提示，**不放宽**精确目标校验。")
+    A("- 经计划引擎的远端写仍以 `digest`（不可逆再加 `DESTROY:<digest>`）为确认值；`batch power-*` 属高风险批量，"
+      "终端会先枚举每个精确 `vm-N` 与数量，再走 digest/DESTROY。\n")
+
     A("**离线测试状态分级**：")
     A("- ① **行为级**：测试以 CLI 词元/命令字面量/精确 handler 名直接驱动并断言。")
     A("- ② **逻辑级**：底层纯函数或 Provider 方法被直接单测，命令薄包装层未逐字走 CLI（覆盖等价逻辑）。")
@@ -323,10 +341,17 @@ def render():
             A("## 领域 `%s`\n" % g)
         t0, f0, note = resolved[d["path"]]
         priv = ", ".join("`%s`" % x for x in d["privileges"]) if d["privileges"] else "—"
-        A("### `%s`  ·  %s" % (d["path"], CATEGORY_CN[d["category"]]))
+        A("### `%s`  ·  %s  ·  风险级：%s" % (d["path"], CATEGORY_CN[d["category"]], RISK_LEVEL_CN[d["risk_level"]]))
         A("- **operation_id**：`%s`" % d["operation_id"])
         A("- **handler**：`%s`　|　**provider_kind**：`%s`　|　**风险**：%s　|　**异步**：%s　|　**MCP 暴露**：%s" % (
             d["handler_ref"], d["provider_kind"], d["risk"], "是" if d["asynchronous"] else "否", "是" if d["mcp"] else "否"))
+        tags = []
+        if d["sensitive"]:
+            tags.append("敏感：" + "/".join(d["sensitive"]))
+        if d["irreversible"]:
+            tags.append("不可逆：" + "/".join(d["irreversible"]))
+        if tags:
+            A("- **管控类别**：" + "；".join(tags))
         A("- **所需特权**：%s" % priv)
         A("- **说明**：%s" % d["description"])
         A("- **输入参数**：")

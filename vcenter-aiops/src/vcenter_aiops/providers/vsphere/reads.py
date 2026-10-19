@@ -2,6 +2,12 @@ from datetime import datetime, timezone
 from ...domain.models import fail
 
 
+def _is_int(value):
+    # vmodl 64-bit longs deserialize to Python int subclasses; accept them while
+    # rejecting bool (which is otherwise an int subclass) and non-integral types.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 class Reads:
     def __init__(self, provider):
         self.provider = provider
@@ -11,7 +17,7 @@ class Reads:
         vm = self.provider.vm(vm_id)
         hardware = vm.config.hardware
         cpu, memory_mb = hardware.numCPU, hardware.memoryMB
-        if type(cpu) is not int or cpu < 1 or type(memory_mb) is not int or memory_mb < 1024 or memory_mb % 1024:
+        if not _is_int(cpu) or cpu < 1 or not _is_int(memory_mb) or memory_mb < 1024 or memory_mb % 1024:
             fail("preset_hardware_unsupported", "CPU 或内存不可表示为正整数 CPU 与整 GiB 内存，不会取整", 4)
         return {"cpu": cpu, "memory_gb": memory_mb // 1024}
 

@@ -1,9 +1,11 @@
 """Cluster lifecycle boundary with exact identity and conservative license checks."""
 import re
 
-from ...domain.models import fail
+from ...domain.models import OperationError, SubmissionRejected, fail
+from ...domain.naming import valid_name
 from .hosts import Hosts
 from .licenses import Licenses
+from .mor import check_privileges
 
 
 ACTIONS = {
@@ -51,6 +53,27 @@ class Clusters:
         if self._id(obj, pattern, typename) != object_id:
             fail("target_unavailable", "对象身份与请求不匹配", 4)
         return obj
+
+    def _existing_cluster(self, object_id):
+        """Resolve a cluster and prove it exists before any precondition work.
+
+        A well-formed but dangling MoRef (domain-c999999) is constructed without a
+        fetch; the first property read raises ManagedObjectNotFound on real
+        vCenter. Normalise that to a structured preflight failure (exit 4) instead
+        of letting it surface as a top-level internal_error (exit 5).
+        """
+        from pyVmomi import vmodl
+        try:
+            # Real resolver constructs lazily (fault fires on first property read);
+            # an injected resolver may raise directly -- both are normalised here.
+            obj = self._resolve("cluster", object_id)
+            state = self._state(obj)
+        except vmodl.fault.ManagedObjectNotFound as fault:
+            missing = getattr(fault, "obj", None)
+            if object_id is not None and getattr(missing, "_moId", None) in (object_id, None):
+                fail("cluster_not_found", "指定集群不存在或已被删除: " + str(object_id), 4)
+            raise
+        return obj, state
 
     @staticmethod
     def _list(obj, attribute):
@@ -150,14 +173,13 @@ class Clusters:
         self._privilege(obj, privilege)
 
     def _privilege(self, obj, privilege):
-        session = getattr(getattr(self.content, "sessionManager", None), "currentSession", None)
-        key = getattr(session, "key", None)
-        check = getattr(getattr(self.content, "authorizationManager", None), "HasPrivilegeOnEntity", None)
-        if not isinstance(key, str) or not key or not callable(check):
-            fail("permission_denied", "无法核对集群权限", 4)
-        granted = check(entity=obj, sessionId=key, privId=[privilege])
-        if not isinstance(granted, (list, tuple)) or len(granted) != 1 or granted[0] is not True:
-            fail("permission_denied", "账户缺少集群操作权限", 4)
+        # Historical contract: a missing session here is folded into the same
+        # permission_denied/4 result rather than session_missing/3, so override
+        # the helper's session mapping while sharing every other fail-closed step.
+        check_privileges(self.content, obj, [privilege],
+                         denied="账户缺少集群操作权限", unable="无法核对集群权限",
+                         session_code="permission_denied", session_exit=4,
+                         session_message="无法核对集群权限")
 
     def preflight(self, command, params):
         self._server()
@@ -168,8 +190,26 @@ class Clusters:
         method, privilege = ACTIONS[command]
         changes, evidence, effects = {}, [], []
         if command == "cluster create":
-            obj = self._resolve("folder", params.get("folder_id"))
-            state = self._folder(obj)
+            # L-1: validate the name locally (deterministic) before any remote
+            # read, using the same vocabulary as clone/create names.
+            name = params.get("name")
+            if not valid_name(name):
+                fail("name_invalid",
+                     "集群名称须为 1–80 字符，不含路径(/\\)、百分号(%)、控制字符或边缘空白", 2)
+            folder_id = params.get("folder_id")
+            # Prove the requested host folder exists before walking its parent
+            # chain. Cover both resolution (an injected resolver may raise
+            # directly) and the first controlled fetch (_folder). A fault naming a
+            # parent object is left to propagate.
+            from pyVmomi import vmodl
+            try:
+                obj = self._resolve("folder", folder_id)
+                state = self._folder(obj)
+            except vmodl.fault.ManagedObjectNotFound as fault:
+                missing = getattr(getattr(fault, "obj", None), "_moId", None)
+                if folder_id is not None and missing in (folder_id, None):
+                    fail("folder_not_found", "指定 host 文件夹不存在或已被删除: " + str(folder_id), 4)
+                raise
             children = []
             for child in self._list(obj, "childEntity"):
                 identity, name = getattr(child, "_moId", None), getattr(child, "name", None)
@@ -182,8 +222,7 @@ class Clusters:
             changes = self._changes(command, params)
             hosts = []
         else:
-            obj = self._resolve("cluster", params.get("cluster_id"))
-            state = self._state(obj)
+            obj, state = self._existing_cluster(params.get("cluster_id"))
             hosts = state["hosts"]
             if command == "cluster delete":
                 if hosts or state["vm_ids"] or state["child_pool_ids"]:
@@ -240,15 +279,25 @@ class Clusters:
         return spec
 
     def submit(self, command, params, binding):
-        if not self.matches(binding, self.preflight(command, params)):
-            fail("plan_stale", "集群身份、集合或配置发生变化，请重新预览", 4)
+        try:
+            if not self.matches(binding, self.preflight(command, params)):
+                fail("plan_stale", "集群身份、集合或配置发生变化，请重新预览", 4)
+            if command == "cluster create":
+                folder = self._resolve("folder", params["folder_id"])
+            else:
+                cluster = self._resolve("cluster", params["cluster_id"])
+        except OperationError as exc:
+            # Read-only recheck/resolution only: no create/destroy/reconfigure
+            # call was issued, so this is a retryable pre-write rejection.
+            raise SubmissionRejected(exc.code, str(exc), exc.exit_code) from exc
+        # From here the remote write may have happened: failures stay unknown/6.
         if command == "cluster create":
-            obj = self._resolve("folder", params["folder_id"])
+            obj = folder
             result = obj.CreateClusterEx(name=params["name"], spec=self._spec(binding["changes"]))
             object_id = self._id(result, r"domain-c\d+", "ClusterComputeResource")
             return {"kind": "object", "server_uuid": self.server_uuid, "object_id": object_id,
                     "folder_id": obj._moId, "name": params["name"]}
-        obj = self._resolve("cluster", params["cluster_id"])
+        obj = cluster
         task = obj.Destroy_Task() if command == "cluster delete" else obj.ReconfigureComputeResource_Task(spec=self._spec(binding["changes"]), modify=True)
         task_id = getattr(task, "_moId", None)
         if not isinstance(task_id, str) or not re.fullmatch(r"task-\d+", task_id):

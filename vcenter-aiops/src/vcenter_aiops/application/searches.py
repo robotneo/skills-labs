@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 
-from ..domain.models import OperationError, Result, fail
+from ..domain.models import OperationError, Result, SubmissionRejected, fail
 from ..infrastructure.store import canonical
 
 
@@ -14,6 +14,9 @@ class Searches:
             id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, profile TEXT NOT NULL,
             params TEXT NOT NULL, scope TEXT NOT NULL, receipt TEXT, state TEXT NOT NULL,
             result TEXT, created REAL NOT NULL)''')
+        # Per-profile history list filters by profile and orders by created desc.
+        store.db.execute('''CREATE INDEX IF NOT EXISTS idx_datastore_searches_profile
+            ON datastore_searches(profile, created DESC)''')
 
     def record(self, search_id):
         row = self.store.db.execute("SELECT * FROM datastore_searches WHERE id=?", (search_id,)).fetchone()
@@ -69,7 +72,19 @@ class Searches:
             with self.store.transaction():
                 self.store.db.execute("UPDATE datastore_searches SET receipt=?,state='running' WHERE id=?", (canonical(receipt), search_id))
                 self.store.audit("datastore_search_receipted", search_id)
+        except SubmissionRejected as exc:
+            # The provider proved the rejection happened before any browse task
+            # was launched: deterministically failed, safe to retry after fixing
+            # the precondition, never "unknown". Persist the terminal state, then
+            # surface the structured exit-4 error to the CLI.
+            self.update(search_id, "failed",
+                        {"state": "not_submitted",
+                         "error": {"code": exc.code, "message": str(exc), "retryable": False}})
+            raise
         except Exception:
+            # The write call was already issued (or its result is unobservable):
+            # cannot prove no task was started, so stay uncertain and never
+            # auto-resubmit.
             self.update(search_id, "reconciliation_required", None)
             return self.result(search_id)
         return self.reconcile(search_id, timeout)

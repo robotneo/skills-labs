@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 import re
 import time
 
-from ...domain.models import fail
+from ...domain.models import OperationError, SubmissionRejected, fail
+from .mor import existing
 
 # Real vCenter DatastoreBrowser tasks are session-scoped managed objects whose
 # _moId looks like ``session[52cbcdca-...]525c034d-...``; older/embedded builds
@@ -50,9 +51,11 @@ class Datastores:
             fail("target_invalid", "需要精确 datastore-N 对象 ID", 2)
         if not isinstance(path, str) or path.startswith("/") or any(c in path for c in "[]\\%") or any(ord(c) < 32 for c in path) or any(p in (".", "..") for p in path.split("/")):
             fail("path_invalid", "只允许数据存储内的相对目录，不允许转义或路径穿越", 2)
-        if type(limit) is not int or not 1 <= limit <= 1000:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
             fail("query_invalid", "结果限制须为 1–1000", 2)
         ds = self.resolver(datastore_id)
+        existing(lambda: ds.summary, datastore_id, "datastore_not_found",
+                 "指定数据存储不存在或已被删除: " + datastore_id)
         if not ds.summary.accessible:
             fail("datastore_unavailable", "数据存储当前不可访问", 4)
         if any(c in ds.name for c in "[]\r\n"):
@@ -65,10 +68,31 @@ class Datastores:
 
     def submit(self, scope):
         from pyVmomi import vim
-        current = self.prepare(scope["datastore_id"], scope["path"], scope["limit"], scope["images_only"], scope["recursive"])
-        if current != scope:
-            fail("search_scope_changed", "搜索范围或服务端身份已变化", 4)
-        ds = self.resolver(scope["datastore_id"])
+        # M-3: narrow the prepare→submit TOCTOU re-check. The recorded scope was
+        # already validated by prepare(); the input-derived fields
+        # (path/limit/images_only/recursive) cannot drift, so re-confirm only the
+        # remote liveness facts that can change underneath us — existence,
+        # accessibility, datastore name (used to build datastorePath) and server
+        # identity — instead of re-running the whole validation/prepare chain and
+        # resolving the object twice.
+        #
+        # This whole block is read-only and runs before the single browse task is
+        # started below, so any OperationError it raises proves no remote task was
+        # launched: wrap it as SubmissionRejected (exit 4) so the application can
+        # mark the search deterministically failed instead of "unknown". The write
+        # method and its response handling stay outside the guarantee.
+        try:
+            ds = self.resolver(scope["datastore_id"])
+            existing(lambda: ds.summary, scope["datastore_id"], "datastore_not_found",
+                     "指定数据存储不存在或已被删除: " + scope["datastore_id"])
+            if not ds.summary.accessible:
+                fail("datastore_unavailable", "数据存储当前不可访问", 4)
+            if ds.name != scope["datastore_name"]:
+                fail("search_scope_changed", "数据存储名称已变化，禁止按旧路径提交搜索", 4)
+            if self.server_uuid != scope["server_uuid"]:
+                fail("search_scope_changed", "搜索范围或服务端身份已变化", 4)
+        except OperationError as exc:
+            raise SubmissionRejected(exc.code, str(exc), exc.exit_code) from exc
         full_path = "[" + scope["datastore_name"] + "]" + (" " + scope["path"] if scope["path"] else "")
         spec = vim.host.DatastoreBrowser.SearchSpec(details=vim.host.DatastoreBrowser.FileInfo.Details(fileSize=True, modification=True, fileType=True))
         method = ds.browser.SearchDatastoreSubFolders_Task if scope["recursive"] else ds.browser.SearchDatastore_Task
@@ -80,12 +104,19 @@ class Datastores:
         return vim.Task(task_id, self.si._stub)
 
     def observe(self, scope, timeout=30):
+        # M-3: this server-identity guard stays a *live* read, not the cached
+        # self.server_uuid. Observe is the cross-session recovery entry point; if
+        # the session was ever reconnected to a different vCenter, it must reject
+        # a same-named task before reading it (fail-closed, same rule as M-2's
+        # live identity reads). The M-3 caching win applies to prepare/submit,
+        # where submit no longer re-runs the whole prepare chain.
         if self.si.RetrieveContent().about.instanceUuid != scope["server_uuid"]:
             fail("server_mismatch", "搜索任务属于其他 vCenter，禁止查询同名任务", 4)
         if not valid_task_id(scope["task_id"]):
             fail("task_identity_mismatch", "搜索任务身份无效", 4)
         task = self.task(scope["task_id"])
         deadline = time.monotonic() + timeout
+        delay = 0.2
         while True:
             info = task.info
             if info.key != scope["task_id"]:
@@ -98,7 +129,11 @@ class Datastores:
                 fail("datastore_search_unknown", "目录搜索任务状态未知", 6)
             if time.monotonic() >= deadline:
                 return {**scope, "state": "running", "warnings": ["等待超时，原只读任务可能仍在服务端运行；未取消或重复提交"]}
-            time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+            # M-3: exponential backoff (0.2s → … capped at 2s) instead of a
+            # fixed 0.2s poll, matching the execution engine; never sleep past
+            # the deadline.
+            time.sleep(min(delay, max(0, deadline - time.monotonic())))
+            delay = min(delay * 2, 2)
         if info.result is None:
             fail("datastore_search_unknown", "搜索成功但未返回结果，不能判定目录为空", 6)
         items, truncated = [], False

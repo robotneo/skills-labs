@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import re
 
 from ...domain.models import fail
+from .mor import existing
 
 
 class OpsReads:
@@ -30,8 +31,11 @@ class OpsReads:
             fail("query_invalid", "事件分页大小无效", 2)
         entity_id = params.get("vm_id") or params.get("host_id")
         entity = self._managed(entity_id) if entity_id else None
-        if entity is not None and entity._moId != entity_id:
-            fail("target_changed", "事件目标身份变化", 4)
+        if entity is not None:
+            if entity._moId != entity_id:
+                fail("target_changed", "事件目标身份变化", 4)
+            existing(lambda: entity.name, entity_id, "target_not_found",
+                     "指定事件目标不存在或已被删除: " + entity_id)
 
         since = None
         if params.get("since"):
@@ -89,6 +93,10 @@ class OpsReads:
         target = self._managed(target_id)
         if target._moId != target_id:
             fail("target_changed", "容量目标身份变化", 4)
+        # host/cluster/datastore all carry a managed summary; reading it forces
+        # one fetch and normalises a dangling MoRef before capacity fields.
+        existing(lambda: target.summary, target_id, "target_not_found",
+                 "指定容量目标不存在或已被删除: " + target_id)
 
         cpu_need = params.get("cpu") or 0
         mem_need = params.get("memory_gb") or 0

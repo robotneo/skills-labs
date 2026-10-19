@@ -279,6 +279,31 @@ class ClusterTests(unittest.TestCase):
             self.assertEqual(result.status, "reconciliation_required")
             self.assertEqual(len(fixture.calls), 1)
 
+    def test_missing_cluster_preflight_is_structured_not_found_d2(self):
+        # A well-formed but dangling MoRef (domain-c999999) must surface as a
+        # structured preflight failure (exit 4), not a top-level internal_error.
+        for command, params in (("cluster delete", {"cluster_id": "domain-c999999"}),
+                                ("cluster configure", {"cluster_id": "domain-c999999", "ha_enabled": False})):
+            with self.subTest(command=command):
+                fixture = ClusterFixture()
+                fixture.read_fault = vmodl.fault.ManagedObjectNotFound(
+                    obj=vim.ClusterComputeResource("domain-c999999", fixture))
+                with self.assertRaises(OperationError) as error:
+                    fixture.provider().preflight(command, params)
+                self.assertEqual(error.exception.code, "cluster_not_found")
+                self.assertEqual(error.exception.exit_code, 4)
+                self.assertIn("domain-c999999", str(error.exception))
+                self.assertEqual(fixture.calls, [])
+
+    def test_unrelated_managed_object_fault_is_not_swallowed_d2(self):
+        # Only a missing reference for the exact requested id is normalised;
+        # a fault naming a different object must still propagate.
+        fixture = ClusterFixture()
+        fixture.read_fault = vmodl.fault.ManagedObjectNotFound(
+            obj=vim.ClusterComputeResource("domain-c777", fixture))
+        with self.assertRaises(vmodl.fault.ManagedObjectNotFound):
+            fixture.provider().preflight("cluster delete", {"cluster_id": "domain-c999999"})
+
     def test_exact_missing_identity_required_for_delete(self):
         fixture = ClusterFixture()
         provider = fixture.provider()
@@ -307,12 +332,20 @@ class ClusterTests(unittest.TestCase):
             engine.apply(plan["id"], plan["digest"])
         self.assertEqual(fixture.calls, [])
 
-    def test_license_validity_metadata_is_not_silently_ignored(self):
+    def test_license_unknown_metadata_keys_ignored_but_expiry_still_enforced(self):
+        # H-6: unknown future/8.0.3 property keys are ignored rather than failing
+        # the whole read; a present-but-invalid/expired expirationDate still denies.
         from test_license_entitlements import LicenseEntitlementTests
         for key, value in (("expirationHours", "0"), ("expirationMinutes", -1),
                            ("startDate", "2098-01-01T00:00:00Z"), ("system_time", "garbage")):
             row = assignment(features=("das",))
             row.assignedLicense.properties.append(NS(key=key, value=value))
+            evidence = LicenseEntitlementTests().checker([row]).require(
+                "host-1", ("das",), "server-1")
+            self.assertEqual(evidence["features"], ["das"])
+        for bad_value in ("not-a-date", "2020-01-01T00:00:00Z"):
+            row = assignment(features=("das",))
+            row.assignedLicense.properties[-1].value = bad_value
             with self.assertRaises(OperationError):
                 LicenseEntitlementTests().checker([row]).require("host-1", ("das",), "server-1")
 
@@ -326,3 +359,30 @@ class ClusterTests(unittest.TestCase):
         fixture.pool.resourcePool = [NS(_moId="resgroup-2", _wsdlName="ResourcePool")]
         with self.assertRaises(OperationError):
             fixture.provider().preflight("cluster configure", {"cluster_id": "domain-c1", "drs_enabled": False})
+
+    def test_create_name_whitelist_rejected_before_remote_read(self):
+        # L-1: deterministic name validation happens before any folder read.
+        # Empty/control names may already be rejected by the command schema
+        # (invalid_arguments); provider-level whitelist is the second line of
+        # defence (name_invalid). Both are exit 2 with zero remote calls.
+        bad_names = ("", "   ", "a/b", "a\\b", "100%", "a\x00b", " leading",
+                     "trailing ", "x" * 81, "vm\u200b", "\ufeffname")
+        for bad in bad_names:
+            with self.subTest(name=repr(bad)):
+                fixture = ClusterFixture()
+                with self.assertRaises(OperationError) as ctx:
+                    fixture.provider().preflight(
+                        "cluster create", {"folder_id": "group-h1", "name": bad})
+                self.assertIn(ctx.exception.code, ("name_invalid", "invalid_arguments"))
+                self.assertEqual(ctx.exception.exit_code, 2)
+                # Rejected before any remote folder enumeration.
+                self.assertEqual(fixture.calls, [])
+
+    def test_create_name_accepts_valid_untrimmed_inner_space(self):
+        # 80 chars, inner spaces, unicode and dots are legitimate cluster names.
+        for good in ("new", "Production Cluster 01", "a" * 80, "集群.A-1_B2"):
+            with self.subTest(name=good):
+                fixture = ClusterFixture()
+                binding = fixture.provider().preflight(
+                    "cluster create", {"folder_id": "group-h1", "name": good})
+                self.assertEqual(binding["target"].split(":", 1)[1], "group-h1")

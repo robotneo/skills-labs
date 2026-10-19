@@ -149,7 +149,10 @@ class LinkedTests(unittest.TestCase):
                     {"result_id": "vm-2", "instance_uuid": "child-uuid"}), case in ("standard", "distributed", "new_port"))
 
     def test_strict_cleanup_rejects_even_with_no_local_dependencies(self):
-        for command in ("vm delete", "vm snapshot-delete", "vm snapshot-revert", "vm migrate"):
+        # Snapshot revert/delete and storage-bearing migration have no
+        # attestation channel and stay globally fail-closed. Whole-VM delete has
+        # its own controlled-channel tests in test_delete_guarded_channel.
+        for command in ("vm snapshot-delete", "vm snapshot-revert", "vm migrate"):
             with self.subTest(command=command):
                 provider = self.make()
                 params = {"vm_id": "vm-1"}
@@ -159,6 +162,15 @@ class LinkedTests(unittest.TestCase):
                     provider.preflight(command, params)
                 self.assertEqual(error.exception.code, "dependency_unproven")
                 self.assertEqual(self.stub.calls, [])
+
+    def test_delete_still_rejects_when_inventory_scan_is_unavailable(self):
+        # No viewManager on the stub content = the whole-vCenter enumeration
+        # cannot be obtained: fail closed even with the attestation flag.
+        provider = self.make()
+        with self.assertRaises(OperationError) as error:
+            provider.preflight("vm delete", {"vm_id": "vm-1", "allow_shared_datastore": True})
+        self.assertEqual(error.exception.code, "dependency_unproven")
+        self.assertEqual(self.stub.calls, [])
 
     def test_compute_migration_has_no_storage_spec_and_power_on_is_unchanged(self):
         provider = self.make()

@@ -14,6 +14,15 @@ from ...domain.models import fail
 
 UNSAFE_ENTRY = re.compile(r"^[\\/]|[A-Za-z]:")
 
+# Decompression-bomb bounds (M-8). A legitimate OVA is a descriptor plus a small
+# number of (possibly large) VMDK streams; these ceilings stop a hostile archive
+# from exhausting local disk/inodes. Byte accounting uses bytes *actually
+# written* (a tar header's declared size cannot be trusted), accumulated before
+# each chunk is persisted, so an oversized entry never lands fully on disk.
+MAX_TOTAL_BYTES = 500 * 1024 ** 3   # 500 GiB extracted total
+MAX_ENTRIES = 20_000                # files + directories + links
+_COPY_CHUNK = 1024 * 1024
+
 
 def safe_member_name(name):
     """Return a normalized relative entry path or None when unsafe."""
@@ -53,14 +62,27 @@ def safe_members(tar):
         yield member
 
 
-def extract_ova(archive, destination):
-    """Extract a local OVA tar safely into destination."""
+def extract_ova(archive, destination, *, max_total_bytes=MAX_TOTAL_BYTES,
+                max_entries=MAX_ENTRIES):
+    """Extract a local OVA tar safely into destination.
+
+    Beyond path/link traversal, bounds extraction against decompression bombs:
+    at most ``max_entries`` members and ``max_total_bytes`` of data actually
+    written. A violation rejects the whole OVA before any oversized payload is
+    fully persisted. Limits are keyword-only so tests can use small thresholds.
+    """
     if os.path.islink(destination):
         fail("ovf_destination_invalid", "目标目录不能是符号链接", 2)
     os.makedirs(destination, exist_ok=True)
     base = os.path.realpath(destination)
+    total_written = 0
+    entry_count = 0
     with tarfile.open(archive, mode="r:*") as tar:
         for member in safe_members(tar):
+            entry_count += 1
+            if entry_count > max_entries:
+                fail("ovf_archive_too_many_entries",
+                     f"OVA 条目数超过上限 {max_entries}；拒绝解包", 2)
             output = os.path.realpath(os.path.join(base, member.name))
             if output != base and not output.startswith(base + os.sep):
                 fail("ovf_unsafe_path", "解包后路径越界，拒绝解包", 2)
@@ -72,15 +94,28 @@ def extract_ova(archive, destination):
             source = tar.extractfile(member)
             if source is None:
                 continue
-            descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            descriptor = None
             try:
                 while True:
-                    chunk = source.read(1024 * 1024)
+                    chunk = source.read(_COPY_CHUNK)
                     if not chunk:
                         break
+                    # Reject before persisting the over-limit chunk, and open the
+                    # output lazily so an over-limit member leaves no file at all
+                    # (not even an empty one), only fully-accepted data lands.
+                    if total_written + len(chunk) > max_total_bytes:
+                        fail("ovf_archive_too_large",
+                             f"OVA 解压后总大小超过上限 {max_total_bytes} 字节；拒绝解包", 2)
+                    if descriptor is None:
+                        descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                     os.write(descriptor, chunk)
+                    total_written += len(chunk)
+                if descriptor is None:
+                    # A legitimate zero-byte member within limits still exists.
+                    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             finally:
-                os.close(descriptor)
+                if descriptor is not None:
+                    os.close(descriptor)
     return base
 
 

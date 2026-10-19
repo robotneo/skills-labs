@@ -14,6 +14,43 @@ def range_bounds(low, high, value):
     return {"min": low, "max": high}
 
 
+def select_new_disk_option(device_options):
+    """Pick a VirtualDiskOption that can create an ordinary FlatVer2 persistent disk.
+
+    Real vCenter (8.0.3) returns several *equivalent* non-deprecated disk options
+    (one per attachable bus); offline stubs historically returned exactly one.
+    Selecting by capability instead of asserting a cardinality of one keeps the
+    conservative FlatVer2 + persistent + thick/thin guarantees without failing on
+    equivalent duplicates. Returns (option, candidate_count, qualified_count).
+    """
+    from pyVmomi import vim
+    disk_options = [o for o in device_options if isinstance(o, vim.vm.device.VirtualDiskOption)
+                    and o.type == vim.vm.device.VirtualDisk and getattr(o, "deprecated", None) is not True]
+
+    def qualified(option):
+        backings = [b for b in (getattr(option, "backingOption", None) or [])
+                    if isinstance(b, vim.vm.device.VirtualDiskOption.FlatVer2BackingOption)
+                    and b.type == vim.vm.device.VirtualDisk.FlatVer2BackingInfo]
+        if len(backings) != 1:
+            return None
+        backing = backings[0]
+        modes = [d.key for d in (getattr(backing.diskMode, "choiceInfo", None) or [])]
+        thin = getattr(backing, "thinProvisioned", None)
+        if "persistent" not in modes or not (getattr(thin, "supported", None) is True
+                                             or getattr(thin, "defaultValue", None) is False):
+            return None
+        return backing
+
+    qualified_options = [o for o in disk_options if qualified(o) is not None]
+    if not qualified_options:
+        # 0 usable FlatVer2 backing means the target genuinely cannot create a
+        # normal disk; equivalent duplicates (4 on 8.0.3) must not reach here.
+        fail("capability_unsupported", "目标不提供明确的 FlatVer2 新磁盘 backing", 4)
+    # Equivalent options: pick deterministically (first in service order), never
+    # "take any first disk" -- every candidate above proved FlatVer2+persistent.
+    return qualified_options[0], len(disk_options), len(qualified_options)
+
+
 def capability(browser, host, params):
     from pyVmomi import vim
     query = getattr(browser, "QueryConfigOption", None)
@@ -51,10 +88,10 @@ def capability(browser, host, params):
             or controller not in available or nic not in nics
             or nic not in (getattr(guest, "supportedEthernetCard", []) or []) or nic not in available):
         fail("capability_unsupported", "推荐控制器或网卡不在目标与 Guest 支持列表中", 4)
-    disks = [o for o in device_options if isinstance(o, vim.vm.device.VirtualDiskOption)
-             and o.type == vim.vm.device.VirtualDisk and getattr(o, "deprecated", None) is not True]
-    if len(disks) != 1:
-        fail("capability_unsupported", "磁盘能力不可确定", 4)
+    # Capability-based selection: a target may expose several equivalent disk
+    # options (8.0.3 returns 4). Choose one that proves FlatVer2 + persistent;
+    # only a target with zero usable FlatVer2 backing is a real hard failure.
+    disk_option, disk_candidates, disk_qualified = select_new_disk_option(device_options)
     controller_options = [o for o in device_options if o.type == controller]
     if len(controller_options) != 1:
         fail("capability_unsupported", "控制器能力不可确定", 4)
@@ -63,19 +100,11 @@ def capability(browser, host, params):
             or "noSharing" not in (getattr(ctl, "sharing", []) or [])):
         fail("capability_unsupported", "控制器不支持普通磁盘或非共享模式", 4)
     controller_disk_bounds = bounds(getattr(ctl, "numSCSIDisks", None), 1)
-    backings = [b for b in disks[0].backingOption if isinstance(b, vim.vm.device.VirtualDiskOption.FlatVer2BackingOption)
-                and b.type == vim.vm.device.VirtualDisk.FlatVer2BackingInfo]
-    if len(backings) != 1:
-        fail("capability_unsupported", "目标不提供明确的 FlatVer2 新磁盘 backing", 4)
-    backing = backings[0]
-    modes = [description.key for description in (getattr(backing.diskMode, "choiceInfo", []) or [])]
-    thin = getattr(backing, "thinProvisioned", None)
-    if "persistent" not in modes or not (getattr(thin, "supported", None) is True or getattr(thin, "defaultValue", None) is False):
-        fail("capability_unsupported", "目标不支持持久厚置备磁盘", 4)
-    disk_bounds = bounds(disks[0].capacityInKB, params["disk_gb"] * 1024**2)
+    disk_bounds = bounds(disk_option.capacityInKB, params["disk_gb"] * 1024**2)
     return {"cpu_values": cpus, "memory_mb": memory_bounds, "guest_max_cpu": max_cpu,
             "guest_memory_mb": guest_bounds, "disk_kb": disk_bounds,
             "controller_disks": controller_disk_bounds, "disk_mode": "persistent", "thin_provisioned": False,
+            "disk_option_candidates": disk_candidates, "disk_option_qualified": disk_qualified,
             "controller": controller.__name__, "nic": nic.__name__}
 
 
