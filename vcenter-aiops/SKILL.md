@@ -66,12 +66,14 @@ vcenter-aiops --profile lab plan apply <plan-id> --confirm <data.confirmation>
 
 ## 创建 / 克隆虚拟机（交互式向导）
 
-用户提出"创建虚拟机""克隆虚拟机""新建一台 VM"等意图时，进入交互式向导，逐轮收集信息，不要直接拼写命令：
+用户提出"克隆虚拟机""创建虚拟机""新建虚拟机""开一台 VM""部署一台虚拟机""加一台机器"等等价意图时，统一进入交互式向导，逐轮收集信息，不要直接拼写命令：
 
-1. **默认就是基于模板的自定义克隆**（`deploy clone-template`）：进入向导后直接选模板并在克隆 spec 内完成名称/规格/集群主机/存储/网络改配，不先建默认配置的关机空白机。`vm create`（无系统空白机，`guest_id`/`hardware_version`/`host_id` 等全必填）仅在用户明确"没有模板、要全新空白机"时才走，并提示需自行装系统。
-2. 逐轮提问、只给盘点出来的可选项；业务网段（CIDR/掩码/网关/可分配范围/scope）在**本对话第一次创建时问一次并记住，后续创建直接复用、不再重问**（不预置固定网段文件、不落盘、不跨对话，用户显式改才更新）；每台新 VM 仍在该网段内从可分配低端逐地址 `ip available` 三路取证（清单占用/本地租约/ping；inconclusive 不算空闲），选最小可用、允许自定义，选中后 `ip reserve` 占坑。
-3. 完整配置先出配置卡做第一次确认，再由 `deploy clone-template` 预览得到 digest，用户批准后才 `plan apply --confirm <digest>`（克隆属 change，不需要 DESTROY）。Linux 单网卡带静态 IP 克隆即开机+定制；Windows/多网卡/DHCP/需 DNS 关机克隆、机内配网后再 `vm power-on`。
-4. 完成后用统一 8 字段结果卡回传（名称/IP/规格/集群/主机/存储/模板/运行状态），取值以 `vm wait-tools`/`vm inspect`/`inventory` 实测为准。
+1. **默认且唯一主路径就是基于模板的自定义克隆**（`deploy clone-template`）：不问"新建还是克隆"，进入后直接在克隆 spec 内完成名称/规格/模板/网络/集群主机/存储改配，不先建关机空白机。`vm create`（无系统空白机，`guest_id`/`hardware_version`/`host_id` 等全必填）仅在用户明确"没有模板、要全新空白机"时才走，并提示需自行装系统。
+2. **先过凭据门**：任一步盘点前先 `profile list`/`profile test`；若没有可用的 vCenter 连接（IP/用户名/密码缺失或 test 失败），先问齐 vCenter 地址(+端口)、用户名、密码，引导用户用 0600 文件 + `env:VC_PASSWORD` 引用安全注入（**绝不在对话/命令行/文档里收发明文密码**），`profile add` 后 `profile test` 通过才继续；本对话记住复用。
+3. **严格按序收集**：CPU 核数/内存 GiB/硬盘 GiB（回车默认 4/8/100，磁盘只扩不缩）→ 列模板名+OS/首盘/规格/网卡供编号选择 → 网段 CIDR/掩码/网关/可分配范围/scope（**首次问一次并记住、后续复用**，不预置文件、不落盘、不跨对话）+ 虚拟机网络 network_id + 客户机形态，在网段内从低端逐地址 `ip available` 三路取证（清单占用/本地租约/ping，inconclusive 不算空闲）选最小可用 → 集群 → 主机（回车 DRS 或自定义具体主机）→ 数据存储；只给盘点出来的可选项。
+4. **命名固定公式 `<业务名>-<IP点改连字符>-<Owner>`**（如 `web01-10-10-0-21-zhangsan`）：业务名每台自由输入、Owner 每台问申请人姓名/工号（同值用于 `ip reserve --owner`），IP 点号一律改连字符；拼名后 `inventory list` 查重，重名换空闲 IP 重拼、不加序号。
+5. 完整配置先出配置卡做第一次确认，再由 `deploy clone-template` 预览得到 digest，用户批准后才 `plan apply --confirm <digest>`（克隆属 change，不需要 DESTROY）。Linux 单网卡带静态 IP 克隆即开机+定制（全连字符名同时是合规 guest 主机名）；Windows/多网卡/DHCP/需 DNS 关机克隆、机内配网后再 `vm power-on`。
+6. 完成后用统一 9 字段结果卡回传（名称/Owner/IP/规格/模板/集群/主机/存储/运行状态），取值以 `vm wait-tools`/`vm inspect`/`inventory` 实测为准。
 
 向导与配套文件（均为只读设计与数据，不新增命令、不自动执行写）：
 

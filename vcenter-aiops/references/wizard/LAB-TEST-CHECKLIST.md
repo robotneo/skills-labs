@@ -4,7 +4,7 @@
 >
 > **执行前必读三条铁律**
 > 1. 默认只走 **`deploy clone-template` 模板自定义克隆**，不先建关机空白机；`vm create` 仅在用户明确"无模板、要空白机"时才用。
-> 2. S1–S4 全部**只读 + 本地占坑**；远端写**只生成预览**（`awaiting_confirmation`），**必须用户看到配置卡显式批准后**才 `plan apply`。
+> 2. 进入执行前的盘点/取证全部**只读 + 本地占坑**（对应状态机 S1–S7）；远端写**只生成预览**（`awaiting_confirmation`），**必须用户看到配置卡显式批准后**才 `plan apply`（S8→S9）。
 > 3. 写后结果未知（exit6 / `reconciliation_required`）只用 `task reconcile/wait` 核对，**绝不重发克隆**。
 >
 > 环境事实（已核对）：profile 名 **`lab`**，vCenter `172.17.41.101:443`，user `administrator@vsphere.local`，`password_ref=env:VC_PASSWORD`，`verify_tls=false`。命令经 `./run.sh`（自动 `export PYTHONPATH=src`，可用 `VCENTER_AIOPS_PYTHON` 指解释器）。工作目录：`vcenter-aiops/`。
@@ -65,7 +65,9 @@ agent 收到后做一次纯本地合法性自检（不联网）：CIDR/掩码连
 
 ---
 
-## 3. S1 连通与身份（只读）
+## 3. 连通与身份核对（只读；对应状态机 S1 凭据门的 test 环节）
+
+> lab profile 已预配（见文首环境事实），凭据在第 1 步注入；这里只做 `profile test`。若是全新环境/无 profile，先按向导 S1 问齐 vCenter IP/用户名/密码并 `profile add`，再 test。
 
 ```bash
 RUN profile test
@@ -76,7 +78,7 @@ RUN profile test
 
 ---
 
-## 4. S2 只读盘点（只记录真实存在的对象）
+## 4. 只读盘点（对应状态机 S3 选模板 / S5 放置的盘点取数；只记录真实存在的对象）
 
 ```bash
 RUN template list --limit 200
@@ -98,27 +100,25 @@ RUN datastore inspect --id <DS_ID>
 - 模板：`config.template=true`、connected；记录**首盘容量** `<TPL_DISK_GB>`、客户机 OS、自带网卡/网络。
 - 存储：accessible/normal、`freeSpace` > 目标盘；指定主机时只选该主机可见存储。
 - 主机（若指定）：∈ 目标集群、connected、非维护、能见到所选存储/网络；否则省略 `--host-id` 走 DRS。
-- 命名查重：用 `inventory list` 确认目标名不存在；同名递增序号。
+- 命名查重：用 `inventory list` 确认目标名不存在；**重名=该 IP 已占用，换空闲 IP 重拼，不递增序号**。名称公式 `<BIZ>-<IP 点改连字符>-<OWNER>`（如 `web01-10-10-0-21-zhangsan`）。
 - 记录放置事实：`<FOLDER_ID>`（VM 文件夹）、`<POOL_ID>`（资源池/计算资源）。
 
 > 历史环境参考（**必须以本次盘点实测为准，不得照抄**）：曾见模板 vm-17091 `Centos7.9_2c4g60g`（首盘 60GB）、存储 datastore-28406（5020-A）、资源池 resgroup-12392、文件夹 group-v1002、集群 domain-c12391、主机 host-12601。
 
 ---
 
-## 5. S3 逐轮选择（Q0–Q7，agent 只给盘点可选项）
+## 5. 逐轮选择（S1–S9，agent 只给盘点可选项，严格按序）
 
 | 轮次 | 问什么 | 默认/规则 |
 |---|---|---|
-| Q0 | 客户机 OS、网卡数、静态/DHCP、是否要 DNS | 决定开机路径：**Linux+单网卡+静态+无额外 DNS** → 5A 克隆即开机；其它 → 5B 关机克隆 |
-| Q1 | 业务用途 → 名称 | 命名 `mumian-<业务段>-<主机号补零3>`，查重；用户可改 |
-| Q2 | 规格 | 回车=**4 核/8GiB/100GiB**；要求 `disk_gb > <TPL_DISK_GB>`，否则只能选更大或换模板（只扩不缩） |
-| Q3 | 集群 | 盘点编号选 `<POOL_ID>` |
-| Q4 | 主机 | 回车=DRS（省略 host_id）；或选 connected 非维护主机 |
-| Q5 | 数据存储 | 选 freeSpace 足够且主机可见的 `<DS_ID>` |
-| Q6 | 模板 | 真模板 `<TPL_ID>`，显示 OS/首盘/网卡 |
-| Q7 | IP | 网段已在第 2 步给出；在 `<FIRST>..<LAST>` 内自动找最小可用 |
+| S1 | vCenter 连接（IP/用户名/密码） | 已有可连通 profile 则复用；否则问齐三件，安全注入后 `profile add`+`profile test`，通过才继续 |
+| S2 | 规格：CPU 核数/内存 GiB/硬盘 GiB | 回车=**4 核/8GiB/100GiB**；要求 `disk_gb > <TPL_DISK_GB>`（选模板后反校，只扩不缩） |
+| S3 | 克隆模板 | `template list/inspect` 列真模板（名/OS/首盘/规格/网卡/MoRef），编号选 `<TPL_ID>` |
+| S4 | 网络与 IP：网段 CIDR/掩码/网关/范围/scope + 虚拟机网络 `<NET_ID>` + 客户机形态 | 网段本对话首次给、后续复用；客户机形态决定 **5A** Linux+单网卡+静态+无 DNS 克隆即开机，其它走 **5B** 关机克隆；在 `<FIRST>..<LAST>` 内自动找最小可用 IP |
+| S5 | 放置：集群/主机/数据存储 | 编号选 `<POOL_ID>`；主机回车=DRS（省略 host_id）或选 connected 非维护主机；存储选 freeSpace 足够且主机可见的 `<DS_ID>` |
+| S6 | 业务名 `<BIZ>` + 申请人 `<OWNER>`（每台都问） | 拼名 **`<BIZ>-<IP 点改连字符>-<OWNER>`**（如 web01+10.10.0.21+zhangsan → `web01-10-10-0-21-zhangsan`），查重；重名换空闲 IP 重拼不加序号；OWNER 同值用于 `ip reserve --owner` |
 
-### Q7 自动选最小可用 IP（严格，含占坑）
+### S4 自动选最小可用 IP（严格，含占坑）
 
 从 `<FIRST>` 起逐地址：
 
@@ -134,14 +134,14 @@ RUN ip available --address <CANDIDATE> --scope "<SCOPE>"
 选中后占坑（确认前唯一本地写）：
 
 ```bash
-RUN ip reserve --scope "<SCOPE>" --ip <IP> --owner "<NAME>" --minutes 60
+RUN ip reserve --scope "<SCOPE>" --ip <IP> --owner "<OWNER>" --minutes 60
 ```
 
 记录返回租约 `<LEASE>`。放弃/改 IP/失败时回收：`RUN ip release <LEASE>`。
 
 ---
 
-## 6. S4 预检（只读 + 本地，零远端变更）
+## 6. S7 预检（只读 + 本地，零远端变更）
 
 - `<TPL_DISK_GB>` < 目标 `disk_gb`（只扩不缩）。
 - 数据存储 freeSpace > 目标盘；放置自洽（主机∈集群、可见存储/网络）。
@@ -152,25 +152,26 @@ RUN ip reserve --scope "<SCOPE>" --ip <IP> --owner "<NAME>" --minutes 60
 
 ---
 
-## 7. S5 配置卡（第一次确认）+ 生成预览
+## 7. S8 配置卡（第一次确认）+ 生成预览
 
 把下面卡片用实测值填好发用户，**等显式"确认"**：
 
 ```text
 ━━━━━━ 请确认虚拟机创建配置 ━━━━━━
 创建方式 : 模板克隆（5A=克隆后自动开机+定制 / 5B=关机克隆）
-名称     : <NAME>
+名称     : <NAME>                 # <BIZ>-<IP 点改连字符>-<OWNER>
+Owner    : <OWNER>
 客户机   : <OS> / <单|多>网卡 / <静态|DHCP>
 规格     : <CPU> vCPU · <MEM> GiB · <DISK> GiB（模板 <TPL_DISK_GB>→<DISK> 仅扩容）
+模板     : <模板名>（<TPL_ID>）
+网络     : <NET_ID 或"保留模板网卡">（scope <SCOPE>）
+IP/掩码/网关: <IP>/<MASK>/<GW>（域 local）  [5B 标注"机内配置（预留 <IP>）"]
 集群     : <POOL_ID>（<计算资源名>）
 主机     : DRS 自动放置 或 <HOST_ID>
 数据存储 : <DS_ID>（<存储名>）
-模板     : <模板名>（<TPL_ID>）
-网络     : <NET_ID 或"保留模板网卡">
-IP/掩码/网关: <IP>/<MASK>/<GW>（域 local）  [5B 标注"机内配置（预留 <IP>）"]
-IP 状态  : ping 不通 + 清单无占用 + 已预留 60 分钟（lease <LEASE>）
+IP 状态  : ping 不通 + 清单无占用 + 已预留 60 分钟（owner <OWNER>，lease <LEASE>）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-回"确认"执行；"改 <项> <值>"修改（改 IP 先 release 旧租约再重测重占）。
+回"确认"执行；"改 <项> <值>"修改（改 IP 先 release 旧租约再重测重占、重拼名）。
 ```
 
 ### 5A Linux 单网卡静态（克隆即开机 + LinuxPrep 定制，无 DNS）
@@ -198,7 +199,7 @@ RUN deploy clone-template \
 
 ---
 
-## 8. S6 用户批准后执行（第二次确认）+ S7 就绪核对
+## 8. S9 用户批准后执行（第二次确认）+ 就绪核对
 
 **仅在用户对配置卡回复"确认"后：**
 
@@ -240,17 +241,18 @@ RUN task wait <OP_ID>
 
 ---
 
-## 10. S8 统一结果卡（取 vm inspect / inventory 实测值，不回显请求值）
+## 10. S9 统一结果卡（取 vm inspect / inventory 实测值，不回显请求值）
 
 ```text
 ✅ 虚拟机创建成功
-名称     : <NAME>
+名称     : <NAME>                 # <BIZ>-<IP 点改连字符>-<OWNER>
+Owner    : <OWNER>
 IP 地址  : <IP>/<PREFIX>（gw <GW>）        # 5B 写"机内配置（预留 <IP>）"
 规格     : <CPU>/<MEM>GiB/<DISK>GiB（实测）
+模板     : <模板名>（<TPL_ID>）
 集群     : <计算资源名>
 主机     : <runtime.host 实测>（DRS 报实际调度结果，不写"自动"）
 数据存储 : <存储名>
-模板     : <模板名>（<TPL_ID>）
 运行状态 : poweredOn · Tools <toolsStatus> · IP 就绪
 plan_id=<PLAN_ID> · new-vm-id=<NEWVM>
 ```

@@ -21,9 +21,11 @@
 
 | 占位符 | 含义 | 取值来源 |
 |---|---|---|
-| `<P>` | profile 名 | 已配置的 vCenter profile |
+| `<P>` | profile 名 | 已配置的 vCenter profile；缺失先走凭据门（见 §1） |
 | `<tpl>` | 源模板 vm-id | `template list`（只取 `config.template=true`） |
-| `<name>` | 新 VM 名 | Q1 命名规则生成 + 查重 |
+| `<biz>` | 业务名（用途短名） | S6 每台询问，自由输入（如 web01/db02），名称词表合法 |
+| `<owner>` | 申请人姓名/工号 | S6 每台询问；同值用于 `ip reserve --owner` |
+| `<name>` | 新 VM 名 | 固定公式 **`<biz>-<ip 点改连字符>-<owner>`**（如 biz=web01、ip=10.10.0.21、owner=zhangsan → `web01-10-10-0-21-zhangsan`）；查重后定稿，重名=该 IP 已占用，换空闲 IP 重拼不加序号 |
 | `<folder>` | 目标 VM 文件夹 MoRef | 盘点（如 group-v1002） |
 | `<pool>` | 目标资源池/计算资源 | 盘点（如 resgroup-12392） |
 | `<host>` | 目标主机（可空） | `host info`；**省略=集群 DRS 自动放置** |
@@ -33,20 +35,30 @@
 | `<cidr>/<mask>/<gw>` | 业务网段 CIDR/掩码/网关 | **本对话首次创建时用户提供一次、对话内记住**，后续创建复用；不读固定台账 |
 | `<first>`/`<last>` | 可分配 IP 下界/上界 | 由该网段参数推出（排除网络/广播/网关/保留）；网段在对话内复用，区间随之复用 |
 | `<scope>` | IP scope 标签 | 该网段约定的字符串，常用 `vlan<号>:<cidr>`（如 `vlan50:10.10.0.0/23`），仅标签不解析 CIDR |
-| `<ip>`/`<dom>` | 选中 IP / 来宾域 | Q7 三路取证选中；域默认 `local` |
+| `<ip>`/`<dom>` | 选中 IP / 来宾域 | S4 三路取证选中；域默认 `local` |
 | `<plan_id>` / `<confirm>` | 计划 ID / 本轮确认值 | 预览返回 `data.id` / `data.confirmation` |
 | `<lease>` | IP 租约 ID | `ip reserve` 返回 |
 | `<newvm>` | 新 VM 的 vm-id | 克隆成功后从结果/`inventory list` 取 |
 
 ---
 
-## 1. 连通与权限（只读）
+## 1. 凭据门与连通（最先，只读）
+
+若还没有可用 profile（vCenter IP/用户名/密码缺失），先在向导 S1 问齐并安全建档——密码只经 0600 文件 + `env:VC_PASSWORD` 引用注入，不在对话/命令行/文档里出现明文：
+
+```bash
+umask 077; read -rs -p "VC password: " pw && printf '%s' "$pw" > /tmp/.vcpw && unset pw && chmod 600 /tmp/.vcpw
+VC_PASSWORD="$(cat /tmp/.vcpw)" vcenter-aiops profile add <P> \
+  --host <vCenter-IP> --user <用户名> --password-ref env:VC_PASSWORD --port 443 --insecure
+```
+
+已有 profile 则直接连通性测试：
 
 ```text
 vcenter-aiops --profile <P> profile test
 ```
 
-失败即停（exit2 配置 / exit3 连接 / exit4 权限前置），不进入后续。
+失败即停（exit2 配置 / exit3 连接 / exit4 权限前置），不进入后续。向导结束 `rm -P /tmp/.vcpw`。
 
 ---
 
@@ -66,7 +78,7 @@ vcenter-aiops --profile <P> inventory list --kind vm --limit 1000
 - 模板：`config.template=true`、connected；读**首盘容量**用于磁盘只扩不缩校验。
 - 存储：accessible/normal、`freeSpace > 目标盘容量`；指定主机时只列该主机可见存储。
 - 主机：∈ 目标集群、connected、非维护、能见到所选存储与网络。
-- 名称：用 `inventory list` 查重；同名递增序号，不覆盖、不模糊匹配。
+- 名称：固定公式 `<biz>-<ip 点改连字符>-<owner>`，用 `inventory list` 查重；**重名=该 IP 已占用，换空闲 IP 重拼，不加序号**，不覆盖、不模糊匹配。
 - 无可用模板：**不静默回退空白机**，提示用户显式决定是否走 `vm create` 旁路。
 
 ---
@@ -89,7 +101,7 @@ vcenter-aiops --profile <P> ip available --address <candidate> --scope "<scope>"
 选中后**占坑**（这是确认前唯一的本地写，可回收）：
 
 ```text
-vcenter-aiops --profile <P> ip reserve --scope "<scope>" --ip <ip> --owner "<name>" --minutes 60
+vcenter-aiops --profile <P> ip reserve --scope "<scope>" --ip <ip> --owner "<owner>" --minutes 60
 ```
 
 记录返回的 `<lease>`。用户放弃、改 IP 或后续失败时回收：
@@ -194,11 +206,12 @@ vcenter-aiops --profile <P> task wait <operation_id>
 
 ---
 
-## 9. 统一结果卡（S8，取实测值，不回显请求值）
+## 9. 统一结果卡（S9，取实测值，不回显请求值）
 
 ```text
 ✅ 虚拟机创建成功
-名称       : <name>
+名称       : <name>                  # <biz>-<ip 点改连字符>-<owner>
+Owner      : <owner>
 IP 地址    : <ip>/<prefix>（gw <gw>，VLAN）        # 5B 标注"机内配置（预留 <ip>）"
 规格       : <cpu> vCPU / <mem> GiB / <disk> GiB   # vm inspect 实测
 集群       : <compute-resource 名>
@@ -227,13 +240,14 @@ vcenter-aiops --profile lab datastore inspect --id datastore-28406
 vcenter-aiops --profile lab inventory list --kind vm --limit 1000
 
 # 3) 本对话已记住的网段（示例 10.10.0.0/23，可分配从 10.10.0.10 起）：逐地址探测最小可用，通过后占坑
+#    假设业务名 web01、Owner zhangsan；名称=web01-10-10-0-21-zhangsan
 vcenter-aiops --profile lab ip available --address 10.10.0.21 --scope "vlan50:10.10.0.0/23"
 vcenter-aiops --profile lab ip reserve --scope "vlan50:10.10.0.0/23" --ip 10.10.0.21 \
-  --owner mumian-office-021 --minutes 60
+  --owner zhangsan --minutes 60
 
 # 4) 克隆预览（Linux 带 IP，克隆即开机+定制）——到此为止，等待人工确认
 vcenter-aiops --profile lab deploy clone-template \
-  --vm-id vm-17091 --name mumian-office-021 \
+  --vm-id vm-17091 --name web01-10-10-0-21-zhangsan \
   --folder-id group-v1002 --pool-id resgroup-12392 --datastore-id datastore-28406 \
   --cpu 4 --memory-gb 8 --disk-gb 100 \
   --ip-address 10.10.0.21 --subnet-mask 255.255.254.0 --gateway 10.10.0.1 --guest-domain local

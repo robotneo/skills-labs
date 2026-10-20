@@ -134,8 +134,9 @@ ip available --address <ip> --scope <scope>
 | 内存 | **8 GiB** | `--memory-gb 8` |
 | 系统盘 | **100 GiB** | `--disk-gb 100`（要求源模板首盘 ≤ 100 GiB） |
 
-**命名建议（沿用团队模板风格，可按 mumian-* 体系调整）**：
-- 模板对象由 vCenter 侧维护（如 `tpl-centos7.9-4c8g100g`）；克隆出的 VM 用业务名，如 `mumian-office-01`。
+**命名规则（固定公式 `<业务名>-<IP点改连字符>-<Owner>`）**：
+- 模板对象由 vCenter 侧维护（如 `tpl-centos7.9-4c8g100g`）；克隆出的 VM 命名 = 业务名（每台自由输入，如 web01）+ IP（点号改连字符）+ Owner（申请人姓名/工号）。
+- 例：业务名 web01、地址 10.10.0.21、Owner zhangsan → **`web01-10-10-0-21-zhangsan`**。用所选 IP 拼名后查重，同名即代表该 IP 已被占用，应换空闲 IP 重拼，不加序号。Owner 同值用于 `ip reserve --owner`。全连字符名同时是合规 Linux 主机名。
 - 标准规格可存为 preset 复用：`preset save` 保存 `deploy clone-template` 的声明式参数（CPU/内存/盘/网络），创建时 `preset show` 取值，避免每次手填。
 
 **前置校验（盘容量约束）**：
@@ -177,7 +178,7 @@ vcenter-aiops --profile lab template inspect --id vm-17091
 #    纯预览，返回 awaiting_confirmation，vCenter 零变更
 vcenter-aiops --profile lab deploy clone-template \
   --vm-id vm-17091 \
-  --name mumian-office-01 \
+  --name web01-10-10-0-21-zhangsan \
   --folder-id group-v1002 \
   --pool-id resgroup-12392 \
   --datastore-id datastore-28406 \
@@ -252,7 +253,7 @@ vcenter-aiops --profile lab ip check     --address 10.10.0.21 --scope vlan50:10.
 
 ```bash
 vcenter-aiops --profile lab ip reserve \
-  --scope vlan50:10.10.0.0/23 --ip 10.10.0.21 --owner mumian-office-01 --minutes 120
+  --scope vlan50:10.10.0.0/23 --ip 10.10.0.21 --owner zhangsan --minutes 120
 ```
 
 ### 5.3 阶段 C：选择完成 → 创建
@@ -276,7 +277,7 @@ vcenter-aiops --profile lab ip reserve \
 
 ```bash
 vcenter-aiops --profile lab deploy clone-template \
-  --vm-id vm-17091 --name mumian-office-01 \
+  --vm-id vm-17091 --name web01-10-10-0-21-zhangsan \
   --folder-id group-v1002 --pool-id resgroup-12392 \
   --datastore-id datastore-28406 --network-id network-1001 \
   --cpu 4 --memory-gb 8 --disk-gb 100 \
@@ -345,7 +346,7 @@ vcenter-aiops --profile lab vm wait-tools   --id <new-vm-id>
 **就绪/收尾**
 - [ ] 开机定制路线必须 `vm wait-tools` 并独立核验 IP/主机名/网卡，任务 success≠就绪。
 - [ ] 交付后在 IPAM 将预留转"已用"；失败 `ip release` 释放，避免地址悬挂。
-- [ ] 命名遵循团队模板（如 mumian-* 业务名 + 序号），目标文件夹内不重名。
+- [ ] 命名固定为 `<业务名>-<IP点改连字符>-<Owner>`（如 `web01-10-10-0-21-zhangsan`），目标文件夹内不重名；重名=该 IP 已占用，换空闲 IP 重拼不加序号。
 
 **验收（只读核验新 VM，9 项）**
 1. 非模板 `config.template=false`；2. 名称==`--name`；3. 所在文件夹==folder_id；4. 资源池==pool_id；5. 主机（指定时）==host_id，否则在集群内；6. 数据存储含 datastore_id；7. CPU/内存==4/8192MB；8. 首盘==100GiB；9. 电源：关机路线 `poweredOff`；开机路线 `poweredOn` 且 Tools/IP 就绪。
@@ -363,9 +364,9 @@ vcenter-aiops --profile $P datastore inspect --id datastore-28406  # 空间
 # 选 IP（需要联网时）
 vcenter-aiops --profile $P ip available --address 10.10.0.21 --scope vlan50:10.10.0.0/23
 vcenter-aiops --profile $P ip reserve --scope vlan50:10.10.0.0/23 \
-  --ip 10.10.0.21 --owner mumian-office-01 --minutes 120
-# 关机标准规格创建（默认路线一）
-vcenter-aiops --profile $P deploy clone-template --vm-id vm-17091 --name mumian-office-01 \
+  --ip 10.10.0.21 --owner zhangsan --minutes 120
+# 关机标准规格创建（默认路线一）；假设业务名 web01 → web01-10-10-0-21-zhangsan
+vcenter-aiops --profile $P deploy clone-template --vm-id vm-17091 --name web01-10-10-0-21-zhangsan \
   --folder-id group-v1002 --pool-id resgroup-12392 --datastore-id datastore-28406 \
   --network-id network-1001 --cpu 4 --memory-gb 8 --disk-gb 100
 vcenter-aiops --profile $P plan apply <plan_id> --confirm <digest> --wait
