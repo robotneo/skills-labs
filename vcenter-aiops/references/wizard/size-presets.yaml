@@ -1,6 +1,6 @@
 # vcenter-aiops 交互式创建/克隆向导 —— 标准虚拟机规格 preset
 #
-# 用途：向导 Q2「规格」回车默认选 standard；也可按业务挑档位。
+# 用途：向导 S2「规格」回车默认选 standard；也可按业务挑档位。
 #       仅映射 deploy clone-template 的三个可选硬件参数：
 #         --cpu <n> --memory-gb <n> --disk-gb <n>
 # 约束（工具真实行为，务必遵守）：
@@ -8,9 +8,9 @@
 #     例：模板 Centos7.9_2c4g60g 首盘 60GB -> 可扩到 100GB；若模板盘已 120GB，则 100GB 非法，
 #     向导应改选更大档位或换更小盘模板（不得试图缩容）。
 #   * 省略 cpu/memory_gb/disk_gb = 原样继承模板（inherit）。
-#   * 不在这里放网络/IP：那是 Q7 与 clone-template 的 ip_* / network_id 参数职责。
+#   * 不在这里放网络/IP：那是向导 S4 与 clone-template 的 ip_* / network_id 参数职责。
 #
-# 对齐：references/INTERACTIVE-VM-CREATION-WIZARD.md Q2
+# 对齐：references/INTERACTIVE-VM-CREATION-WIZARD.md S2
 #       references/TEMPLATE-CLONE-PROVISIONING-PLAN.md 第 3 章
 
 schema_version: 1

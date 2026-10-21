@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vcenter-aiops"
-version = "3.0.0b6"
+version = "3.0.0rc1"
 description = "面向 AI Agent 的原子化 vCenter 运维 CLI"
 requires-python = ">=3.10"
 dependencies = ["pyvmomi>=8.0.3,<10", "PyYAML>=6,<7"]

@@ -1,15 +1,15 @@
 ---
 name: vcenter-aiops
-description: 适用于 vCenter 资产查询、虚拟机创建/克隆（交互式向导，默认基于模板自定义克隆）、电源/快照/克隆/迁移、OVA/OVF 部署、Guest 执行/传输/定制、IP 地址信号与预留、告警确认/重置、变更预览及任务恢复。当前为 Beta 候选版，vSphere 实机兼容尚未验收。
+description: 适用于 vCenter 资产查询、虚拟机创建/克隆（交互式向导，默认基于模板自定义克隆）、电源/快照/克隆/迁移、OVA/OVF 部署、Guest 执行/传输/定制、IP 地址信号与预留、告警确认/重置、变更预览及任务恢复。当前为发布候选版（rc），功能冻结，vSphere 实机兼容矩阵尚未验收。
 metadata:
-  version: 3.0.0b6
+  version: 3.0.0rc1
 ---
 
 # vCenter AIops
 
 统一入口为 `vcenter-aiops`，源码运行可使用 `./run.sh`（macOS/Linux）或 `run.bat`（Windows）。需要 Python 3.10+；启动器可通过 `VCENTER_AIOPS_PYTHON` 指定已安装解释器的完整路径。缺少依赖时在已授权的虚拟环境安装流程中执行 `python -m pip install .`。不要自动安装到系统 Python。
 
-当前是 Beta 候选版（3.0.0b6），不是完成版 3.0。先运行 `capabilities list`，只调用其中实际实现的命令。vSphere 6.5、6.7、7.0、8.0 均为设计目标，尚未通过实机矩阵；不要声称已经兼容验证。
+当前是发布候选版（3.0.0rc1，release-candidate），功能已冻结，尚未做正式 3.0 GA。先运行 `capabilities list`，只调用其中实际实现的命令。vSphere 6.5、6.7、7.0、8.0 均为设计目标，尚未通过逐版本实机矩阵；不要声称已经兼容验证。
 
 所有参数细节读取对应叶子 `--help`；机器参数契约使用 `capabilities show "领域 动词"`。全局参数在领域命令之前：
 

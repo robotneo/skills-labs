@@ -1,6 +1,6 @@
 # 基于模板克隆创建虚拟机 —— 完整设计与落地方案
 
-> 适用版本：vcenter-aiops 3.0.0b6（execution-beta）。统一入口原子命令 `deploy clone-template`（对齐 vcenter-ops 2.0 克隆模版标准流程）。
+> 适用版本：vcenter-aiops 3.0.0rc1（release-candidate，功能冻结，真机矩阵待验收）。统一入口原子命令 `deploy clone-template`（对齐 vcenter-ops 2.0 克隆模版标准流程）。
 > 本文所有命令均以当前注册的 112 条命令真实签名为准；所有远端写都走"预览出固定计划 → 二次确认 → plan apply → task/wait 核对"，不直接生效、不自动重发。
 > 最后更新：2026-10-19。
 
@@ -285,8 +285,8 @@ vcenter-aiops --profile lab deploy clone-template \
   --gateway 10.10.0.1 --guest-domain local
 # → awaiting_confirmation，再 plan apply <id> --confirm <digest> --wait
 # → 克隆任务结束后必须核对 Tools/IP（任务成功 ≠ 来宾已就绪）：
-vcenter-aiops --profile lab vm tools-status --id <new-vm-id>
-vcenter-aiops --profile lab vm wait-tools   --id <new-vm-id>
+vcenter-aiops --profile lab vm tools-status --vm-id <new-vm-id>
+vcenter-aiops --profile lab vm wait-tools   --vm-id <new-vm-id>
 ```
 
 **强制核对项**：克隆 success 仅代表已创建/已提交定制。用 `vm wait-tools`/`task wait` 等到 Tools 与 IP 就绪，再用 `vm inspect`/`inventory list` 独立核验实际网卡与 IP；定制后主机名取 `--name`（LinuxPrep FixedName）。

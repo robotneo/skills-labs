@@ -1,6 +1,6 @@
 # vcenter-aiops 功能清单（按功能模块）
 
-> 版本：**3.0.0b6**（execution-beta，候选版）。真值来源：`src/vcenter_aiops/application/registry.py` 的 `COMMANDS`（运行时实测 **112 条**）与各 `registrations/*` 子模块；本文据运行时注册表导出，已脚本校验 20 个模块并集 = 112 条，**无遗漏 / 无重复 / 无未注册命令**。
+> 版本：**3.0.0rc1**（release-candidate，发布候选；功能冻结，真机矩阵待验收）。真值来源：`src/vcenter_aiops/application/registry.py` 的 `COMMANDS`（运行时实测 **112 条**）与各 `registrations/*` 子模块；本文据运行时注册表导出，已脚本校验 20 个模块并集 = 112 条，**无遗漏 / 无重复 / 无未注册命令**。
 > 实机兼容：所有远端命令对 vSphere **6.5 / 6.7 / 7.0 / 8.0 的兼容状态均为 `not_lab_verified`**（离线测试 ≠ 实机验收）。命令签名、特权核权、二次确认与“未知不重发”为不可变核心语义。
 
 ## 0. 总览

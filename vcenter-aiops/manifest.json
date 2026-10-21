@@ -1,9 +1,9 @@
 {
   "id": "vcenter-aiops",
   "name": "vCenter AIops",
-  "version": "3.0.0b6",
-  "stage": "execution-beta",
-  "description": "原子化 vCenter 运维 CLI Beta 候选：查询、VM 生命周期、资产/事件/配额、IP 信号、OVA/OVF 部署、Guest 执行/传输/定制、告警确认与批量重置、计划确认与任务恢复；真机兼容待实机验收。",
+  "version": "3.0.0rc1",
+  "stage": "release-candidate",
+  "description": "原子化 vCenter 运维 CLI 发布候选：查询、VM 生命周期、资产/事件/配额、IP 信号、OVA/OVF 部署、Guest 执行/传输/定制、告警确认与批量重置、计划确认与任务恢复；功能已冻结，真机兼容矩阵待验收。",
   "entry": {"command": "vcenter-aiops", "macos": "run.sh", "linux": "run.sh", "windows": "run.bat"},
   "requirements": ["python>=3.10"],
   "vsphere_targets": ["6.5", "6.7", "7.0", "8.0"],

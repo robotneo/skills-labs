@@ -1,4 +1,4 @@
-# 命令 ↔ Skill 交互核对清单（vcenter-aiops 3.0.0b6）
+# 命令 ↔ Skill 交互核对清单（vcenter-aiops 3.0.0rc1）
 
 > **受版本控制的 Skill 交付物**。真值来源：`src/vcenter_aiops/application/registry.py` 的 `COMMANDS`（运行时实测 **112** 条）。本文档由 `scripts/generate_command_interaction.py` 从注册表与 `tests/` 自动生成；**每次增删命令或修改命令契约/参数后必须重跑该脚本并随版本一起提交**，不要手工编辑正文。CLI 示例值均为占位，不代表真实环境。
 
@@ -71,7 +71,7 @@
 ```text
 vcenter-aiops version
 ```
-- **预期结果**：data={version, product}；当前 version=3.0.0b6。不联网、不建状态。
+- **预期结果**：data={version, product}；当前 version=3.0.0rc1。不联网、不建状态。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`
   - 备注：test_version_and_doctor_do_not_create_state 以元组词元遍历调用 version/doctor
