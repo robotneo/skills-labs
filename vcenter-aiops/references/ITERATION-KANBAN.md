@@ -7,7 +7,7 @@
 | 项目 | 值 |
 | --- | --- |
 | 产品 / 命令 | vCenter AIops / 唯一公共命令 `vcenter-aiops` |
-| 当前版本 | **3.0.0rc1**（release-candidate，功能冻结；向导重排为前置凭据门 S0–S9、命名公式统一为 `<业务名>-<IP点改连字符>-<Owner>`，并修正文档命令签名；非 GA，待 7.0+/8.0+ 两条线**逐写入动作**真机验收与 Windows 密钥后端后转 GA；6.5/6.7 无真机环境不阻断） |
+| 当前版本 | **3.0.0rc1**（release-candidate，功能冻结；向导重排为前置凭据门 S0–S9、命名公式统一为 `<业务名>-<IP点改连字符>-<Owner>`，并修正文档命令签名；非 GA，转 GA 的唯一门=7.0+/8.0+ 两条线**逐写入动作**真机验收；6.5/6.7 无真机环境不阻断） |
 | 看板更新 | 2026-10-20（发布候选 **3.0.0rc1**：四落点 `__init__.py`/manifest/pyproject/SKILL frontmatter 及各 references 版本头统一为 rc1、stage=release-candidate；manifest 保留 `prd_complete:false`/`vsphere_lab_verified:[]`，不把未验证兼容性包装成 GA；向导重排为**前置凭据门 S0–S9**（统一触发→凭据门→规格→模板→网络/IP→放置→命名→预检占坑→配置卡第 1 次确认→plan apply 第 2 次确认+核对+9 字段结果卡），删除写死的 mumian 前缀，命名公式统一 **`<业务名>-<IP点改连字符>-<Owner>`**（全连字符即合法 Linux 主机名，规避 FixedName 含点被当 FQDN；重名换空闲 IP，不递增序号）；业务网段首次对话给一次、会话内复用不跨对话；修复文档命令签名——`vm wait-tools`/`vm tools-status` 误用 `--id` 改为 `--vm-id`（主向导/TEMPLATE 共 3 处）、size-presets.yaml 注释旧轮次 Q2/Q7 改 S2/S4；注册表仍 **112** 条零新增，COMMAND-INTERACTION 按 `__version__` 重生成 `--check` 通过，816 离线测试通过、pyflakes 0，命令特权核权/二次确认/"未知不重发"语义不变）。前次 2026-10-19（b6）：统一版本号四落点 `__init__.py`/manifest/pyproject/SKILL frontmatter 及各 references 版本头，COMMAND-INTERACTION 按 `__version__` 脚本重生成；本版相对 b5 合入此前未提交的两批工作——①`vm delete` 受控通道替代全局 fail-closed：新增 consumers.py 全 vCenter 磁盘链消费者扫描（运行态+快照树），仅在"无本地依赖+干净扫描+显式 `--allow-shared-datastore` 担保+plan apply 双重确认"齐全时才 Destroy_Task，枚举不可得/发现消费者/预览后新增消费者均写前拒绝（dependency_present/dependency_unproven，exit4），扫描证据入 binding 并 submit 重校验；snapshot revert/delete 与带存储 migrate 仍全局全禁；新增 test_delete_guarded_channel；②"交互式创建/克隆向导"配套件（**零源码、命令仍 112**）：`references/wizard/size-presets.yaml`（默认 standard 4C/8G/100G，磁盘只扩不缩）、`references/wizard/CLONE-RUNBOOK.md`、`references/wizard/LAB-TEST-CHECKLIST.md`（跨对话自包含实机演练手册，密码经 0600 /tmp/.vcpw 注入不入库）；默认环节为 `deploy clone-template` 模板自定义克隆，`vm create` 空白机降为显式旁路；业务网段（CIDR/掩码/网关/可分配范围/scope）**不固化文件**，首次对话提供一次、会话内记住复用，每台具体 IP 仍重新三路取证（曾误建 references/wizard/ip-pools.yaml 固定台账，已删除）；SKILL.md 新增向导节并补 frontmatter 触发意图。816+ 离线测试通过、pyflakes 0，命令特权核权/二次确认/"未知不重发"语义不变）。前次 2026-10-18（b5）：rename/snapshot 名称远端读取前收口、target_busy 退出码统一 4、state.db/audit 导出/debug.log 符号链接加固、datastore 搜索 submit 写前拒绝与写后未知分流（785 测试）。COMMAND-INTERACTION --check 通过 |
 | 安装状态 | 已安装用户级 `~/.workbuddy/skills/vcenter-aiops/`（b1 安全审计后）；b4 发布后 rsync 同步，2026-10-16 再同步 M1–M4、S1 分平台 marker 锁与 D1–D3 四 src 修复。**D-1 风险分级核查时标准 skills 目录暂未检出 vcenter-aiops 代码副本**（仅数据 home `~/Library/Application Support/vcenter-aiops`），平台重装后以仓库源码为准；运行经 `VCENTER_AIOPS_PYTHON` 指向隔离 venv |
 | PRD 必需叶子 | 150 |
@@ -109,7 +109,7 @@
 | **下一步（阻塞 GA）** | 各写入动作的实机验收（W1 + ova/ovf + W3 Guest + W4 reset） | 注册+离线已完成，**等用户在 7.0+/8.0+ 真实 vCenter 逐写入动作验收勾选**（只读不阻断） | GA 前置 |
 | 搁置 | W5 TTL、W7 扫描/调查/调度、W8 通知、mcp、4 组合编排 | 41 项，暂不做，可恢复 | 按需 |
 | 切换时 | W6 数据迁移 | 一次性，2.0→3.0 切换前启用 | rc |
-| 持续 | 7.0+/8.0+ 写入动作实机矩阵 + Windows 密钥后端 | 两条线逐写入动作与跨平台是 GA 硬门槛（6.5/6.7 无真机不阻断） | GA |
+| 持续 | 7.0+/8.0+ 写入动作实机矩阵 | 两条线逐写入动作是 GA 唯一硬门槛（2026-10-21 用户裁决；6.5/6.7 无真机不阻断；Windows 密钥后端/覆盖率/PRD AC 不再卡 GA） | GA |
 
 > 详细任务拆分、文件清单、接口契约、TDD 顺序见
 > `docs/superpowers/plans/2026-10-10-vcenter-aiops-iteration.md`（Iteration I 覆盖 P0）。
@@ -157,9 +157,9 @@ b4 风险分级与分级管控（同版本，2026-10-16，阶段 D-1）── �
   ▼
 3.0.0rc1 (当前，2026-10-20) ── 进入发布候选（release-candidate，功能冻结，**零新增原子命令，注册表仍 112**；manifest 保留 `prd_complete:false`/`vsphere_lab_verified:[]`，不把未验证兼容性包装成 GA）。**交互式创建/克隆向导大重构（编排层 S0–S9）**：统一触发（"克隆/创建/新建/开一台 VM"等价意图都进模板克隆）→ **S1 前置凭据门**（无 vCenter IP/用户名/密码先问，安全注入 profile add→test，再继续）→ S2 规格(CPU/内存/硬盘，默认 4C/8G/100G) → S3 选模板(列名/OS/首盘/规格/网卡/MoRef) → S4 网络与 IP(网段 CIDR/掩码/网关/范围/scope+network_id，首次给会话内复用不跨对话，每台 IP 仍三路取证) → S5 放置(集群/主机 DRS 或自定义/数据存储) → S6 命名 → S7 预检+ip reserve 占坑 → S8 配置卡第 1 次确认出 digest → S9 plan apply 第 2 次确认+wait-tools/inspect 核对+9 字段结果卡。**删除写死的 mumian 前缀**，命名公式统一 **`<业务名>-<IP点改连字符>-<Owner>`**（业务名每台自由输入、Owner 每台问申请人姓名/工号、IP 点改连字符；全连字符即合法 Linux 主机名，规避开机定制 LinuxPrep FixedName 含点被当 FQDN；重名=IP 已占用，换空闲 IP 重拼、不递增序号）。**文档小修复**：`vm wait-tools`/`vm tools-status` 误用 `--id` 改 `--vm-id`（主向导/TEMPLATE 共 3 处，对注册表求差体检发现）、size-presets.yaml 注释旧轮次 Q2/Q7 改 S2/S4。不改命令签名/特权集/二次确认/"未知不重发"；版本四落点 + references 版本头一致，COMMAND-INTERACTION 按 `__version__` 重生成 `--check` 通过；816 离线测试通过、pyflakes 0
   ▼
-rc1 → GA 门      ── 门：7.0+/8.0+ 两条线**逐写入动作**真机验收（remote_write 成功路径 + fail-closed 拒绝，只读不阻断）；Windows 密钥后端；TTL/扫描/通知默认关
+rc1 → GA 门      ── 唯一门：7.0+/8.0+ 两条线**逐写入动作**真机验收（remote_write 成功路径 + fail-closed 拒绝，只读不阻断）；6.5/6.7 无真机不阻断。2026-10-21 用户裁决：Windows 密钥后端、覆盖率、PRD AC 全集不再作为 GA 门，归入 3.1 backlog
   ▼
-3.0.0 GA         ── 门：7.0+/8.0+ 写入动作矩阵通过（6.5/6.7 无真机环境不阻断、保留 not_lab_verified 设计声明）+ PRD AC-01–29 + 覆盖率≥85%
+3.0.0 GA         ── 门：7.0+/8.0+ 写入动作矩阵通过（6.5/6.7 无真机环境不阻断、保留 not_lab_verified 设计声明）
   ▼
 3.1.0（建议）    ── 消化 PRD 未实施 42 叶子（41 搁置 + add-host 延期）：MCP 服务面 + 数据迁移（P1）→ 扫描/通知/调度/add-host（P2）→ 调查/TTL/组合编排（P3）；任务清单与 AC 映射见 references/ROADMAP-3.1-unimplemented.md
 ```
