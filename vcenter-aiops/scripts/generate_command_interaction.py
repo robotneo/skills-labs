@@ -309,7 +309,8 @@ def render():
     A("- ② **逻辑级**：底层纯函数或 Provider 方法被直接单测，命令薄包装层未逐字走 CLI（覆盖等价逻辑）。")
     A("- ③ **共享执行轨**：经已被测试的 Engine+Mutations 写轨，但该动词专属 SDK 分支无离线用例。")
     A("- ④ **仅契约基线**：仅被全量 schema/`--help` 基线覆盖。")
-    A("- 所有远端命令的 6.5/6.7/7.0/8.0 兼容性在 capabilities 中均为 `not_lab_verified`，离线测试**不等于实机验收**。\n")
+    A("- 所有远端命令的 6.5/6.7/7.0/8.0 兼容性在 capabilities 中均为 `not_lab_verified`，离线测试**不等于实机验收**。")
+    A("- **GA 真机门（2026-10-21 收敛）**：只在 **7.0+/8.0+ 两条线逐写入动作（remote_write）真机验证**（成功路径 + fail-closed 拒绝）；只读(remote_read)以离线契约 + 8.0.3 只读轮次为准、不阻断 GA；6.5/6.7 无真机环境、不阻断 GA（保留 `not_lab_verified` 设计声明）。\n")
 
     tier_count = Counter()
     resolved = {}
@@ -369,7 +370,12 @@ def render():
         if note:
             A("  - 备注：%s" % note)
         if d["category"] in ("remote_read", "remote_write", "orchestration"):
-            A("- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。")
+            if d["category"] == "remote_write":
+                A("- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。")
+            elif d["category"] == "remote_read":
+                A("- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。")
+            else:
+                A("- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。")
         A("")
     return "\n".join(L) + "\n"
 

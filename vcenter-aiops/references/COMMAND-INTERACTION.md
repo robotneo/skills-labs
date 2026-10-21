@@ -48,6 +48,7 @@
 - ③ **共享执行轨**：经已被测试的 Engine+Mutations 写轨，但该动词专属 SDK 分支无离线用例。
 - ④ **仅契约基线**：仅被全量 schema/`--help` 基线覆盖。
 - 所有远端命令的 6.5/6.7/7.0/8.0 兼容性在 capabilities 中均为 `not_lab_verified`，离线测试**不等于实机验收**。
+- **GA 真机门（2026-10-21 收敛）**：只在 **7.0+/8.0+ 两条线逐写入动作（remote_write）真机验证**（成功路径 + fail-closed 拒绝）；只读(remote_read)以离线契约 + 8.0.3 只读轮次为准、不阻断 GA；6.5/6.7 无真机环境、不阻断 GA（保留 `not_lab_verified` 设计声明）。
 
 **覆盖汇总**：总 112 = ①行为级 **81** + ②逻辑级 **27** + ③共享轨 **3** + ④仅契约 **1**。
 
@@ -235,7 +236,7 @@ vcenter-aiops profile test
 - **预期结果**：连接并返回服务端 about 身份（instance_uuid/api_version/version/apiType），validation_status=not_lab_verified。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_secrets.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `profile update`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`profile.update`
@@ -283,7 +284,7 @@ vcenter-aiops --profile lab ip available --address 10.10.50.21 --scope vlan50
 - **预期结果**：仅在有正向空闲证据时 available=true，否则 false 并给 reasons/inconclusive。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `ip check`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`ip.check`
@@ -302,7 +303,7 @@ vcenter-aiops --profile lab ip check --address 10.10.50.21 --scope vlan50
 - **预期结果**：data 汇总 inventory_use + active_lease + ping 三路信号；ping 不通只标记 inconclusive，不判空闲。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_foundation.py`, `test_ip_signals.py`, `test_ping_timeout_l8.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `ip expire`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`ip.expire`
@@ -403,7 +404,7 @@ vcenter-aiops --profile lab plan apply <plan-id>
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_delete_guarded_channel.py`, `test_guest_processes.py`, `test_linked_clone_strict.py`, `test_tls_warning.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `plan archive`  ·  本地写入  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`plan.archive`
@@ -439,7 +440,7 @@ vcenter-aiops --profile lab plan create --file ./out.json
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `plan list`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.list`
@@ -475,7 +476,7 @@ vcenter-aiops --profile lab plan reconcile <plan-id>
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `plan rollback`  ·  编排/恢复  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.rollback`
@@ -493,7 +494,7 @@ vcenter-aiops --profile lab plan rollback <plan-id>
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_cluster_lifecycle.py`, `test_delete_guarded_channel.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_foundation.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_membership.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_ovf_placement_m6.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_risk_gate_cli.py`, `test_search_recovery.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `plan show`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`plan.show`
@@ -529,7 +530,7 @@ vcenter-aiops --profile lab plan validate <plan-id>
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_linked_clone_strict.py`, `test_provider_routing.py`
   - 备注：handler plan_validate 被直接调用断言（Engine.validate 路径）
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -601,7 +602,7 @@ vcenter-aiops --profile lab inventory export --file ./out.json --kind vm --forma
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_risk_classification.py`, `test_risk_gate_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `inventory list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`inventory.list`
@@ -620,7 +621,7 @@ vcenter-aiops --profile lab inventory list --limit 1 --kind vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_provider.py`, `test_templates_linked.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -647,7 +648,7 @@ vcenter-aiops --profile lab events list --vm-id vm-101 --host-id host-21 --since
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`, `test_audit.py`, `test_cache.py`, `test_cache_invalidate_token_m4.py`, `test_cache_refresh_m3.py`, `test_capacity_int_l11.py`, `test_cluster_lifecycle.py`, `test_contracts.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_debug_log_rotation_m6.py`, `test_delete_guarded_channel.py`, `test_diagnostics_m5.py`, `test_enrollment_unavailable.py`, `test_execution.py`, `test_failure_category_l5.py`, `test_foundation.py`, `test_guest_customize.py`, `test_guest_customize_flow.py`, `test_guest_file_commands_h1.py`, `test_guest_http_tls_h2.py`, `test_guest_observe_cache.py`, `test_guest_processes.py`, `test_guest_transfer.py`, `test_guest_windows.py`, `test_hardening_r5.py`, `test_hardening_r6.py`, `test_history_presets_policy.py`, `test_host_dangling_mor.py`, `test_host_maintenance.py`, `test_ip_signals.py`, `test_license_entitlements.py`, `test_linked_clone_strict.py`, `test_linked_mount_m7.py`, `test_membership.py`, `test_name_vocabulary_r4.py`, `test_observation_serial_m10.py`, `test_observe_task_l12.py`, `test_operation_state.py`, `test_ops_extensions.py`, `test_ovf.py`, `test_ovf_bomb_m8.py`, `test_ovf_deploy.py`, `test_ovf_http_m9.py`, `test_ovf_lease.py`, `test_ovf_placement_m6.py`, `test_ovf_verify_m8.py`, `test_paths.py`, `test_ping_timeout_l8.py`, `test_placement.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_privilege_helper_r4.py`, `test_provider.py`, `test_provider_routing.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_real_type_contracts.py`, `test_risk_classification.py`, `test_risk_gate_cli.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_search_submit_classify_r6.py`, `test_secrets.py`, `test_snapshot_submit_m1.py`, `test_submit_rejection_m2.py`, `test_target_whitespace_m5.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_template_clone_h3.py`, `test_template_clone_hardening.py`, `test_templates_linked.py`, `test_tls_warning.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -675,7 +676,7 @@ vcenter-aiops --profile lab quota check --cluster-id domain-c7 --host-id host-21
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_capacity_int_l11.py`, `test_dangling_mor_matrix.py`, `test_ops_extensions.py`, `test_ovf_lease.py`, `test_real_type_contracts.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -707,7 +708,7 @@ vcenter-aiops --profile lab vm clone --vm-id vm-101 --pool-id resgroup-9 --datas
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_placement.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm create`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.create`
@@ -739,7 +740,7 @@ vcenter-aiops --profile lab vm create --name demo-vm --folder-id group-v4 --pool
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_submit_rejection_m2.py`, `test_vm_creation.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm delete`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`vm.delete`
@@ -762,7 +763,7 @@ vcenter-aiops --profile lab vm delete --vm-id vm-101 --allow-shared-datastore
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_cache_invalidate_token_m4.py`, `test_delete_guarded_channel.py`, `test_execution.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_risk_classification.py`, `test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm guest-customize`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_customize`
@@ -790,7 +791,7 @@ vcenter-aiops --profile lab vm guest-customize --vm-id vm-101 --guest-username r
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_customize.py`, `test_guest_customize_flow.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm guest-download`  ·  远端只读  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_download`
@@ -814,7 +815,7 @@ vcenter-aiops --profile lab vm guest-download --vm-id vm-101 --guest-username ro
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_file_commands_h1.py`, `test_risk_classification.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm guest-exec`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_exec`
@@ -844,7 +845,7 @@ vcenter-aiops --profile lab vm guest-exec --vm-id vm-101 --guest-username root -
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_customize_flow.py`, `test_guest_file_commands_h1.py`, `test_guest_observe_cache.py`, `test_guest_processes.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm guest-exec-output`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_exec_output`
@@ -874,7 +875,7 @@ vcenter-aiops --profile lab vm guest-exec-output --vm-id vm-101 --guest-username
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_file_commands_h1.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm guest-output`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.guest_output`
@@ -894,7 +895,7 @@ vcenter-aiops --profile lab vm guest-output <run_id>
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_guest_transfer.py`, `test_guest_processes.py`
   - 备注：凭 run-id 经 store.guest_run 反查只读；输出解码/标记解析由纯逻辑覆盖，无独立 CLI 字面用例
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm guest-process-status`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.guest_process_status`
@@ -913,7 +914,7 @@ vcenter-aiops --profile lab vm guest-process-status <op-id>
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_processes.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm guest-upload`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.guest_upload`
@@ -938,7 +939,7 @@ vcenter-aiops --profile lab vm guest-upload --vm-id vm-101 --guest-username root
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_file_commands_h1.py`, `test_risk_classification.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm inspect`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.inspect`
@@ -957,7 +958,7 @@ vcenter-aiops --profile lab vm inspect --id <id> --name demo-vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_contracts.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.list`
@@ -975,7 +976,7 @@ vcenter-aiops --profile lab vm list --limit 1
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_membership.py`, `test_provider.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm migrate`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.migrate`
@@ -1000,7 +1001,7 @@ vcenter-aiops --profile lab vm migrate --vm-id vm-101 --pool-id resgroup-9 --hos
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_linked_clone_strict.py`, `test_placement.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm power-off`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.power_off`
@@ -1022,7 +1023,7 @@ vcenter-aiops --profile lab vm power-off --vm-id vm-101
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_provider_routing.py`, `test_risk_gate_cli.py`, `test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm power-on`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.power_on`
@@ -1044,7 +1045,7 @@ vcenter-aiops --profile lab vm power-on --vm-id vm-101
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_diagnostics_m5.py`, `test_execution.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_observation_serial_m10.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_provider_routing.py`, `test_tls_warning.py`, `test_vm_devices.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm reconfigure`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.reconfigure`
@@ -1069,7 +1070,7 @@ vcenter-aiops --profile lab vm reconfigure --vm-id vm-101 --cpu 1 --memory-gb 1 
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_capacity_int_l11.py`, `test_dangling_mor_matrix.py`, `test_plans.py`, `test_provider_routing.py`, `test_vm_devices.py`, `test_vm_provider.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm rename`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.rename`
@@ -1092,7 +1093,7 @@ vcenter-aiops --profile lab vm rename --vm-id vm-101 --new-name demo-vm-renamed
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_history_presets_policy.py`, `test_plans.py`, `test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm reset`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.reset`
@@ -1114,7 +1115,7 @@ vcenter-aiops --profile lab vm reset --vm-id vm-101
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：③共享执行轨（经已测试的 Engine+Mutations 轨，该动词专属 SDK 分支无离线用例）
   - 备注：经 Engine+Mutations 共享写轨；专属 ResetVM_Task 分支无离线用例
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm shutdown`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.shutdown`
@@ -1136,7 +1137,7 @@ vcenter-aiops --profile lab vm shutdown --vm-id vm-101
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm snapshot-create`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.snapshot_create`
@@ -1162,7 +1163,7 @@ vcenter-aiops --profile lab vm snapshot-create --vm-id vm-101 --snapshot-name sn
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm snapshot-delete`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`vm.snapshot_delete`
@@ -1185,7 +1186,7 @@ vcenter-aiops --profile lab vm snapshot-delete --vm-id vm-101 --snapshot-id snap
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_linked_clone_strict.py`, `test_risk_classification.py`, `test_snapshot_submit_m1.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm snapshot-list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.snapshot_list`
@@ -1204,7 +1205,7 @@ vcenter-aiops --profile lab vm snapshot-list --vm-id vm-101 --limit 1
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_read_models.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm snapshot-revert`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`vm.snapshot_revert`
@@ -1227,7 +1228,7 @@ vcenter-aiops --profile lab vm snapshot-revert --vm-id vm-101 --snapshot-id snap
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_linked_clone_strict.py`, `test_risk_classification.py`, `test_snapshot_submit_m1.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm suspend`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`vm.suspend`
@@ -1249,7 +1250,7 @@ vcenter-aiops --profile lab vm suspend --vm-id vm-101
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：③共享执行轨（经已测试的 Engine+Mutations 轨，该动词专属 SDK 分支无离线用例）
   - 备注：经 Engine+Mutations 共享写轨；专属 SuspendVM_Task 分支无离线用例
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `vm tools-status`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.tools_status`
@@ -1267,7 +1268,7 @@ vcenter-aiops --profile lab vm tools-status --vm-id vm-101
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_read_models.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `vm wait-tools`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`vm.wait_tools`
@@ -1285,7 +1286,7 @@ vcenter-aiops --profile lab vm wait-tools --vm-id vm-101
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_datastore_m3.py`, `test_delete_guarded_channel.py`, `test_execution.py`, `test_failure_category_l5.py`, `test_guest_customize_flow.py`, `test_guest_observe_cache.py`, `test_guest_processes.py`, `test_host_maintenance.py`, `test_linked_clone_strict.py`, `test_observation_serial_m10.py`, `test_plans.py`, `test_poll_write_coalescing.py`, `test_read_models.py`, `test_search_cli.py`, `test_search_recovery.py`, `test_secrets.py`, `test_snapshot_submit_m1.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_tls_warning.py`, `test_vm_media.py`, `test_vm_provider.py`, `test_write_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -1314,7 +1315,7 @@ vcenter-aiops --profile lab template convert --vm-id vm-101 --pool-id resgroup-9
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_templates_linked.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `template inspect`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`template.inspect`
@@ -1333,7 +1334,7 @@ vcenter-aiops --profile lab template inspect --id <id> --name demo-vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_delete_guarded_channel.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_snapshot_submit_m1.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_template_clone_h3.py`, `test_template_clone_hardening.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `template list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`template.list`
@@ -1351,7 +1352,7 @@ vcenter-aiops --profile lab template list --limit 1
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_delete_guarded_channel.py`, `test_guest_customize_flow.py`, `test_guest_processes.py`, `test_history_presets_policy.py`, `test_linked_clone_strict.py`, `test_placement.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_snapshot_submit_m1.py`, `test_template_clone.py`, `test_template_clone_flow.py`, `test_template_clone_h3.py`, `test_template_clone_hardening.py`, `test_templates_linked.py`, `test_vm_creation.py`, `test_vm_devices.py`, `test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -1392,7 +1393,7 @@ vcenter-aiops --profile lab deploy clone-template --vm-id vm-101 --name demo-vm 
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_template_clone.py`, `test_template_clone_flow.py`
   - 备注：Provider preflight/submit/observe/verify 全链路 + Engine preview/apply/去重/取消/补偿边界被直接断言；命令仅为薄 preview 包装层，未逐字走 CLI（路径字面量仅作 preflight 实参）
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy iso`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.iso`
@@ -1418,7 +1419,7 @@ vcenter-aiops --profile lab deploy iso --vm-id vm-101 --cdrom-key 1 --datastore-
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_vm_media.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy linked-clone`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.linked_clone`
@@ -1447,7 +1448,7 @@ vcenter-aiops --profile lab deploy linked-clone --vm-id vm-101 --parent-uuid <pa
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_delete_guarded_channel.py`, `test_linked_clone_strict.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy mark-template`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.mark_template`
@@ -1469,7 +1470,7 @@ vcenter-aiops --profile lab deploy mark-template --vm-id vm-101
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：③共享执行轨（经已测试的 Engine+Mutations 轨，该动词专属 SDK 分支无离线用例）
   - 备注：经 Engine+Mutations 共享写轨；专属 MarkAsTemplate 分支无离线用例
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy ova`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.ova`
@@ -1498,7 +1499,7 @@ vcenter-aiops --profile lab deploy ova <source> --work-dir <work_dir> --name dem
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`, `test_ovf_placement_m6.py`, `test_ovf_verify_m8.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy ovf`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.ovf`
@@ -1527,7 +1528,7 @@ vcenter-aiops --profile lab deploy ovf <source> --work-dir <work_dir> --name dem
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_foundation.py`, `test_ovf_deploy.py`, `test_ovf_placement_m6.py`, `test_ovf_verify_m8.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy template`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.template`
@@ -1554,7 +1555,7 @@ vcenter-aiops --profile lab deploy template --vm-id vm-101 --pool-id resgroup-9 
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_placement.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `deploy unmount-iso`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`deploy.unmount_iso`
@@ -1577,7 +1578,7 @@ vcenter-aiops --profile lab deploy unmount-iso --vm-id vm-101 --cdrom-key 1
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_vm_media.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 
 ---
@@ -1601,7 +1602,7 @@ vcenter-aiops --profile lab host info --id <id> --name demo-vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_history_presets_policy.py`, `test_membership.py`, `test_provider.py`, `test_read_models.py`, `test_reads_preset_hardware.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `host maintenance-enter`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`host.maintenance_enter`
@@ -1626,7 +1627,7 @@ vcenter-aiops --profile lab host maintenance-enter --host-id host-21 --task-time
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_host_dangling_mor.py`, `test_host_maintenance.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `host maintenance-exit`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`host.maintenance_exit`
@@ -1649,7 +1650,7 @@ vcenter-aiops --profile lab host maintenance-exit --host-id host-21 --task-timeo
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_host_maintenance.py`, `test_submit_rejection_m2.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 
 ---
@@ -1680,7 +1681,7 @@ vcenter-aiops --profile lab cluster configure --cluster-id domain-c7 --ha-enable
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_cluster_lifecycle.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `cluster create`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`cluster.create`
@@ -1705,7 +1706,7 @@ vcenter-aiops --profile lab cluster create --folder-id group-v4 --name demo-vm -
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_cluster_lifecycle.py`, `test_dangling_mor_matrix.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `cluster delete`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`cluster.delete`
@@ -1727,7 +1728,7 @@ vcenter-aiops --profile lab cluster delete --cluster-id domain-c7
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_cluster_lifecycle.py`, `test_risk_classification.py`, `test_submit_rejection_m2.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `cluster info`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cluster.info`
@@ -1746,7 +1747,7 @@ vcenter-aiops --profile lab cluster info --id <id> --name demo-vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `cluster list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cluster.list`
@@ -1764,7 +1765,7 @@ vcenter-aiops --profile lab cluster list --limit 1
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_vm_creation.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `cluster remove-host`  ·  远端写（确认执行）  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`cluster.remove_host`
@@ -1788,7 +1789,7 @@ vcenter-aiops --profile lab cluster remove-host --cluster-id domain-c7 --host-id
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_enrollment_unavailable.py`, `test_membership.py`, `test_risk_classification.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 
 ---
@@ -1816,7 +1817,7 @@ vcenter-aiops --profile lab datastore browse --limit 1 --datastore-id datastore-
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_search_submit_classify_r6.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `datastore inspect`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.inspect`
@@ -1835,7 +1836,7 @@ vcenter-aiops --profile lab datastore inspect --id <id> --name demo-vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_submit_classify_r6.py`, `test_vm_creation.py`, `test_vm_media.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `datastore list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.list`
@@ -1853,7 +1854,7 @@ vcenter-aiops --profile lab datastore list --limit 1
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`, `test_dangling_mor_matrix.py`, `test_datastore_browser.py`, `test_datastore_m3.py`, `test_foundation.py`, `test_membership.py`, `test_provider.py`, `test_real_type_contracts.py`, `test_search_cli.py`, `test_search_submit_classify_r6.py`, `test_vm_creation.py`, `test_vm_media.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `datastore scan`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.scan`
@@ -1876,7 +1877,7 @@ vcenter-aiops --profile lab datastore scan --limit 1 --datastore-id datastore-30
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_datastore_browser.py`, `test_delete_guarded_channel.py`, `test_search_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `datastore search-inspect`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`datastore.search_inspect`
@@ -1929,7 +1930,7 @@ vcenter-aiops --profile lab datastore search-status <search_id>
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_search_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -1957,7 +1958,7 @@ vcenter-aiops --profile lab alarm acknowledge --entity-id vm-101 --alarm-id alar
 - **预期结果**：远端写：默认先做只读预检并持久化固定计划，返回 `awaiting_confirmation`（data 含 id/digest/confirmation/confirmation_expires）；`plan apply <id> --confirm <digest>` 后提交，成功 status=succeeded；写后超时/响应丢失返回 reconciliation_required，不自动重发。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_alarms.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 ### `alarm list`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`alarm.list`
@@ -1977,7 +1978,7 @@ vcenter-aiops --profile lab alarm list --limit 1 --entity-id vm-101 --status red
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_alarm_reset.py`, `test_alarms.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `alarm reset`  ·  远端写（确认执行）  ·  风险级：中（敏感/可逆，影响说明+确认）
 - **operation_id**：`alarm.reset`
@@ -2000,7 +2001,7 @@ vcenter-aiops --profile lab alarm reset --entity-type vm --statuses '["red","yel
 - **预期结果**：先预览返回 awaiting_confirmation 并绑定精确告警 key 集合；apply 后 data={reset,command,requested_count}；6.5 返回 capability_unsupported；提交前范围扩大返回 plan_stale。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_alarm_reset.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机（GA 门）**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；7.0+/8.0+ 两条线需逐写入动作真机验证（成功路径 + fail-closed 拒绝），6.5/6.7 无真机环境不阻断。
 
 
 ---
@@ -2041,7 +2042,7 @@ vcenter-aiops --profile lab cache refresh --kind vm
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_cache.py`, `test_cache_refresh_m3.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `cache status`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`cache.status`
@@ -2083,7 +2084,7 @@ vcenter-aiops --profile lab task cancel <op-id>
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_template_clone_flow.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `task inspect`  ·  本地只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`task.inspect`
@@ -2136,7 +2137,7 @@ vcenter-aiops --profile lab task reconcile <op-id>
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_linked_clone_strict.py`, `test_execution.py`
   - 备注：handler task_reconcile/Engine 核对路径被直接断言，不重复提交
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 ### `task wait`  ·  远端只读  ·  风险级：低（只读，直接执行）
 - **operation_id**：`task.wait`
@@ -2154,7 +2155,7 @@ vcenter-aiops --profile lab task wait <op-id>
 - **预期结果**：只读：status=succeeded，data 为该读模型对象；查询被截断显式标记 truncated，不把部分结果当完整清单；不修改远端。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_guest_processes.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：6.5/6.7/7.0/8.0 现均 `not_lab_verified`；只读动作以离线契约 + 8.0.3 只读轮次为准，非 GA 阻断项。
 
 
 ---
@@ -2179,7 +2180,7 @@ vcenter-aiops --profile lab batch power-off --vm-ids '["vm-1","vm-2"]'
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_risk_classification.py`, `test_risk_gate_cli.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `batch power-on`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.power_on`
@@ -2200,7 +2201,7 @@ vcenter-aiops --profile lab batch power-on --vm-ids '["vm-1","vm-2"]'
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_provider_routing.py`
   - 备注：plans.batch_power_on 被直接调用，断言只构建固定对象计划不提交
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `batch reset`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.reset`
@@ -2220,7 +2221,7 @@ vcenter-aiops --profile lab batch reset --vm-ids '["vm-1","vm-2"]'
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：①行为级离线测试（CLI/handler 直接断言）
   - 覆盖文件：`test_risk_classification.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 ### `batch shutdown`  ·  编排/恢复  ·  风险级：高（不可逆/批量/终止，精确目标+二次确认）
 - **operation_id**：`batch.shutdown`
@@ -2240,7 +2241,7 @@ vcenter-aiops --profile lab batch shutdown --vm-ids '["vm-1","vm-2"]'
 - **预期结果**：编排/恢复：只核对或驱动既有计划/任务，不重复提交远端写；返回计划或操作状态（含 ready_to_resume/reconciliation_required）。
 - **离线测试状态**：②逻辑级离线测试（底层纯函数/Provider 被断言，命令薄包装层未逐字走 CLI）
   - 覆盖文件：`test_alarm_reset.py`, `test_cache_refresh_m3.py`, `test_foundation.py`, `test_linked_clone_strict.py`, `test_plans.py`, `test_provider_routing.py`, `test_risk_classification.py`, `test_risk_gate_cli.py`, `test_templates_linked.py`, `test_vm_provider.py`
-- **vSphere 实机**：6.5/6.7/7.0/8.0 均 `not_lab_verified`，待真机验收。
+- **vSphere 实机**：编排命令本身在本地构建/确认，其触发的远端写入随对应写入动作在 7.0+/8.0+ 真机验收。
 
 
 ---

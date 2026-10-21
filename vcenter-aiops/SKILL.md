@@ -9,7 +9,7 @@ metadata:
 
 统一入口为 `vcenter-aiops`，源码运行可使用 `./run.sh`（macOS/Linux）或 `run.bat`（Windows）。需要 Python 3.10+；启动器可通过 `VCENTER_AIOPS_PYTHON` 指定已安装解释器的完整路径。缺少依赖时在已授权的虚拟环境安装流程中执行 `python -m pip install .`。不要自动安装到系统 Python。
 
-当前是发布候选版（3.0.0rc1，release-candidate），功能已冻结，尚未做正式 3.0 GA。先运行 `capabilities list`，只调用其中实际实现的命令。vSphere 6.5、6.7、7.0、8.0 均为设计目标，尚未通过逐版本实机矩阵；不要声称已经兼容验证。
+当前是发布候选版（3.0.0rc1，release-candidate），功能已冻结，尚未做正式 3.0 GA。先运行 `capabilities list`，只调用其中实际实现的命令。vSphere 6.5、6.7、7.0、8.0 均为设计兼容目标，但 6.5/6.7 无真机测试环境：GA 真机验收只覆盖 **7.0+ 与 8.0+ 两条线，且只逐「写入动作」验证**（成功路径 + fail-closed 正确拒绝），只读动作以离线契约测试与 8.0.3 只读轮次为准；在通过前不要声称已实机兼容验证。
 
 所有参数细节读取对应叶子 `--help`；机器参数契约使用 `capabilities show "领域 动词"`。全局参数在领域命令之前：
 

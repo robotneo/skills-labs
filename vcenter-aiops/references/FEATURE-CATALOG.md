@@ -1,7 +1,7 @@
 # vcenter-aiops 功能清单（按功能模块）
 
 > 版本：**3.0.0rc1**（release-candidate，发布候选；功能冻结，真机矩阵待验收）。真值来源：`src/vcenter_aiops/application/registry.py` 的 `COMMANDS`（运行时实测 **112 条**）与各 `registrations/*` 子模块；本文据运行时注册表导出，已脚本校验 20 个模块并集 = 112 条，**无遗漏 / 无重复 / 无未注册命令**。
-> 实机兼容：所有远端命令对 vSphere **6.5 / 6.7 / 7.0 / 8.0 的兼容状态均为 `not_lab_verified`**（离线测试 ≠ 实机验收）。命令签名、特权核权、二次确认与“未知不重发”为不可变核心语义。
+> 实机兼容：所有远端命令对 vSphere **6.5 / 6.7 / 7.0 / 8.0 的兼容状态均为 `not_lab_verified`**（离线测试 ≠ 实机验收）。**GA 真机门（2026-10-21 收敛）只要求 7.0+ 与 8.0+ 两条线逐「写入动作」验证**（成功路径 + fail-closed 拒绝；只读不阻断）；6.5/6.7 无真机环境、不作为 GA 阻断项，但保留 `not_lab_verified` 设计声明，不宣称已验证。命令签名、特权核权、二次确认与“未知不重发”为不可变核心语义。
 
 ## 0. 总览
 
@@ -39,7 +39,7 @@
 | `vm migrate`（带 `datastore_id`） | **受限** | 仅允许明确“无磁盘且无 NVDIMM”的计算迁移（省略 datastore_id）；带磁盘缺 PBM 策略证据、指定存储均拒绝 |
 | `alarm reset` | **能力受限** | vSphere 6.7+；只能按类型(vm/host)+状态(red/yellow)批量清除，不能定位单告警/单实体/集群/数据存储 |
 | `batch power-on/off`、`batch shutdown`、`batch reset` | **只构建计划，不直接变更** | 生成固定对象计划，须再经 `plan apply` 确认执行 |
-| 全部远端命令 | **未实机验收** | 6.5/6.7/7.0/8.0 为 not_lab_verified；OVA/OVF、Guest 三命令、alarm reset 已离线验收、待真机矩阵 |
+| 全部远端命令 | **未实机验收** | 6.5/6.7/7.0/8.0 为 not_lab_verified；GA 真机门只要求 7.0+/8.0+ 逐写入动作验证（只读不阻断）；OVA/OVF、Guest 三命令、alarm reset 已离线验收、待真机写入验收 |
 
 ---
 
@@ -293,7 +293,7 @@
 - **"可用"的两层含义**：
   1. *已注册并离线可用*：112 条全部满足（有处理器、有离线测试，全量 816 项通过）。
   2. *当前真正能在真机执行写动作*：`vm delete` 已开**受控通道**——全 vCenter 清单扫描证明本 vCenter 内无其他 VM/模板/快照引用其磁盘链 + 显式 `--allow-shared-datastore` 担保 + `plan apply` 双重确认才销毁（证据不足/发现消费者/无担保仍 fail-closed）；`vm snapshot-revert`、`vm snapshot-delete` 仍因外部依赖不可证而**一律拒绝**；`vm migrate` 仅放开纯计算迁移；这些在第 0.3 节与各表备注中已逐条标注。
-- **未实机验收 ≠ 未实现**：所有远端命令在 6.5/6.7/7.0/8.0 均为 `not_lab_verified`；其中 OVA/OVF、Guest 输出/传输/定制、`alarm reset` 已离线验收，等待真机矩阵。
+- **未实机验收 ≠ 未实现**：所有远端命令在 6.5/6.7/7.0/8.0 均为 `not_lab_verified`；GA 真机门只要求 7.0+/8.0+ 两条线逐写入动作验证（只读以离线契约 + 8.0.3 只读轮次为准），6.5/6.7 无真机环境不阻断；其中 OVA/OVF、Guest 输出/传输/定制、`alarm reset` 已离线验收，等待真机写入验收。
 - **`remaining_domains`（capabilities 声明的后续领域，当前无对应命令）**：linked_clone 实机验收、typed_plan_output_references、scans（定时扫描）、schedules（调度）、notifications（通知）、ttl（缓存/记录 TTL 自动清理）、mcp（MCP 服务面复用分级门）、migration（存储迁移策略证据）。这些方向目前**没有注册命令**，不属于上表 112 条。
 - **参数速记**：表中"必填"指无默认且 required；未标必填者均可选并给默认值或 None。`--id/--name` 标注"二选一"的为 oneOf，须且只能提供一个。
 - **更新方式**：命令或参数有增改后重跑 `PYTHONPATH=src python scripts/generate_command_interaction.py`；本清单依据同一份注册表真值整理，模块分组为人工归类（已用脚本校验并集完整）。

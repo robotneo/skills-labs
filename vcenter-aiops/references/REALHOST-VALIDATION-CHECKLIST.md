@@ -1,16 +1,16 @@
-# vcenter-aiops 实机验证清单（b5，execution-beta）
+# vcenter-aiops 实机验证清单（rc1，release-candidate）
 
-> 生成日期：2026-10-18。真值：`registry.COMMANDS` 112 条（handler 112/112 可解析、0 断链、0 重复；CLI subparser 112/112；源码 0 个 NotImplemented/TODO 占位；离线 785 测试通过、pyflakes 0）。
-> **实机状态：vSphere 6.5 / 6.7 / 7.0 / 8.0 = 0/4，全部远端命令仍 `not_lab_verified`。** 离线通过 ≠ 实机验收。
+> 生成日期：2026-10-18；口径 2026-10-21 收敛（rc1）。真值：`registry.COMMANDS` 112 条（handler 112/112 可解析、0 断链、0 重复；CLI subparser 112/112；源码 0 个 NotImplemented/TODO 占位；离线 816 测试通过、pyflakes 0）。
+> **GA 真机门口径（2026-10-21 起）：只验 7.0+ 与 8.0+ 两条线，且真机只逐「写入动作」验证**（remote_write，成功路径 + fail-closed 正确拒绝）。只读动作以离线契约测试 + 8.0.3（build-24091160）已完成的只读轮次为准，**不作为 GA 真机阻断项**（可在真机顺带冒烟，但不通过也不卡 GA）。6.5/6.7 无真机环境，**不阻断 GA**：仍保留为设计兼容目标，capabilities 维持 `not_lab_verified`，不宣称已验证；`alarm reset` 等版本门的 6.5 写前拒绝行为由离线契约保证。
 > 用法：在测试环境（独立集群 / 测试 VM、可回收数据存储）执行；每条记录 build、账号权限、结果与失败分类（预期内 fail-closed / 真实缺陷）。
 
 ## 0. 数字口径
 
 | 类别 | 数量 | 是否需实机 |
 |---|---:|---|
-| 远端只读 remote_read | 31 | 是（只读，先做） |
-| 远端写 remote_write | 35 | 是（需特权 34、异步 30；高风险 5） |
-| **需实机合计** | **66** | |
+| 远端写 remote_write | 35 | **是 —— GA 真机门的核心，逐条验**（成功路径 + fail-closed 拒绝） |
+| 远端只读 remote_read | 31 | 否（GA 门不阻断；离线契约 + 8.0.3 只读轮次为准，可顺带冒烟） |
+| **GA 真机门合计** | **35 写入动作** | 仅 7.0+ / 8.0+ 两条线 |
 | 纯本地 local_read/local_write + 编排本地部分 | 46 | 否（本机即可，见第 8 节） |
 
 高风险写（5，二次确认）：`vm delete`、`vm snapshot-revert`、`vm snapshot-delete`、`cluster remove-host`、`cluster delete`。
@@ -24,7 +24,9 @@
 5. 全程 `--dry-run` 先预览；不可逆写经 `plan apply --confirm <digest>`（销毁类再加 `--confirm-destruction`）。
 6. 故障判定：写后结果不明应 exit6 + `task reconcile`，**不得自动重发**；参数/身份问题应 exit4。
 
-## 2. P0 只读冒烟（安全，最先跑，31 条）
+## 2. 只读冒烟（非 GA 阻断项，可顺带跑，31 条）
+
+> 只读动作已由离线契约 + 8.0.3 只读轮次覆盖，**不通过也不卡 GA**；以下用于写动作前确认连通与读取形态正常。
 
 连接/IP（3）：`profile test`、`ip check --address --scope`、`ip available`。
 资产/事件/容量（4）：`inventory list`（kind=vm/host/cluster/datastore 各一）、`inventory export`、`events list`、`quota check`。
@@ -37,6 +39,8 @@ Guest 只读（3，需 Tools + 来宾凭据）：`vm guest-process-status`、`vm
 > 重点核对（历史真机缺陷 D1–D3 同类风险）：64 位 long 标量、DatastoreBrowser `session[]` 任务 id、大分页 PropertyCollector、缺字段返回 unavailable 而非编造。
 
 ## 3. 台账优先：14 项高频新增能力（A–E 组）
+
+> 口径：写入类（C1/C2 OVA·OVF、D 组 Guest 写/输出、E1 alarm reset）属 GA 门、7.0+/8.0+ 逐动作真机验；只读类（A1–A3 导出/事件/配额、B1/B2 IP 信号）非阻断，真机可顺带核对、以离线契约为准。
 
 | 组 | 命令 | 实机要点 |
 |---|---|---|
@@ -71,12 +75,14 @@ Guest 只读（3，需 Tools + 来宾凭据）：`vm guest-process-status`、`vm
 
 ## 5. 必须验证“正确拒绝”的命令（验 fail-closed，不是验成功）
 
+> 以下均属写入动作的 fail-closed 面，在 7.0+/8.0+ 两条线真机验；仅 6.5 版本门一项无真机环境，由离线契约测试保证。
+
 | 命令 | 预期实机表现 |
 |---|---|
 | `vm delete`（**受控通道**，b5 新增） | 四种情形分别验：① 不带 `--allow-shared-datastore`，即便扫描无消费者也应 `dependency_unproven`/exit4 拒绝；② 扫描发现其他 VM/模板/快照引用其磁盘文件应 `dependency_present`/exit4；③ 预览后、提交前若新增消费者，submit 应 `dependency_present`（SubmissionRejected，不发写）；④ 无本地依赖 + 干净扫描 + 旗标 + 两把确认（digest 与 `DESTROY:`）齐全才真正 `Destroy_Task`。另验枚举不可得（权限/读失败）时即使带旗标也拒绝 |
 | `vm snapshot-revert` / `vm snapshot-delete` | 无担保通道，应无条件拒绝恢复/清理（`dependency_unproven`） |
 | `vm migrate`（带 `--datastore-id`） | 缺 PBM 策略证据/指定存储应拒绝；仅“无磁盘且无 NVDIMM”的纯计算迁移可执行 |
-| `alarm reset`（6.5） | 版本门写前 exit4；scope 扩大（集群/数据存储/单告警）拒绝 |
+| `alarm reset`（6.5 版本门） | 6.5 写前 exit4、scope 扩大（集群/数据存储/单告警）拒绝；**6.5 无真机，该版本门由离线契约测试保证**，7.0+/8.0+ 仍验 scope 扩大拒绝 |
 | 任意写，权限不足 | exit4 并说明所缺特权；不得调用不支持的写 API |
 | 同名对象仅给 `--name` | 返回消歧信息，不默认操作第一个 |
 
@@ -84,16 +90,18 @@ Guest 只读（3，需 Tools + 来宾凭据）：`vm guest-process-status`、`vm
 
 在 7.0/8.0 优先，逐项验证：精确模板 ID 克隆；host 省略走 DRS、指定 host 走放置；DVPG（network-N）与标准端口组（dvportgroup-N）；静态 IP Linux 定制（给 IP 即开机，子网掩码/网关/域）与不给 IP（关机）；CPU/内存改配与省略保留；**磁盘仅扩容不缩容**；Tools 就绪交 `vm wait-tools`。记录定制后实际网卡/IP/主机名。
 
-## 7. 版本矩阵记录（每系列一行）
+## 7. 版本矩阵记录（GA 门：7.0+/8.0+ 两条线，逐写入动作）
 
-| vSphere | build | 账号/许可 | 只读冒烟 | 14 项 A–E | 写抽样 | fail-closed 项 | 结论 |
-|---|---|---|---|---|---|---|---|
-| 6.5 | | | ☐ | ☐（alarm reset 应拒） | ☐ | ☐ | |
-| 6.7 | | | ☐ | ☐ | ☐ | ☐ | |
-| 7.0 | | | ☐ | ☐ | ☐ | ☐ | |
-| 8.0（含 8.0.3 build-24091160 复测 D1–D3） | | | ☐ | ☐ | ☐ | ☐ | |
+> 真机只填「写抽样/全部写入动作」与「fail-closed 项」；只读冒烟列仅作连通参考、不阻断。
 
-GA 还需：四系列通过 + Windows secret 后端 + 隔离安装/打包 + 覆盖率 ≥85% + PRD AC-01–29。
+| vSphere | build | 账号/许可 | 只读冒烟(参考) | 写入动作（35，逐条） | fail-closed 项 | 结论 |
+|---|---|---|---|---|---|---|
+| **7.0+**（GA 门线 1） | | | ☐（不阻断） | ☐ | ☐ | |
+| **8.0+**（GA 门线 2，含 8.0.3 build-24091160 复测 D1–D3） | | | ☐（不阻断；8.0.3 只读轮次已做） | ☐ | ☐ | |
+| 6.7（无真机环境，**不阻断 GA**） | — | — | — | — | 版本门拒绝由离线契约保证（alarm reset 6.7 可用，仅记录） | 保留 not_lab_verified |
+| 6.5（无真机环境，**不阻断 GA**） | — | — | — | — | `alarm reset` 写前拒绝由离线契约保证 | 保留 not_lab_verified |
+
+GA 还需：**7.0+/8.0+ 两条线 35 个写入动作逐真机通过（含 fail-closed 正确拒绝）** + Windows secret 密钥后端 + 隔离安装/打包 + 覆盖率 ≥85% + PRD AC-01–29。6.5/6.7 无真机环境，不作为 GA 阻断项（保留设计兼容声明）。
 
 ## 8. 不需实机的 46 条本地命令（本机验证即可）
 
